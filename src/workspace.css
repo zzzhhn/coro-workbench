@@ -1174,6 +1174,11 @@
 .pitch-coverage-heading { margin-bottom: 8px; font-size: 12px; }
 .pitch-coverage-heading span { color: var(--muted); font-size: 11px; }
 .pitch-coverage-controls select { flex: 1; min-width: 0; width: 0; font-size: 11px; }
+.rebuild-scope { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+.rebuild-scope p, .rebuild-result p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.rebuild-caution { display: flex; align-items: flex-start; gap: 9px; color: var(--warning); font-size: 12px; line-height: 1.7; }
+.rebuild-caution svg, .rebuild-result > svg { flex-shrink: 0; margin-top: 2px; }
+.rebuild-result { display: flex; gap: 12px; padding: 17px 0 6px; }
 .pitch-coverage-controls button { padding: 8px; flex-shrink: 0; }
 .pitch-coverage .subtle-note { margin: 8px 0 0; }
 .pitch-coverage-band { fill: #a2512e; opacity: .09; pointer-events: none; }
@@ -2398,6 +2403,8 @@
   }
 }
 @media (max-width: 760px) {
+  .source-evidence-bar { flex-wrap: wrap; gap: 8px; padding: 4px 12px; }
+  .source-evidence-bar .evidence-summary { display: none; }
   :root {
     --sidebar: 0px;
     --inspector: 0px;

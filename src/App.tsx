@@ -82,6 +82,8 @@ import ExportDialog from './components/ExportDialog';
 import Modal from './components/Modal';
 import { readOriginalFile, resolveLocalAsset } from './lib/projectBundle';
 import PitchReviewDialog from './components/PitchReviewDialog';
+import VocalRebuildDialog from './components/VocalRebuildDialog';
+import { readPendingVocalRebuild, vocalRebuildSourceId } from './lib/vocalRebuild';
 
 type ActiveDocument = 'source' | 'arrangement';
 type Dialog =
@@ -95,6 +97,7 @@ type Dialog =
   | 'delete-part'
   | 'repair'
   | 'pitch-review'
+  | 'vocal-rebuild'
   | undefined;
 type History = { past: ScoreProject[]; future: ScoreProject[] };
 const newHistory = (): Record<ActiveDocument, History> => ({
@@ -117,7 +120,7 @@ export default function App() {
   const [selection, setSelection] = useState<Selection>();
   const [visiblePart, setVisiblePart] = useState('all');
   const [dialog, setDialog] = useState<Dialog>(() =>
-    localStorage.getItem(PENDING_ANALYSIS_KEY) ? 'import' : undefined,
+    readPendingVocalRebuild(localStorage) ? 'vocal-rebuild' : localStorage.getItem(PENDING_ANALYSIS_KEY) ? 'import' : undefined,
   );
   const [mobilePanel, setMobilePanel] = useState<'parts' | 'inspector' | undefined>();
   const [tab, setTab] = useState<'workbench' | 'practice'>('workbench');
@@ -1366,6 +1369,10 @@ export default function App() {
           project={project}
           onImportCopy={importProject}
           onMessage={notify}
+          onVocalRebuild={vocalRebuildSourceId(source) ? () => {
+            engine.current?.pause();
+            setDialog('vocal-rebuild');
+          } : undefined}
           onSeek={(seconds) => seekSource(Math.max(0, Math.min(1, seconds / sourceLength)))}
           onAudio={(url, name) => {
             engine.current?.pause();
@@ -1481,6 +1488,25 @@ export default function App() {
             setDialog(undefined);
             notify('原曲主唱修正已应用，可撤销；已有编配和模型证据保持不变。');
           }}/>
+      )}
+      {dialog === 'vocal-rebuild' && (
+        <VocalRebuildDialog project={source} hasArrangement={Boolean(arrangement)}
+          onBeforeStart={() => {
+            const state = { ...workspaceRef.current, savedAt: new Date().toISOString() };
+            try {
+              archiveWorkspace(state);
+              saveWorkspace(state);
+            } catch {
+              throw new Error('暂时无法安全保存旧工程，请先导出便携工程备份或释放浏览器空间，再重建主唱。');
+            }
+            setSaved('saved');
+          }}
+          onClose={() => setDialog(undefined)} onOpen={(next) => {
+            importProject(next);
+            setTab('workbench');
+            setVisiblePart('vocals');
+            notify('已打开主唱重建副本。旧总谱和编配保留在工程库，其他声部与和弦保持不变。');
+          }} />
       )}
       {dialog === 'project' && (
         <Modal title="乐谱信息" eyebrow="PROJECT SETTINGS" onClose={() => setDialog(undefined)}>

@@ -1,4 +1,5 @@
-import type { AnalysisJob, OmrJob } from './types';
+import type { AnalysisJob, OmrJob, ScoreProject } from './types';
+import { vocalRebuildSourceId } from './vocalRebuild';
 
 export interface EngineHealth {
   status: string;
@@ -55,6 +56,16 @@ export const getJob = async (id: string): Promise<AnalysisJob> =>
   jsonResponse(await fetch(`/api/jobs/${encodeURIComponent(id)}`));
 export const cancelJob = async (id: string): Promise<AnalysisJob> =>
   jsonResponse(await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+
+export async function rebuildVocal(project: ScoreProject): Promise<AnalysisJob> {
+  const jobId = vocalRebuildSourceId(project);
+  if (!jobId) throw new Error('这份谱没有可复用的本机主唱音轨，请先导入音频并分轨。');
+  return jsonResponse(await fetch(`/api/projects/${jobId}/vocal-rebuild`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project }),
+  }));
+}
 
 export async function recognizeScore(
   file: File,

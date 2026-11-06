@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextlib
+import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -126,7 +128,8 @@ class UploadLimitMiddleware:
             await self.app(scope, receive, send)
             return
         headers = dict(scope.get("headers", []))
-        limit = (300 * 1024 * 1024 if scope.get("path") == "/api/video" else config.MAX_UPLOAD_BYTES) + 1024 * 1024
+        is_rebuild = scope.get("path", "").endswith("/vocal-rebuild")
+        limit = 30 * 1024 * 1024 if is_rebuild else (300 * 1024 * 1024 if scope.get("path") == "/api/video" else config.MAX_UPLOAD_BYTES) + 1024 * 1024
         content_length = headers.get(b"content-length")
         if content_length:
             try:
@@ -144,7 +147,7 @@ class UploadLimitMiddleware:
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
                 if received > limit:
-                    raise HTTPException(413, "音频文件不能超过 100 MB。")
+                    raise HTTPException(413, "工程不能超过 30 MB。" if is_rebuild else "音频文件不能超过 100 MB。")
             return message
 
         await self.app(scope, bounded_receive, send)
@@ -271,6 +274,52 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def job(job_id: str):
         return JobStatus(get_directory(job_id)).read()
 
+    @app.post("/api/projects/{job_id}/vocal-rebuild", status_code=202)
+    async def vocal_rebuild(job_id: str, request: Request):
+        from .vocal_rebuild import MAX_REQUEST_BYTES, prepare_rebuild
+        get_directory(job_id)
+        size, chunks = 0, []
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_REQUEST_BYTES:
+                raise HTTPException(413, "工程不能超过 30 MB。")
+            chunks.append(chunk)
+        try:
+            def reject_constant(value):
+                raise ValueError("工程包含非有限 JSON 数值。")
+            body = json.loads(b"".join(chunks), parse_constant=reject_constant)
+            if not isinstance(body, dict) or set(body) != {"project"}:
+                raise ValueError("请求必须只包含 project 源乐谱快照。")
+            project, _, stem, _ = prepare_rebuild(directory, job_id, body["project"])
+        except (ValueError, TypeError, KeyError, RecursionError, OSError) as error:
+            raise HTTPException(422, str(error) if isinstance(error, ValueError) else "无法安全读取源工程。") from error
+        from .rosvot import runtime_health as vocal_note_health
+        if not vocal_note_health()["ready"]:
+            raise HTTPException(503, "主唱词音引擎尚未安装或校验失败，请运行 bash scripts/setup-rosvot.sh 后再重建。原谱未改动。")
+        if not manager.reserve_upload():
+            raise HTTPException(429, "本机分析队列已满（最多 4 个），请等待或取消已有任务。")
+        new_id = uuid.uuid4().hex
+        target = directory / new_id
+        result = {"id": new_id, "status": "queued", "progress": 0, "stage": "queued", "message": "等待从原音轨重建主唱，不重新分轨。", "createdAt": utc_now(), "updatedAt": utc_now()}
+        created = False
+        try:
+            target.mkdir(parents=True, mode=0o700)
+            created = True
+            # Stem duration is authoritative even when this is already a derived result.
+            import soundfile as sf
+            duration = float(sf.info(stem).duration)
+            atomic_json(target / "previous-project.json", project)
+            atomic_json(target / "request.json", {"id": new_id, "action": "vocal-rebuild", "source_job_id": job_id, "project": project, "max_seconds": duration, "mode": "vocal-rebuild", "decoder": "rosvot"})
+            atomic_json(target / "status.json", result)
+            manager.submit(new_id)
+        except BaseException:
+            if created:
+                shutil.rmtree(target, ignore_errors=True)
+            raise
+        finally:
+            manager.release_upload()
+        return result
+
     @app.get("/api/projects/{job_id}/raw")
     def raw_project(job_id: str):
         path = get_directory(job_id) / "raw-project.json"
@@ -303,7 +352,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 if analyzed_audio.is_file() and not analyzed_audio.is_symlink():
                     with wave.open(str(analyzed_audio), "rb") as audio_file:
                         analyzed = audio_file.getnframes() / audio_file.getframerate()
-                results.append({"id": path.parent.name, "title": project.get("title", "未命名转写"), "filename": project.get("source", {}).get("filename", ""), "createdAt": state.get("createdAt", ""), "updatedAt": state.get("updatedAt", ""), "tempo": project.get("tempo"), "measures": project.get("measures"), "parts": len(project.get("parts", [])), "duration": full, "analyzedSeconds": analyzed, "mode": request.get("mode", "unknown"), "decoder": quality.get("decoderProfile", request.get("decoder", "standard")), "hasRaw": (path.parent / "raw-project.json").is_file(), "uncertainRegions": len(analysis.get("uncertaintyIntervals") or []), "proposal": bool(analysis.get("transforms"))})
+                results.append({"id": path.parent.name, "title": project.get("title", "未命名转写"), "filename": project.get("source", {}).get("filename", ""), "createdAt": state.get("createdAt", ""), "updatedAt": state.get("updatedAt", ""), "tempo": project.get("tempo"), "measures": project.get("measures"), "parts": len(project.get("parts", [])), "duration": full, "analyzedSeconds": analyzed, "mode": request.get("mode", "unknown"), "operation": request.get("action"), "decoder": quality.get("decoderProfile", request.get("decoder", "standard")), "hasRaw": (path.parent / "raw-project.json").is_file(), "uncertainRegions": len(analysis.get("uncertaintyIntervals") or []), "proposal": bool(analysis.get("transforms"))})
                 if len(results) >= limit:
                     break
             except (OSError, ValueError, KeyError, TypeError, wave.Error, EOFError):

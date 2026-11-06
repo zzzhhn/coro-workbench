@@ -13,6 +13,7 @@ export default function SourceEvidence({
   onSeek,
   onAudio,
   onPitchReview,
+  onVocalRebuild,
 }: {
   project: ScoreProject;
   onImportCopy: (project: ScoreProject) => void;
@@ -20,6 +21,7 @@ export default function SourceEvidence({
   onSeek?: (seconds: number) => void;
   onAudio?: (url: string, name: string) => void;
   onPitchReview?: (seconds: number) => void;
+  onVocalRebuild?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(0);
@@ -125,6 +127,11 @@ export default function SourceEvidence({
             原始转写
           </button>
         )}
+        {onVocalRebuild && (
+          <button className="text-button" onClick={onVocalRebuild} title="复用已分离主唱，另存一份节奏重建结果；其他声部不变">
+            重建主唱节奏
+          </button>
+        )}
       </div>
       {expanded && (
         <div className="source-evidence-body">
@@ -133,8 +140,11 @@ export default function SourceEvidence({
               <strong>主唱：词音边界 + 联合节奏</strong>
               <p>先辨识演唱中的词与音符边界，再整理相邻起止。没有按固定短时值删掉快速音；原始模型音符仍保留在证据中，歌词未识别。</p>
               <p>下方 FCPE / CREPE 曲线来自独立音高模型，便于对照原声，不是这份主唱谱的正确率。</p>
-              {typeof analysis.quality.vocalAlignedBoundaries === 'number' && (
+              {typeof analysis.quality.vocalAlignedBoundaries === 'number' && analysis.quality.vocalAlignmentVersion !== 'not_available' && (
                 <p>已按原声的音高进入、收音和再起音对齐 {analysis.quality.vocalAlignedBoundaries} 处边界；没有给整曲统一加延迟，也没有因此增加或删除音符。</p>
+              )}
+              {analysis.quality.vocalAlignmentVersion === 'not_available' && (
+                <p>本机缺少可用于起止对齐的连续音高，本次保留词音模型的时序。</p>
               )}
             </div>
           )}

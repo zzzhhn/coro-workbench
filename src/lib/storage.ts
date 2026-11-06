@@ -1,5 +1,6 @@
 import type { ScoreProject } from './types';
 import { validateProject } from './music';
+import { decodeLocalState, encodeLocalState } from './localCodec';
 
 const KEY = 'coro.session.v1';
 const DATABASE = 'coro-local-audio';
@@ -38,7 +39,7 @@ function safeProject(project: ScoreProject): ScoreProject {
 export function saveWorkspace(state: WorkspaceState): void {
   localStorage.setItem(
     KEY,
-    JSON.stringify({
+    encodeLocalState({
       ...state,
       source: safeProject(state.source),
       arrangement: state.arrangement ? safeProject(state.arrangement) : undefined,
@@ -53,12 +54,12 @@ export function archiveWorkspace(state: WorkspaceState): void {
     source: safeProject(state.source),
     arrangement: state.arrangement ? safeProject(state.arrangement) : undefined,
   });
-  localStorage.setItem(LIBRARY_KEY, JSON.stringify(existing.slice(0, 12)));
+  localStorage.setItem(LIBRARY_KEY, encodeLocalState(existing.slice(0, 12)));
 }
 
 export function readLibrary(): WorkspaceState[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(LIBRARY_KEY) ?? '[]');
+    const raw = decodeLocalState(localStorage.getItem(LIBRARY_KEY) ?? '[]');
     return Array.isArray(raw)
       ? raw.filter((state) => state?.source?.version === 1 && Array.isArray(state.source.parts))
       : [];
@@ -71,7 +72,7 @@ export function readWorkspace(): WorkspaceState | undefined {
   const raw = localStorage.getItem(KEY);
   if (!raw) return undefined;
   try {
-    const state = JSON.parse(raw) as WorkspaceState;
+    const state = decodeLocalState(raw) as WorkspaceState;
     if (!state.source || !Array.isArray(state.source.parts) || state.source.version !== 1) return undefined;
     if (validateProject(state.source).length) return undefined;
     if (state.arrangement && validateProject(state.arrangement).length) return undefined;

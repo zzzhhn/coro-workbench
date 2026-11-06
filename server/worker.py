@@ -14,8 +14,13 @@ def main() -> int:
     status = JobStatus(directory)
     try:
         status.check_cancelled()
-        from .pipeline import analyze_audio
-        project = analyze_audio(directory, read_json(directory / "request.json"), status)
+        request = read_json(directory / "request.json")
+        if request.get("action") == "vocal-rebuild":
+            from .vocal_rebuild import rebuild_vocals
+            project = rebuild_vocals(directory, request, status)
+        else:
+            from .pipeline import analyze_audio
+            project = analyze_audio(directory, request, status)
         status.finish(project)
         return 0
     except Cancelled:

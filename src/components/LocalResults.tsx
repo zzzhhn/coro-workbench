@@ -13,6 +13,7 @@ interface ProjectRow {
   duration: number;
   analyzedSeconds: number;
   mode: string;
+  operation?: string;
   decoder: string;
   proposal: boolean;
   uncertainRegions: number;
@@ -88,7 +89,9 @@ export default function LocalResults({
                     ? '整曲'
                     : `前 ${Math.round(row.analyzedSeconds)} 秒`}{' '}
                 · {row.measures} 小节 · {row.parts} 声部 ·{' '}
-                {row.decoder === 'rosvot'
+                {row.operation === 'vocal-rebuild'
+                  ? '主唱重建副本'
+                  : row.decoder === 'rosvot'
                   ? '词音节奏'
                   : row.decoder === 'acoustic'
                   ? '声学起止提案'

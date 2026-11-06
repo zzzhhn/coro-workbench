@@ -80,6 +80,13 @@ and selected stems privately. A `.coro.json` export contains editing data only.
 Clone the repository and rerun setup to move development; copying only the Git
 repository does not copy your projects or installed models.
 
+Local workspace JSON is compressed automatically, including migration from older
+plain browser records. This reduces quota use but is not a backup: clearing site
+data still removes it. The new vocal-rebuild action uses original server-side
+stems and therefore requires the original local analysis directory; a portable
+project without that directory still supports editing, playback and export, but
+needs a new audio analysis before this server-side action is available.
+
 ## Checks
 
 ```bash

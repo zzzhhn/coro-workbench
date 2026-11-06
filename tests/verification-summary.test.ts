@@ -26,6 +26,14 @@ describe('independent verification evidence labels', () => {
   it('retains historical dense evidence without inventing a current success status', () => {
     expect(summary({ 'vocals.denseVerifiedSeconds': 267.12 })?.title).toBe('保存的逐帧音高校验 · 267.1 秒');
   });
+  it('labels reused evidence and unavailable verification separately after vocal rebuilding', () => {
+    const cached = summary({ verificationStatus: 'prior_cached', 'vocals.denseVerifiedSeconds': 20 });
+    expect(cached?.title).toContain('沿用原声');
+    expect(cached?.detail).toContain('未重新运行');
+    const missing = summary({ verificationStatus: 'not_rerun', 'vocals.denseVerifiedSeconds': 20 });
+    expect(missing?.title).toBe('本次未重跑独立音高校验');
+    expect(missing?.detail).not.toContain('20.0');
+  });
   it.each(['failed', 'not_applicable'])('lets %s override older dense values', (status) => {
     const result = summary({ verificationStatus: status, 'vocals.denseVerifiedSeconds': 8 });
     expect(result?.title).not.toContain('已完成');

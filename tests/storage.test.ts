@@ -94,4 +94,34 @@ describe('local project preservation and import safety', () => {
     const project = createDemoProject();
     expect(parseProject(serializeProject(project))).toEqual(project);
   });
+  it('migrates a legacy workspace and recent library to compact storage', () => {
+    const store = memoryStore();
+    const state = { source: createDemoProject(), active: 'source' as const, savedAt: 'old' };
+    store.set('coro.session.v1', JSON.stringify(state));
+    store.set('coro.library.v1', JSON.stringify([state]));
+    expect(readWorkspace()).toEqual(state);
+    expect(readLibrary()).toEqual([state]);
+    saveWorkspace(state);
+    archiveWorkspace(state);
+    expect(store.get('coro.session.v1')).toMatch(/^coro-z1:/);
+    expect(store.get('coro.library.v1')).toMatch(/^coro-z1:/);
+    expect(readWorkspace()).toEqual(state);
+    expect(readLibrary()).toEqual([state]);
+  });
+  it('saves a complete dense score when plain JSON would exceed the available quota', () => {
+    const store = new Map<string, string>();
+    const project = createDemoProject();
+    for (const part of project.parts) for (const note of part.notes) note.lyric = 'rehearsal '.repeat(10);
+    const state = { source: project, active: 'source' as const, savedAt: 'now' };
+    expect(JSON.stringify(state).length).toBeGreaterThan(32_000);
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (value.length > 32_000) throw new Error('QuotaExceededError');
+        store.set(key, value);
+      },
+    });
+    saveWorkspace(state);
+    expect(readWorkspace()).toEqual(state);
+  });
 });

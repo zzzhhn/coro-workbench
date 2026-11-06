@@ -29,6 +29,9 @@
 - `server/vocal_alignment.py`: local pitch-entry, reattack and release evidence
   refines the learned syllable boundaries while retaining the note count and
   pitch sequence. No human-reference delay is applied to the audio.
+- `server/vocal_rebuild.py`: reuses a saved vocal stem with a current edited
+  project snapshot. It creates a new source document without reseparating audio
+  or changing other parts; see `VOCAL_REBUILD_API.md`.
 - `server/chordino.py`, `server/audio_harmony.py`: accompaniment-audio harmony,
   explicit no-chord gaps, slash bass and source-time provenance.
 - `server/pitch_evidence.py`, `server/voice_verification.py`: stored independent
@@ -63,6 +66,11 @@ arrangement quality distinct in reports.
 The current workspace and recent list live in browser local storage. Media lives
 in IndexedDB or the backend `data/` tree. Do not change a saved project in place
 when re-running models: create a separate result and preserve user edits.
+
+`src/lib/localCodec.ts` compresses the workspace and recent-library JSON to avoid
+exhausting browser quotas with repeated note fields. Existing uncompressed
+records remain readable; public export formats are unchanged. Preserve both
+documents before asynchronous rebuilds, not only when their result is opened.
 
 Model installers live in `scripts/`; runtimes and weights remain ignored. If a
 new engine needs different dependency versions, give it an isolated environment
