@@ -1,5 +1,6 @@
 """Publish separate full-song lead-rhythm results from actual ROSVOT inference."""
 from pathlib import Path
+import argparse
 import copy
 import hashlib
 import json
@@ -31,10 +32,13 @@ def rhythm_stats(notes):
 
 
 def main():
-    target = ROOT / 'evidence/phase6/four-vocal-rhythm-songs.json'
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--align', action='store_true', help='Create new acoustic-boundary-aligned versions of the saved learned-note results')
+    args = parser.parse_args()
+    target = ROOT / ('evidence/phase7/four-aligned-vocal-songs.json' if args.align else 'evidence/phase6/four-vocal-rhythm-songs.json')
     if target.exists():
         raise RuntimeError('Existing delivery retained; no duplicate projects created')
-    prior = json.loads((ROOT / 'evidence/phase5/four-audio-harmony-songs.json').read_text())
+    prior = json.loads((ROOT / ('evidence/phase6/four-vocal-rhythm-songs.json' if args.align else 'evidence/phase5/four-audio-harmony-songs.json')).read_text())
     keys = ['bye', 'attention', 'out_of_time', 'kong_er']
     result = {'inputs': prior['inputs'], 'scope': 'Real learned vocal notes + joint rhythmic score. Other parts, harmony, audio and all old projects unchanged. Counts are readability evidence, not accuracy.', 'results': []}
     for entry, name in zip(prior['results'], keys):
@@ -47,13 +51,26 @@ def main():
         protected = [parent / value for value in ('project.json', 'raw-project.json', 'quality-evidence.json', 'status.json')]
         protected += [report_path, audio]
         hashes = {str(path.relative_to(ROOT)): sha(path) for path in protected}
+        alignment = None
+        candidate_events = report['events']
+        if args.align:
+            import numpy as np
+            import soundfile as sf
+            from server.lead_note_proposal import frame_acoustic_evidence
+            from server.vocal_alignment import align_vocal_notes
+            contour = audio.parent / 'lead-identity/lead-models/vocals-fcpe.npz'
+            hashes[str(contour.relative_to(ROOT))] = sha(contour)
+            with np.load(contour, allow_pickle=False) as track:
+                samples, sr = sf.read(audio, dtype='float32', always_2d=True)
+                features = frame_acoustic_evidence(track['time'], samples.mean(axis=1), sr)
+                candidate_events, alignment = align_vocal_notes(report['events'], track['time'], track['f0'], track['activation'], features)
         events = [[event['source_start_seconds'], event['source_end_seconds'], event['midi_pitch'], .75]
-                  for event in report['events'] if event['midi_pitch'] is not None]
+                  for event in candidate_events if event['midi_pitch'] is not None]
         notes, rhythm = quantize_vocal_rhythm(events, evidence['grid'], source['originalAudio']['duration'], preserve_confidence=False)
         assert len(notes) == len(events) and all('confidence' not in note for note in notes)
         project = copy.deepcopy(source)
         project['id'] = uuid.uuid4().hex
-        project['title'] = source['title'].split(' · ')[0] + ' · 词音节奏'
+        project['title'] = source['title'].split(' · ')[0] + (' · 词音对齐' if args.align else ' · 词音节奏')
         project['createdAt'] = project['updatedAt'] = utc_now()
         lead = next(part for part in project['parts'] if part['id'] == 'vocals')
         old_notes = copy.deepcopy(lead['notes'])
@@ -63,11 +80,15 @@ def main():
         analysis = project['source']['analysis']
         analysis['transforms'] = ['前序版本记录：' + text if any(key in text for key in ('主唱旋律提案', 'FCPE重新做声学', '单旋律解码的主唱/低音')) else text for text in analysis['transforms']]
         analysis['transforms'].append('本版主唱重新使用ROSVOT/RWBD词音边界模型，并联合整理相邻起止。未统一删短音，全部模型有音高事件一对一进入谱面；原FCPE主唱谱与完整模型输出保留。其它声部、和弦、速度与原始音频不变。')
+        if alignment:
+            analysis['transforms'].append('使用实际FCPE音高进入/退出与音频再起音逐处校正词音边界，不统一延后整曲；保持模型事件与音高序列不变，保留充分换气间隙。')
         analysis['quality'].update({'decoderRequested': 'rosvot', 'decoderProfile': 'rosvot', 'decoderVersion': 'rosvot-rwbd-joint-score-1',
                                     'vocalRhythmVersion': VERSION, 'vocalRhythmMaxOnsetShiftSeconds': rhythm['maximumOnsetShiftSeconds'],
                                     'derivedFromJob': entry['jobId'], 'groundTruthAvailable': False,
                                     'modelEvidenceUrl': f"/api/projects/{project['id']}/evidence"})
         analysis['quality'].update(note_quality(project['parts']))
+        if alignment:
+            analysis['quality'].update({'decoderVersion': 'rosvot-rwbd-acoustic-alignment-score-2', 'vocalAlignmentVersion': alignment['version'], 'vocalAlignedBoundaries': len(alignment['boundaryEdits'])})
         analysis['rawProjectUrl'] = f"/api/projects/{project['id']}/raw"
         project['source']['warnings'] = [text for text in project['source']['warnings'] if not text.startswith(('声学起止为独立备选', '音符吸附到十六分音符'))]
         project['source']['warnings'].append('主唱为词音边界模型与节奏整理结果。FCPE/CREPE曲线及独立检查仍是原声的另外两条模型证据，不是在验证ROSVOT音符正确。歌词未识别；节奏整理不保证所有自由节奏和装饰音完全还原。')
@@ -83,6 +104,9 @@ def main():
         evidence['previousVocalScore'] = old_notes
         evidence['learnedVocalNotes'] = report
         evidence['scoreRhythm'] = rhythm
+        if alignment:
+            evidence['vocalBoundaryAlignment'] = alignment
+            evidence['alignedVocalEvents'] = candidate_events
         evidence['vocalRhythmRevision'] = {'sourceJob': entry['jobId'], 'inputHashes': hashes, 'otherPartsAndChordsUnchanged': True, 'inference': str(report_path.relative_to(ROOT)), 'actualNeuralInference': True}
         evidence['revisionMetrics'] = note_quality(project['parts'])
         atomic_json(destination / 'quality-evidence.json', evidence)
@@ -100,6 +124,9 @@ def main():
                'before': rhythm_stats(old_notes), 'after': rhythm_stats(notes), 'modelVoicedNotes': len(events),
                'allModelAttacksRetained': len(notes) == len(events), 'inputHashes': hashes,
                'maximumOnsetShiftSeconds': rhythm['maximumOnsetShiftSeconds'], 'maximumOffsetShiftSeconds': rhythm['maximumOffsetShiftSeconds']}
+        if alignment:
+            row['alignment'] = {key: value for key, value in alignment.items() if key != 'boundaryEdits'}
+            row['alignment']['adjustedBoundaries'] = len(alignment['boundaryEdits'])
         result['results'].append(row)
         print(json.dumps({key: val for key, val in row.items() if key != 'inputHashes'}, ensure_ascii=False), flush=True)
     atomic_json(target, result)

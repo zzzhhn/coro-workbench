@@ -328,8 +328,19 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
                     status.update(95, "vocal-notes", "正在以词边界与音符边界模型重建主唱节奏，不把音高掉帧直接记成碎音。")
                 learned = infer_rosvot(target_audio, directory / "vocal-note-model", timeout_seconds=max(180., duration * 3),
                                        cancel_check=(lambda: status.check_cancelled()) if status else None)
+                alignment_contour = directory / "lead-identity/lead-models/vocals-fcpe.npz" if target_audio.name == "stem-lead.wav" else model_dir / "vocals-fcpe.npz"
+                aligned_events = learned["events"]
+                if alignment_contour.is_file():
+                    from .vocal_alignment import align_vocal_notes
+                    from .lead_note_proposal import frame_acoustic_evidence
+                    with np.load(alignment_contour, allow_pickle=False) as comparison:
+                        alignment_audio, alignment_sr = sf.read(target_audio, dtype="float32", always_2d=True)
+                        features = frame_acoustic_evidence(comparison["time"], alignment_audio.mean(axis=1), alignment_sr)
+                        aligned_events, alignment_details = align_vocal_notes(learned["events"], comparison["time"], comparison["f0"], comparison["activation"], features)
+                    details["vocalBoundaryAlignment"] = alignment_details
+                    details["alignedVocalEvents"] = aligned_events
                 predicted = [[event["source_start_seconds"], event["source_end_seconds"], event["midi_pitch"], .75]
-                             for event in learned["events"] if event["midi_pitch"] is not None]
+                             for event in aligned_events if event["midi_pitch"] is not None]
                 # The model does not expose calibrated note confidence. 0.75 is
                 # a playback velocity only, never a displayed correctness score.
                 learned_notes, rhythm = quantize_vocal_rhythm(predicted, grid, duration, part_id, preserve_confidence=False)
@@ -343,6 +354,8 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
                     part["stemUrl"] = f"/api/audio/{project['id']}/stem-lead.wav"
                 monophonic = True
                 transforms.append("主唱由ROSVOT/RWBD学习词与音符边界，再联合整理相邻起止；保留真实重复起音与换气，原FCPE分段另存。未生成歌词，不把模型置信或曲线一致当正确率。")
+                if "vocalBoundaryAlignment" in details:
+                    transforms.append("对词边界偏早的情况，用实际音高进入、同音再起和收音证据逐处对齐；不统一延后整曲，不改变模型音符数量或音高。")
             except Cancelled:
                 raise
             except Exception as error:
@@ -403,10 +416,13 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
     decoder_used = detailed["parts"].get("vocals", {}).get("decoderUsed", "not_applicable" if decoder_requested == "rosvot" else decoder_requested)
     quality["decoderRequested"] = decoder_requested
     quality["decoderProfile"] = "acoustic" if decoder_used == "acoustic_fallback" else decoder_used
-    quality["decoderVersion"] = "rosvot-rwbd-joint-score-1" if decoder_used == "rosvot" else DECODER_VERSIONS.get(quality["decoderProfile"], "not_applicable")
+    quality["decoderVersion"] = "rosvot-rwbd-acoustic-alignment-score-2" if decoder_used == "rosvot" else DECODER_VERSIONS.get(quality["decoderProfile"], "not_applicable")
     if decoder_used == "rosvot":
         quality["vocalRhythmVersion"] = detailed["parts"]["vocals"]["scoreRhythm"]["version"]
         quality["vocalRhythmMaxOnsetShiftSeconds"] = detailed["parts"]["vocals"]["scoreRhythm"].get("maximumOnsetShiftSeconds", 0)
+        alignment = detailed["parts"]["vocals"].get("vocalBoundaryAlignment", {})
+        quality["vocalAlignmentVersion"] = alignment.get("version", "not_available")
+        quality["vocalAlignedBoundaries"] = len(alignment.get("boundaryEdits", []))
         project["source"]["warnings"].append("主唱为词音边界模型与节奏整理结果。FCPE/CREPE曲线及独立检查仍是原声的另外两条模型证据，不是在验证ROSVOT音符正确。")
     if decoder_used == "acoustic_fallback":
         project["source"]["warnings"].append("词音节奏模型本次未成功，已回退声学分段；主唱节奏仍需校正。")

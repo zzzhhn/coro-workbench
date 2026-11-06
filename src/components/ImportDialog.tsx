@@ -389,7 +389,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
                 </select>
                 <small>
                   {decoder === 'rosvot'
-                    ? '使用本机 ROSVOT/RWBD，不把逐帧音高跳动直接记成音符；保留重复吐字和原始候选，不生成歌词。'
+                    ? '本机 ROSVOT/RWBD 辨识词音，再按原声对齐起止；保留重复吐字和原始候选，不生成歌词。'
                     : decoder === 'acoustic'
                     ? '在人审清唱留出集改善了音符起止；复杂混音仍需校对，不补缺失音高。'
                     : '细节提案可能增加短音符，需与标准版本对照；不是已确认更准确。'}

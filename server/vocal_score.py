@@ -9,7 +9,7 @@ import math
 
 import numpy as np
 
-VERSION = "vocal-score-joint-rhythm-1"
+VERSION = "vocal-score-joint-rhythm-2"
 
 
 def clean_vocal_fragments(events: list, times, f0, features: dict) -> tuple[list, dict]:
@@ -152,7 +152,7 @@ def quantize_vocal_rhythm(events: list, grid: dict, duration: float, part_id: st
         gaps = (next_options[:, 0, None] - prev_options[None, :, 1]) * spb
         allowed = gaps >= -1e-7
         if real_rest:
-            allowed &= gaps >= max(.03125 * spb, raw_gap - .16) - 1e-7
+            allowed &= gaps >= max(min(.30, raw_gap), raw_gap - .12) - 1e-7
         continuity = np.where((gaps > 1e-7) & connected, 1.8 + np.minimum(2., gaps / spb * 2), 0.)
         costs = np.where(allowed, totals[-1][None, :] + continuity, np.inf)
         back = np.argmin(costs, axis=1)

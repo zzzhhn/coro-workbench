@@ -26,6 +26,9 @@ export default function SourceEvidence({
   const [pageUrl, setPageUrl] = useState<string>();
   const [busy, setBusy] = useState(false);
   const analysis = project.source.analysis;
+  const displayedTransforms = [...new Set((analysis?.transforms ?? []).map((text) =>
+    text.replace(/^(前序版本记录：)+/, '前序版本记录：'),
+  ))];
   const verification = pitchVerificationSummary(analysis);
   const pages = project.source.pages ?? [];
   const rawUrl = analysis?.rawProjectUrl;
@@ -113,7 +116,7 @@ export default function SourceEvidence({
         </button>
         <span className="evidence-summary">
           {analysis?.rhythm
-            ? `${analysis.rhythm.bpm.toFixed(1)} BPM · ${analysis.transforms.length} 项处理，${rawUrl ? '原始结果保留' : '提案来源记录'}`
+            ? `${analysis.rhythm.bpm.toFixed(1)} BPM · ${displayedTransforms.length} 项处理，${rawUrl ? '原始结果保留' : '提案来源记录'}`
             : project.source.engine}
         </span>
         {rawUrl && (
@@ -130,6 +133,9 @@ export default function SourceEvidence({
               <strong>主唱：词音边界 + 联合节奏</strong>
               <p>先辨识演唱中的词与音符边界，再整理相邻起止。没有按固定短时值删掉快速音；原始模型音符仍保留在证据中，歌词未识别。</p>
               <p>下方 FCPE / CREPE 曲线来自独立音高模型，便于对照原声，不是这份主唱谱的正确率。</p>
+              {typeof analysis.quality.vocalAlignedBoundaries === 'number' && (
+                <p>已按原声的音高进入、收音和再起音对齐 {analysis.quality.vocalAlignedBoundaries} 处边界；没有给整曲统一加延迟，也没有因此增加或删除音符。</p>
+              )}
             </div>
           )}
           {verification && (
@@ -183,7 +189,7 @@ export default function SourceEvidence({
                   : '此工程保留处理说明；原始模型结果与详细模型证据需在原工作台另行保存，不在此便携工程中。'}
               </p>
               <ul>
-                {analysis.transforms.map((transform, index) => (
+                {displayedTransforms.map((transform, index) => (
                   <li key={index}>{transform}</li>
                 ))}
               </ul>

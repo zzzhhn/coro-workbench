@@ -26,6 +26,9 @@
 - `server/vocal_score.py`: joint score-time path. Rhythmic complexity, adjacent
   boundaries and meaningful rests are considered together; it does not discard
   attacks because two events collide on a rounded onset.
+- `server/vocal_alignment.py`: local pitch-entry, reattack and release evidence
+  refines the learned syllable boundaries while retaining the note count and
+  pitch sequence. No human-reference delay is applied to the audio.
 - `server/chordino.py`, `server/audio_harmony.py`: accompaniment-audio harmony,
   explicit no-chord gaps, slash bass and source-time provenance.
 - `server/pitch_evidence.py`, `server/voice_verification.py`: stored independent

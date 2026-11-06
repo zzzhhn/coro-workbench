@@ -17,8 +17,16 @@ transcription or feature parity with a professional notation publisher.
   This is not a ranking on commercial mixed songs. Readability gains do not
   override those accuracy limitations. Predicted boundaries often precede the
   reference's pitched onset; no reference-derived delay is applied to the product.
+- The additional acoustic alignment improves, but does not solve, onset timing.
+  On another 32 existing human-reviewed recordings, native/aligned onset+pitch
+  micro F1 is 0.2546/0.5506 (A1) and 0.2762/0.5744 (A2); including note offsets
+  gives 0.1755/0.3106 and 0.2217/0.3337. This is development regression, not a
+  new blinded mixed-song benchmark. One recording in that group and one in the
+  original eight-recording group lose full-note F1. No notes or pitches are
+  added/deleted by the alignment step.
 - Vocal notation uses a joint timing path with a preference for simpler rhythm.
-  It can shift note boundaries by roughly a tenth of a second. Original model
+  It can shift note boundaries by roughly a tenth of a second after acoustic
+  alignment, whose separate bound is 160 ms. Original model
   intervals remain in local evidence. Free time and intentional microtiming need editing.
 - Chordino has dictionary and separation limitations, particularly suspended and
   diminished-seventh chords. N means no chord was recognized, not proven silence.

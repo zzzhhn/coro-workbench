@@ -71,7 +71,7 @@ def test_real_fast_notes_survive_in_order_without_by_start_deduplication():
 def test_preserves_breath_and_handles_negative_audio_phase_without_changing_pitch():
     events = [[.4, .9, 60, .8], [1.3, 1.8, 62, .8]]
     notes, info = quantize_vocal_rhythm(events, {"bpm": 90, "offsetSeconds": -.2}, 3, preserve_confidence=False)
-    assert (notes[1]["start"] - notes[0]["start"] - notes[0]["duration"]) * 60 / 90 >= .24
+    assert (notes[1]["start"] - notes[0]["start"] - notes[0]["duration"]) * 60 / 90 >= .30
     assert all("confidence" not in n for n in notes)
     assert len(info["boundaryChanges"]) == len(events)
 
