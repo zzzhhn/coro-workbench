@@ -1,0 +1,255 @@
+{
+  "spaceRevision": "5e66c1ea173a8186e0d20432b841d3180cc015b5",
+  "modelRevision": "e45ebd70398682d54b7bb1901a5216e18f3b1824",
+  "sourceFiles": [
+    {
+      "path": "amt/src/config/config.py",
+      "sha256": "6803e1479c77a9c5f5ddec145291ee9b17cd9a15fbcd5f1bcf7ba39297218838"
+    },
+    {
+      "path": "amt/src/config/data_presets.py",
+      "sha256": "0b47f4b711d63a355f3214a87a16750d82ff791a087e58f8e64a2dbac7494bb3"
+    },
+    {
+      "path": "amt/src/config/task.py",
+      "sha256": "b04b75554de2771c9787e9d74b2d8b7d93707117c16be8814a18c7abf590b93c"
+    },
+    {
+      "path": "amt/src/config/vocabulary.py",
+      "sha256": "9d693c320d6d912f4e756b90c132a0999aa1aaf8a75fcb627a69935cf63aea36"
+    },
+    {
+      "path": "amt/src/model/RoPE/RoPE.py",
+      "sha256": "b8046efd8f898b1c3cc157819b0371e7823d447cf506bc68d7692bc9a7ce008a"
+    },
+    {
+      "path": "amt/src/model/conformer_helper.py",
+      "sha256": "ee1ecd79a1115bd8de114412261295f10d63984e4d4898d5fdf32ca983da6491"
+    },
+    {
+      "path": "amt/src/model/conformer_mod.py",
+      "sha256": "c15da582b655ac099bddfc114c246e570300fecaa142995145c210efedf18de7"
+    },
+    {
+      "path": "amt/src/model/conv_block.py",
+      "sha256": "f99cb054e1772c5c8ad882284c60ebdbdd196314f45129d496e277c9606ad0c4"
+    },
+    {
+      "path": "amt/src/model/ff_layer.py",
+      "sha256": "b098073babb815634f36587a7a944edf6b755c2b3bac11ba574a172cc09643e0"
+    },
+    {
+      "path": "amt/src/model/init_train.py",
+      "sha256": "3affcde16839445bb95c04988e2e177a657adfd3b0329e51983b56f1493833d1"
+    },
+    {
+      "path": "amt/src/model/lm_head.py",
+      "sha256": "458891fcc0620c4b2b6aea1ed91d9dbb020f5dcb53aa09cbefa7a10cabb651f0"
+    },
+    {
+      "path": "amt/src/model/lr_scheduler.py",
+      "sha256": "8d38d649004e7f07e1ca6c807e84f8c45fb3a4da94e046004c4cf39094111162"
+    },
+    {
+      "path": "amt/src/model/ops.py",
+      "sha256": "c169ce23fcd0251354786313ba8409aaba918fcecf15cec8a94f7889916e6cc3"
+    },
+    {
+      "path": "amt/src/model/optimizers.py",
+      "sha256": "95b8bf82a1b0ef834a7ad492c96e120f78689395e0b148e71bbb5dfdef42d106"
+    },
+    {
+      "path": "amt/src/model/perceiver_helper.py",
+      "sha256": "c23aa7ec1fa368a0a17ed318891ae3967d798fcde9d210bd10fe864b1af17d4f"
+    },
+    {
+      "path": "amt/src/model/perceiver_mod.py",
+      "sha256": "68e899abc3d620d5913b0f0d336a8494b8211d0577e432386799b072ad5f1e2e"
+    },
+    {
+      "path": "amt/src/model/pitchshift_layer.py",
+      "sha256": "38a5be7559bfa18f0e90985e416ab6c9830050d68f35b854472f406d953360aa"
+    },
+    {
+      "path": "amt/src/model/positional_encoding.py",
+      "sha256": "f2edca87fdc418bc48bad1105733a56dea5d940f064d074db0b5fa19544b87fe"
+    },
+    {
+      "path": "amt/src/model/projection_layer.py",
+      "sha256": "cedc45baec4e112fc6f64d081aaf8cfe8764a5d767eaa07defc9c988dba1da1a"
+    },
+    {
+      "path": "amt/src/model/spectrogram.py",
+      "sha256": "772c8e32855ce9bc5990dec310cfdc35505629ce4f91da4d4276a1bed01216f6"
+    },
+    {
+      "path": "amt/src/model/t5mod.py",
+      "sha256": "2cedcbdc4d0abef869f99bff624508ca7e90a20f585f59f418af5ff19e25f147"
+    },
+    {
+      "path": "amt/src/model/t5mod_helper.py",
+      "sha256": "118d9aff99511d0e706d55eec27795c5fdaa84c6e62587377d4c982097e47dea"
+    },
+    {
+      "path": "amt/src/model/ymt3.py",
+      "sha256": "a7c83aa71ddfa0ac3b51fc7e98606a7416715a053f02c118a6c957dff4079c61"
+    },
+    {
+      "path": "amt/src/utils/audio.py",
+      "sha256": "ac08d1a6509e7f5c5b473cae0e86b6851a60c5dcd44e50c4a4463494d1a76258"
+    },
+    {
+      "path": "amt/src/utils/augment.py",
+      "sha256": "05bed9e28f29a5ece00045b206b9b60bcb4b9e64243daa50d119837e549f2852"
+    },
+    {
+      "path": "amt/src/utils/data_modules.py",
+      "sha256": "782f9382092733eec76863a3fc62a87e482dcf65e29abd6bbe3baa39ba9e86e6"
+    },
+    {
+      "path": "amt/src/utils/datasets_eval.py",
+      "sha256": "8992adc5a1a32cc1c77cff23c342fc0c0e211d549cb49d2323d4bf6ed71351c0"
+    },
+    {
+      "path": "amt/src/utils/datasets_helper.py",
+      "sha256": "366818b6fc270ba19b9a0f58d366fc9021e9ca9d6747b289250cac0795ad7d90"
+    },
+    {
+      "path": "amt/src/utils/datasets_train.py",
+      "sha256": "ba99402358d22465085d02bb6324593a82aa4cd58c78bd94f43d2fb17bf6710b"
+    },
+    {
+      "path": "amt/src/utils/event2note.py",
+      "sha256": "039ff94e2b7cd022a1ac09dc215fccf6280cf656c1bce0fd16fbd63db187efea"
+    },
+    {
+      "path": "amt/src/utils/event_codec.py",
+      "sha256": "c487e6c7ac855146dc81a9192efb35a4d45fc8cd42ddaa24a958c4675acbfe48"
+    },
+    {
+      "path": "amt/src/utils/metrics.py",
+      "sha256": "244f2be91a51023081fa41f0537233b68df308e29daca5fc9a2d3e5f70c8076a"
+    },
+    {
+      "path": "amt/src/utils/metrics_helper.py",
+      "sha256": "d7a83f42aff34f82f58e4f464be3e1c95e5145ad715c54742a06244c28897eff"
+    },
+    {
+      "path": "amt/src/utils/midi.py",
+      "sha256": "5b8cb566bb47a2c94c171d507a071057a5434f944f8a2f4f05f4ab3b1245992f"
+    },
+    {
+      "path": "amt/src/utils/mirdata_dev/datasets/slakh16k.py",
+      "sha256": "42492c6dcadf3f3c4251600c9b8641b03644b2894ecb5efbc6568b10ddc1bd6b"
+    },
+    {
+      "path": "amt/src/utils/mirdata_dev/scripts/make_slakh_index.py",
+      "sha256": "6a1d0e7ebecc6c8b3b1f6c5b6c26712a2a409ad93f82dda1a54e389b1f11b9ec"
+    },
+    {
+      "path": "amt/src/utils/note2event.py",
+      "sha256": "7aea803c628f98a26b248f8c6b886db48717aa8b0e68c89293b6bd6dfb94c7ed"
+    },
+    {
+      "path": "amt/src/utils/note_event_dataclasses.py",
+      "sha256": "6ce49b909191178255fffcf539c01f1c8ec0e4f1adcb207cfd0c811a52bc1f40"
+    },
+    {
+      "path": "amt/src/utils/preprocess/dataset_stats.py",
+      "sha256": "08d9acd44a82ace6c44993e7c956193c402b9fee079653b84aa2e10946e26ff6"
+    },
+    {
+      "path": "amt/src/utils/preprocess/generate_dataset_stats.py",
+      "sha256": "faef71c46bc54e2a22c30ae037866f9a00e18300894b659af1a6a4e5d05f7b86"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_cmedia.py",
+      "sha256": "e24d5388a57931fa07cbd071eaba22d9853427dbf51dc99718221474add9c7ce"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_egmd.py",
+      "sha256": "cd6c7f9b73a79e3cb0f64a0fdbb647f7102fe096e02a62c07cca3747cb39aa4e"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_enstdrums.py",
+      "sha256": "634eac84f50e2bc50cd9dd6177ee9c4e8dc9af713184529e01f292bc120b03c6"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_geerdes.py",
+      "sha256": "031d98aa39cf81a93dbfbec3ae5c6a670c1454247b84245908363d5bba066b5a"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_guitarset.py",
+      "sha256": "0ee687f3b5c5072462c79ea9925da3f4a527aecd09bf8ac85e1cf049c66091c2"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_idmt_smt_bass.py",
+      "sha256": "8591bfcff9b28d654d09067aa239aea7975354d695dc9705f034af958df66b34"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_maestro.py",
+      "sha256": "09d7334c9853708f2c49882c41d63d40b59234ce9adcab86a764f88d8a6f717b"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_maps.py",
+      "sha256": "b4ca18c337f4636c6b0898bfa4669719ab6bfdb60dc0f29c67005a82082bacc2"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_mir1k.py",
+      "sha256": "442f35be292ee35600c669ac784a53fa9cd303f3bf1ec04d89e844f71b36bdba"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_mir_st500.py",
+      "sha256": "7fd6c15995fed9190c9a670f412a964d03ab05a5d0b333a2894c342fd51e98eb"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_musicnet.py",
+      "sha256": "22783e68aa0e18defa8b96965c931a679fc731acc4e782945db36179a235aed3"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_rnsynth.py",
+      "sha256": "8156918d90d61b5c84b60511d8472e4d3788875f2c247cd6fc62ff323becec75"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_rwc_pop.py",
+      "sha256": "4796d3647ea4f5d7dcf4c1723033fb1ff895327236067ecc3df07ccc32f778fc"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_rwc_pop_full.py",
+      "sha256": "10deeb5dfc3bf64b6785ce967f2ad28dcbf507babac474f34573ad5687898e0a"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_slakh.py",
+      "sha256": "f9dace6bdc22a5104260b1f79b1e32445d6ac99688830de60bca8650c5d2f46b"
+    },
+    {
+      "path": "amt/src/utils/preprocess/preprocess_urmp.py",
+      "sha256": "461485b2662fc25a8ffa1e5be16c5717bebefb4293420f0eec4bdf2705485d76"
+    },
+    {
+      "path": "amt/src/utils/task_manager.py",
+      "sha256": "5e480366febd0250e92eb25ca78f906cc0d61144814adce18ecce642412e5669"
+    },
+    {
+      "path": "amt/src/utils/tokenizer.py",
+      "sha256": "81c691cdc49084b3e65f5a722686a61b769a2d3169830cf04c1fe6bbc97fa8a8"
+    },
+    {
+      "path": "amt/src/utils/utils.py",
+      "sha256": "eb9412923ea9a7a194ab38d433f2f00b017daf1ac1181b3162a8d3bfe8c18872"
+    },
+    {
+      "path": "model_helper.py",
+      "sha256": "47706291e10a0d25aef768ef276de3bfcdf98175141d57802b571917c6de4d3a"
+    },
+    {
+      "path": "README.md",
+      "sha256": "9a8468bd685eb0e9084566c5b6cca230481ea4e1c0a6212b4388c4b4618400b4"
+    }
+  ],
+  "checkpoint": {
+    "path": "amt/logs/2024/mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops/checkpoints/last.ckpt",
+    "sha256": "ae38e415c79efd5592dcb9b658cdb99ddb11d4c4e1eaa364cab04a052473fc25"
+  },
+  "licenseNote": "HF source file headers and model card Apache-2.0; GitHub root LICENSE GPLv3. Optional local research component, redistribution review required."
+}

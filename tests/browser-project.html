@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Coro portable project checks</title>
+    <style>
+      body {
+        font:
+          15px Georgia,
+          serif;
+        max-width: 950px;
+        margin: 40px auto;
+        padding: 20px;
+        color: #2d3640;
+        background: #f2f4f6;
+      }
+      button {
+        background: #303840;
+        color: #fff;
+        border: 0;
+        padding: 12px 18px;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      pre {
+        background: white;
+        padding: 20px;
+        border: 1px solid #d9dfe7;
+        white-space: pre-wrap;
+        line-height: 1.8;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Coro portable project integrity</h1>
+    <p>
+      Original generated audio and image fixtures only. Uses the production archive, hash checking, IndexedDB
+      and restore functions.
+    </p>
+    <button id="run">Run project roundtrip checks</button>
+    <p id="status">Ready</p>
+    <pre id="results"></pre>
+    <a href="/">Return to Coro</a>
+    <script type="module" src="/tests/browser-project.ts"></script>
+  </body>
+</html>

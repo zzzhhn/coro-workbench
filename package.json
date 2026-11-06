@@ -1,0 +1,42 @@
+{
+  "name": "coro-workbench",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "start": "node scripts/start.mjs"
+  },
+  "dependencies": {
+    "@fontsource/dm-mono": "^5.2.7",
+    "@fontsource/dm-sans": "^5.2.8",
+    "@fontsource/newsreader": "^5.2.8",
+    "@phosphor-icons/react": "^2.1.10",
+    "@tonejs/midi": "^2.0.28",
+    "@vexflow-fonts/bravura": "^1.0.2",
+    "abcjs": "6.7.2",
+    "fast-xml-parser": "^5.3.3",
+    "fflate": "^0.8.3",
+    "jspdf": "^4.2.1",
+    "midi-file": "^1.2.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "svg2pdf.js": "^2.9.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "prettier": "^3.9.10",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.0",
+    "vitest": "^5.1.0"
+  }
+}

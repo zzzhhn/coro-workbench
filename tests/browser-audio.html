@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Coro browser audio checks</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      body {
+        font:
+          15px Georgia,
+          serif;
+        background: #f4f6ef;
+        color: #293d2f;
+        max-width: 1000px;
+        margin: 40px auto;
+        padding: 20px;
+      }
+      button {
+        background: #2d6447;
+        color: #fff;
+        border: 0;
+        padding: 12px 18px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      pre {
+        white-space: pre-wrap;
+        line-height: 1.8;
+        background: #fff;
+        padding: 20px;
+        border: 1px solid #dde4d2;
+      }
+      a {
+        color: #285c3c;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Coro real browser audio checks</h1>
+    <p>
+      Isolated original fixtures only. This page is a developer test, not an accuracy demo or human listening
+      acceptance. It uses real Web Audio, locally bundled samples and the same production transport.
+    </p>
+    <button id="run">Run browser audio checks</button>
+    <p id="status">Ready</p>
+    <pre id="results"></pre>
+    <a href="/">Return to Coro</a>
+    <script type="module" src="/tests/browser-audio.ts"></script>
+  </body>
+</html>
