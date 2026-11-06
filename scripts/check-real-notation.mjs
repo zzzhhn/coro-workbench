@@ -240,6 +240,7 @@ function auditEngravedPitchSpelling(tune, result, project) {
   let checkedHeads = 0;
   let mismatchedHeads = 0;
   const examples = [];
+  const heldAccidentals = new Map();
   for (const line of tune.lines)
     (line.staff ?? []).forEach((staff, staffIndex) => {
       const map = result.staffMap[staffIndex];
@@ -265,18 +266,28 @@ function auditEngravedPitchSpelling(tune, result, project) {
           if (!event.pitches?.length) continue;
           const segment = result.noteSegments[event.startChar];
           event.pitches.forEach((pitch, index) => {
+            const noteKey = `${map.partId}\0${segment?.noteIds[index]}`;
+            const source = sources.get(noteKey);
+            // Raw abcjs partial-chord endTie flags are positional, not pitch
+            // identities. Track continuations by event ID, never by source MIDI.
+            const continuation = source && segment.start > source.start + 1e-7;
             let writtenMidi;
             if (map.clef === 'percussion') writtenMidi = tune.formatting.percmap?.[pitch.name]?.sound;
             else {
-              if (pitch.accidental in alters) barAccidentals.set(pitch.pitch, alters[pitch.accidental]);
+              // A tied continuation may repeat its accidental after a barline,
+              // but it does not establish that accidental for later attacks.
+              const explicit = alters[pitch.accidental];
+              if (explicit !== undefined && !continuation) barAccidentals.set(pitch.pitch, explicit);
               const degree = ((pitch.pitch % 7) + 7) % 7;
+              const accidental = explicit ?? (continuation ? heldAccidentals.get(noteKey) : undefined) ?? barAccidentals.get(pitch.pitch) ?? key[degree] ?? 0;
+              heldAccidentals.set(noteKey, accidental);
               writtenMidi =
                 60 +
                 Math.floor(pitch.pitch / 7) * 12 +
                 degrees[degree] +
-                (barAccidentals.get(pitch.pitch) ?? key[degree] ?? 0);
+                accidental;
             }
-            const expected = sources.get(`${map.partId}\0${segment?.noteIds[index]}`)?.midi;
+            const expected = source?.midi;
             checkedHeads++;
             if (writtenMidi !== expected) {
               mismatchedHeads++;
@@ -301,7 +312,7 @@ function auditEngravedPitchSpelling(tune, result, project) {
     mismatchedHeads,
     examples,
     method:
-      'Independent diatonic pitch + key signature + measure accidental decoding before afterParsing, without using injected midipitch values; percussion uses the emitted explicit GM percmap.',
+      'Independent written pitch + key + measure accidental decoding before afterParsing; event IDs track tie continuation, not expected MIDI. No injected midipitch values; percussion uses emitted GM percmap.',
   };
 }
 

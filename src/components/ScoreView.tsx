@@ -201,6 +201,8 @@ export default function ScoreView({
           }
         }
       }
+      // A new part/layout changes scroll coordinates even at the same beat.
+      lastScrolledBar.current = -1;
       setRenderVersion((value) => value + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '乐谱渲染失败，请检查音符数据。');
@@ -232,6 +234,7 @@ export default function ScoreView({
       if (!live || !container.current) return;
       const boxes = fitEngravingSystems([...container.current.querySelectorAll<SVGSVGElement>('svg')]);
       setEngravedWidth(Math.ceil(Math.max(0, ...boxes.map((box) => box.width))));
+      lastScrolledBar.current = -1;
       setRenderVersion((value) => value + 1);
     });
     return () => {

@@ -4,6 +4,7 @@ import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { parseMidi, writeMidi } from 'midi-file';
 import type { AbcRenderResult, ChordEvent, NoteEvent, ScorePart, ScoreProject } from './types';
 import { createEngravingPlan } from './engraving';
+import { notePlaybackLevel, notesWithActiveDynamics } from './dynamics';
 
 const Midi = ToneMidi.Midi ?? (ToneMidi as unknown as { default: typeof ToneMidi }).default.Midi;
 
@@ -277,6 +278,10 @@ export function validateProject(project: ScoreProject): string[] {
         problems.push(`${part.name}: 力度记号无效。`);
         break;
       }
+      if (note.dynamicScope !== undefined && !['staff', 'voice'].includes(note.dynamicScope)) {
+        problems.push(`${part.name}: 力度范围无效。`);
+        break;
+      }
       if (
         note.staff !== undefined &&
         (!Number.isInteger(note.staff) ||
@@ -470,24 +475,6 @@ function measureSegments(lane: NoteGroup[], start: number, duration: number): Se
   return result;
 }
 
-function splitAtChordChanges(segment: Segment, changes: ChordEvent[]): Segment[] {
-  const end = segment.start + segment.duration;
-  const boundaries = [
-    segment.start,
-    ...changes
-      .map((chord) => chord.start)
-      .filter((start) => start > segment.start + EPSILON && start < end - EPSILON),
-    end,
-  ];
-  return boundaries.slice(0, -1).map((start, index) => ({
-    ...segment,
-    start,
-    duration: boundaries[index + 1] - start,
-    tiedFrom: segment.tiedFrom || index > 0,
-    tiedTo: segment.tiedTo || index < boundaries.length - 2,
-  }));
-}
-
 function gcd(a: number, b: number): number {
   return b ? gcd(b, a % b) : a;
 }
@@ -520,12 +507,14 @@ function keyAccidentals(key: string): Record<string, number> {
   return result;
 }
 
-function abcPitch(midi: number, key: string, accidentals: Map<string, number>): string {
+function abcPitch(midi: number, key: string, accidentals: Map<string, number>, startsNote = true): string {
   const { step, alter, octave } = spellPitch(midi, key);
   const position = `${step}${octave}`;
   const implied = accidentals.get(position) ?? keyAccidentals(key)[step] ?? 0;
   const accidental = implied === alter ? '' : alter === 1 ? '^' : alter === -1 ? '_' : '=';
-  accidentals.set(position, alter);
+  // A tied continuation's accidental belongs to that held note; it does not
+  // establish the accidental for later attacks in the new measure.
+  if (startsNote) accidentals.set(position, alter);
   const letter =
     octave >= 5
       ? step.toLowerCase() + "'".repeat(Math.max(0, octave - 5))
@@ -605,8 +594,15 @@ export function toAbc(
   const plan = createEngravingPlan(project, partIds);
   const noteMap: AbcRenderResult['noteMap'] = {};
   const noteSegments: NonNullable<AbcRenderResult['noteSegments']> = {};
+  const displayedHarmony = harmonyChanges(project);
+  const chordCounts = new Map<number, number>();
+  for (const chord of displayedHarmony) {
+    const bar = Math.floor((chord.start + EPSILON) / beatsPerBar(project));
+    chordCounts.set(bar, (chordCounts.get(bar) ?? 0) + 1);
+  }
+  const denseHarmony = [...chordCounts.values()].some((count) => count > 3);
   const requestedBarsPerSystem = Math.max(1, Math.min(16, Math.round(layout.barsPerSystem ?? 4)));
-  const barsPerSystem = plan.dense ? Math.min(requestedBarsPerSystem, 2) : requestedBarsPerSystem;
+  const barsPerSystem = plan.dense || denseHarmony ? Math.min(requestedBarsPerSystem, 2) : requestedBarsPerSystem;
   const staffSep = Math.max(plan.dense ? 52 : 20, Math.min(200, layout.staffSep ?? 62));
   const systemSep = Math.max(20, Math.min(250, layout.systemSep ?? 52));
   if (![barsPerSystem, staffSep, systemSep].every(Number.isFinite)) throw new Error('谱面布局数值无效。');
@@ -614,8 +610,15 @@ export function toAbc(
     ...staff,
     lanes: staff.voices.map((voice) => ({ ...voice, lane: voice.groups })),
   }));
-  const staffExpression = (staff: (typeof voices)[number]): string =>
-    staff.lanes.length > 1 ? `( ${staff.lanes.map((lane) => lane.id).join(' ')} )` : staff.lanes[0].id;
+  const harmonyVoiceId = displayedHarmony.length ? 'CoroHarmony' : undefined;
+  const staffVoiceIds = (staff: (typeof voices)[number]): string[] => [
+    ...staff.lanes.map((lane) => lane.id),
+    ...(staff === voices[0] && harmonyVoiceId ? [harmonyVoiceId] : []),
+  ];
+  const staffExpression = (staff: (typeof voices)[number]): string => {
+    const ids = staffVoiceIds(staff);
+    return ids.length > 1 ? `( ${ids.join(' ')} )` : ids[0];
+  };
   const scoreExpression = parts
     .map((part) => {
       const staves = voices.filter((staff) => staff.part.id === part.id);
@@ -639,14 +642,19 @@ export function toAbc(
       abc += `V:${voice.id} clef=${clef === 'percussion' ? 'perc' : clef}${voice.stem ? ` stems=${voice.stem}` : ''}${index === 0 ? ` name="${abcText(name)}" snm="${abcText(shortName)}"` : ''}\n`;
     }),
   );
+  // Timed invisible spacers carry harmony independently: a mid-note chord
+  // label must not split the singer's note into artificial tied fragments.
+  if (harmonyVoiceId)
+    abc += `V:${harmonyVoiceId} clef=${voices[0].clef === 'percussion' ? 'perc' : voices[0].clef} stems=up\n`;
   abc += `K:${normalizeKey(project.key)}\n`;
   const barLength = beatsPerBar(project);
+  const [meterBeats, meterUnit] = project.timeSignature;
+  const beamUnit = meterUnit === 8 && meterBeats >= 6 && meterBeats % 3 === 0 ? 1.5 : 4 / meterUnit;
   const hasPercussion = parts.some((part) => part.role === 'percussion' || part.clef === 'percussion');
-  const displayedHarmony = harmonyChanges(project);
   const systemMeasures: number[] = [];
   for (let firstBar = 0; firstBar < project.measures; firstBar += barsPerSystem) {
     systemMeasures.push(firstBar + 1);
-    voices.forEach(({ part, clef, lanes }, staffIndex) =>
+    voices.forEach(({ part, clef, lanes }, staffIndex) => {
       lanes.forEach(({ lane, id }, laneIndex) => {
         if (firstBar === 0 || hasPercussion) abc += `V:${id}\n`;
         if (firstBar === 0) abc += `%%MIDI program ${part.role === 'percussion' ? 128 : part.program}\n`;
@@ -659,19 +667,15 @@ export function toAbc(
         for (let bar = firstBar; bar < Math.min(firstBar + barsPerSystem, project.measures); bar++) {
           const start = bar * barLength;
           const accidentals = new Map<string, number>();
-          let chordIndex = 0;
-          const chords =
-            staffIndex === 0 && laneIndex === 0
-              ? displayedHarmony.filter(
-                  (chord) => chord.start >= start - EPSILON && chord.start < start + barLength - EPSILON,
-                )
-              : [];
+          let previousBeamGroup = -1;
           for (const segment of measureSegments(lane, start, barLength)
-            .flatMap((segment) => splitAtChordChanges(segment, chords))
             .flatMap(splitAbcSegment)) {
+            const beamGroup = Math.floor((segment.start - start + EPSILON) / beamUnit);
+            // Syncopated runs may never end exactly on a beat. Still separate
+            // their beams when the next attack belongs to a new metrical beat.
+            if (beamGroup > previousBeamGroup && !abc.endsWith(' ')) abc += ' ';
+            previousBeamGroup = beamGroup;
             let prefix = '';
-            while (chordIndex < chords.length && chords[chordIndex].start <= segment.start + EPSILON)
-              prefix += `"${abcText(chords[chordIndex++].symbol)}"`;
             const first = segment.notes[0];
             const firstAttack = first && Math.abs(first.start - segment.start) < EPSILON;
             if (firstAttack) {
@@ -686,7 +690,7 @@ export function toAbc(
             const pitchedTokens = pitches.map((note) =>
               part.role === 'percussion'
                 ? drumPitch(note.midi!)
-                : abcPitch(note.midi!, project.key, accidentals),
+                : abcPitch(note.midi!, project.key, accidentals, Math.abs(note.start - segment.start) < EPSILON),
             );
             const continuing = pitches.map(
               (note) => note.start + note.duration > segment.start + segment.duration + EPSILON,
@@ -728,7 +732,7 @@ export function toAbc(
               });
             }
             const end = segment.start + segment.duration;
-            if (Math.abs(end - Math.round(end)) < EPSILON) abc += ' ';
+            if (Math.abs((end - start) / beamUnit - Math.round((end - start) / beamUnit)) < EPSILON) abc += ' ';
             if (pitches.length) {
               const lyric = firstAttack ? first?.lyric : undefined;
               hasLyrics ||= Boolean(lyric);
@@ -747,19 +751,38 @@ export function toAbc(
         }
         abc += '\n';
         if (hasLyrics) abc += `w:${lyrics.join(' ')}\n`;
-      }),
-    );
+      });
+      if (staffIndex === 0 && harmonyVoiceId) {
+        if (firstBar === 0 || hasPercussion) abc += `V:${harmonyVoiceId}\n`;
+        if (hasPercussion) abc += `K:${part.role === 'percussion' || clef === 'percussion' ? 'none' : normalizeKey(project.key)}\n`;
+        abc += `[V:${harmonyVoiceId}] `;
+        for (let bar = firstBar; bar < Math.min(firstBar + barsPerSystem, project.measures); bar++) {
+          const start = bar * barLength, end = start + barLength;
+          const changes = displayedHarmony.filter((chord) => chord.start >= start - EPSILON && chord.start < end - EPSILON);
+          const times = [...new Set([start, ...changes.map((chord) => chord.start), end])].sort((a, b) => a - b);
+          for (let i = 0; i < times.length - 1; i++) {
+            const labels = changes.filter((chord) => Math.abs(chord.start - times[i]) < EPSILON);
+            abc += labels.map((chord) => `"${abcText(chord.symbol)}"`).join('');
+            for (const spacer of splitAbcSegment({ start: times[i], duration: times[i + 1] - times[i], notes: [], tiedFrom: false, tiedTo: false }))
+              abc += `${spacer.tupletPrefix ?? ''}x${abcDuration(spacer.notatedDuration ?? spacer.duration)} `;
+          }
+          abc += bar === project.measures - 1 ? '|] ' : '| ';
+        }
+        abc += '\n';
+      }
+    });
   }
   return {
     abc,
     noteMap,
+    harmonyVoiceId,
     noteSegments,
     systemMeasures,
     staffMap: voices.map((staff) => ({
       partId: staff.part.id,
       staffNumber: staff.number,
       clef: staff.clef,
-      voiceIds: staff.lanes.map((lane) => lane.id),
+      voiceIds: staffVoiceIds(staff),
     })),
     warnings: plan.warnings,
   };
@@ -995,7 +1018,7 @@ export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
           for (const segment of measureSegments(lane.groups, start, barLength)) {
             const first = segment.notes[0];
             if (first?.dynamic && Math.abs(first.start - segment.start) < EPSILON)
-              content += `<direction placement="below"><direction-type><dynamics><${first.dynamic}/></dynamics></direction-type><voice>${xmlText(voice)}</voice>${staves.length > 1 ? `<staff>${lane.staff}</staff>` : ''}</direction>`;
+              content += `<direction placement="below"><direction-type><dynamics><${first.dynamic}/></dynamics></direction-type>${first.dynamicScope === 'voice' ? `<voice>${xmlText(voice)}</voice>` : ''}${staves.length > 1 || part.staves ? `<staff>${lane.staff}</staff>` : ''}</direction>`;
             const pieces = decomposeDuration(segment.duration);
             let pieceStart = segment.start;
             pieces.forEach((duration, index) => {
@@ -1380,7 +1403,7 @@ export function fromMusicXml(xml: string): ScoreProject {
               staff: staffNumber,
               voice,
               ...(lyric ? { lyric } : {}),
-              ...(pendingDynamic ? { dynamic: pendingDynamic } : {}),
+              ...(pendingDynamic ? { dynamic: pendingDynamic, dynamicScope: dynamicKey.endsWith(':*') ? 'staff' as const : 'voice' as const } : {}),
               ...(articulations.includes('staccato')
                 ? { articulation: 'staccato' as const }
                 : articulations.includes('accent')
@@ -1492,14 +1515,14 @@ export function toMidi(project: ScoreProject, partIds?: string[]): Uint8Array {
     track.addCC({ number: 7, ticks: 0, value: part.volume });
     track.addCC({ number: 10, ticks: 0, value: ((part.pan ?? 0) + 1) / 2 });
     track.endOfTrackTicks = Math.round(project.measures * beatsPerBar(project) * midi.header.ppq);
-    part.notes
+    notesWithActiveDynamics(part)
       .filter((note) => note.midi !== null && note.velocity > 0)
       .forEach((note) =>
         track.addNote({
           midi: note.midi!,
           ticks: Math.round(note.start * midi.header.ppq),
           durationTicks: Math.max(1, Math.round(note.duration * midi.header.ppq)),
-          velocity: note.velocity,
+          velocity: note.dynamic ? notePlaybackLevel(note) : note.velocity,
         }),
       );
   });

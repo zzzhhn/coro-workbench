@@ -394,12 +394,14 @@ export default function App() {
   const stash = () => {
     try {
       archiveWorkspace({ ...workspaceRef.current, savedAt: new Date().toISOString() });
+      return true;
     } catch {
-      notify('本地工程库空间不足，请导出当前工程备份。', true);
+      notify('未能保存当前工程，已取消切换。请先导出备份并检查浏览器存储空间或权限。', true);
+      return false;
     }
   };
   const importProject = (next: ScoreProject) => {
-    stash();
+    if (!stash()) return false;
     setSource(next);
     setArrangement(undefined);
     setActive('source');
@@ -408,9 +410,10 @@ export default function App() {
     resetEditor(next);
     setDialog(undefined);
     notify(`已导入「${next.title}」`);
+    return true;
   };
   const openWorkspace = (next: WorkspaceState) => {
-    stash();
+    if (!stash()) return false;
     setSource(next.source);
     setArrangement(next.arrangement);
     setActive(next.active);
@@ -418,6 +421,7 @@ export default function App() {
     setHistoryVersion((value) => value + 1);
     resetEditor(next.active === 'arrangement' && next.arrangement ? next.arrangement : next.source);
     setDialog(undefined);
+    return true;
   };
   const switchDocument = (next: ActiveDocument) => {
     if (next === 'arrangement' && !arrangement) {
@@ -1502,7 +1506,7 @@ export default function App() {
             setSaved('saved');
           }}
           onClose={() => setDialog(undefined)} onOpen={(next) => {
-            importProject(next);
+            if (!importProject(next)) return;
             setTab('workbench');
             setVisiblePart('vocals');
             notify('已打开主唱重建副本。旧总谱和编配保留在工程库，其他声部与和弦保持不变。');

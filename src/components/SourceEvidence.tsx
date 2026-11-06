@@ -17,7 +17,7 @@ export default function SourceEvidence({
   onVocalRebuild,
 }: {
   project: ScoreProject;
-  onImportCopy: (project: ScoreProject) => void;
+  onImportCopy: (project: ScoreProject) => boolean | void;
   onMessage: (message: string, error?: boolean) => void;
   onSeek?: (seconds: number) => void;
   onAudio?: (url: string, name: string) => void;
@@ -81,8 +81,8 @@ export default function SourceEvidence({
         const raw = parseProject(text);
         raw.id = crypto.randomUUID();
         raw.title += ' · 原始模型副本';
-        onImportCopy(raw);
-        onMessage('已打开原始模型副本；之前工程保存在工程库。');
+        if (onImportCopy(raw) !== false)
+          onMessage('已打开原始模型副本；之前工程保存在工程库。');
       } else
         downloadFile(
           text,

@@ -33,12 +33,14 @@ def rhythm_stats(notes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--align', action='store_true', help='Create new acoustic-boundary-aligned versions of the saved learned-note results')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--align', action='store_true', help='Create new acoustic-boundary-aligned versions of the saved learned-note results')
+    mode.add_argument('--requantize', action='store_true', help='Re-notate saved aligned events with current continuity rules, without rerunning models')
     args = parser.parse_args()
-    target = ROOT / ('evidence/phase7/four-aligned-vocal-songs.json' if args.align else 'evidence/phase6/four-vocal-rhythm-songs.json')
+    target = ROOT / ('evidence/phase10/four-continuous-vocal-songs.json' if args.requantize else 'evidence/phase7/four-aligned-vocal-songs.json' if args.align else 'evidence/phase6/four-vocal-rhythm-songs.json')
     if target.exists():
         raise RuntimeError('Existing delivery retained; no duplicate projects created')
-    prior = json.loads((ROOT / ('evidence/phase6/four-vocal-rhythm-songs.json' if args.align else 'evidence/phase5/four-audio-harmony-songs.json')).read_text())
+    prior = json.loads((ROOT / ('evidence/phase7/four-aligned-vocal-songs.json' if args.requantize else 'evidence/phase6/four-vocal-rhythm-songs.json' if args.align else 'evidence/phase5/four-audio-harmony-songs.json')).read_text())
     keys = ['bye', 'attention', 'out_of_time', 'kong_er']
     result = {'inputs': prior['inputs'], 'scope': 'Real learned vocal notes + joint rhythmic score. Other parts, harmony, audio and all old projects unchanged. Counts are readability evidence, not accuracy.', 'results': []}
     for entry, name in zip(prior['results'], keys):
@@ -53,6 +55,9 @@ def main():
         hashes = {str(path.relative_to(ROOT)): sha(path) for path in protected}
         alignment = None
         candidate_events = report['events']
+        if args.requantize:
+            candidate_events = evidence['alignedVocalEvents']
+            alignment = evidence['vocalBoundaryAlignment']
         if args.align:
             import numpy as np
             import soundfile as sf
@@ -70,7 +75,7 @@ def main():
         assert len(notes) == len(events) and all('confidence' not in note for note in notes)
         project = copy.deepcopy(source)
         project['id'] = uuid.uuid4().hex
-        project['title'] = source['title'].split(' · ')[0] + (' · 词音对齐' if args.align else ' · 词音节奏')
+        project['title'] = source['title'].split(' · ')[0] + (' · 词音连贯' if args.requantize else ' · 词音对齐' if args.align else ' · 词音节奏')
         project['createdAt'] = project['updatedAt'] = utc_now()
         lead = next(part for part in project['parts'] if part['id'] == 'vocals')
         old_notes = copy.deepcopy(lead['notes'])
@@ -82,13 +87,16 @@ def main():
         analysis['transforms'].append('本版主唱重新使用ROSVOT/RWBD词音边界模型，并联合整理相邻起止。未统一删短音，全部模型有音高事件一对一进入谱面；原FCPE主唱谱与完整模型输出保留。其它声部、和弦、速度与原始音频不变。')
         if alignment:
             analysis['transforms'].append('使用实际FCPE音高进入/退出与音频再起音逐处校正词音边界，不统一延后整曲；保持模型事件与音高序列不变，保留充分换气间隙。')
+        if args.requantize:
+            analysis['transforms'].append('本版仅重新记谱：原声相接的音优先共享同一量化边界，避免制造微小休止；未重新运行识别模型，保留全部主唱起音、音高及真实换气。')
         analysis['quality'].update({'decoderRequested': 'rosvot', 'decoderProfile': 'rosvot', 'decoderVersion': 'rosvot-rwbd-joint-score-1',
                                     'vocalRhythmVersion': VERSION, 'vocalRhythmMaxOnsetShiftSeconds': rhythm['maximumOnsetShiftSeconds'],
                                     'derivedFromJob': entry['jobId'], 'groundTruthAvailable': False,
                                     'modelEvidenceUrl': f"/api/projects/{project['id']}/evidence"})
         analysis['quality'].update(note_quality(project['parts']))
         if alignment:
-            analysis['quality'].update({'decoderVersion': 'rosvot-rwbd-acoustic-alignment-score-2', 'vocalAlignmentVersion': alignment['version'], 'vocalAlignedBoundaries': len(alignment['boundaryEdits'])})
+            analysis['quality'].update({'decoderVersion': 'rosvot-rwbd-acoustic-alignment-score-3', 'vocalAlignmentVersion': alignment['version'], 'vocalAlignedBoundaries': len(alignment['boundaryEdits'])})
+        analysis['quality'].update({'vocalSharedTouchingBoundaries': rhythm['sharedTouchingBoundaries'], 'vocalTouchingBoundaryFallback': rhythm['touchingBoundaryFallback']})
         analysis['rawProjectUrl'] = f"/api/projects/{project['id']}/raw"
         project['source']['warnings'] = [text for text in project['source']['warnings'] if not text.startswith(('声学起止为独立备选', '音符吸附到十六分音符'))]
         project['source']['warnings'].append('主唱为词音边界模型与节奏整理结果。FCPE/CREPE曲线及独立检查仍是原声的另外两条模型证据，不是在验证ROSVOT音符正确。歌词未识别；节奏整理不保证所有自由节奏和装饰音完全还原。')

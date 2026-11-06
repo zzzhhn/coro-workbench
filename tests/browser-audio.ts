@@ -121,6 +121,28 @@ runButton.addEventListener('click', async () => {
     for (const sample of silentRender.buffer.getChannelData(0))
       silentPeak = Math.max(silentPeak, Math.abs(sample));
     check('zero_velocity_is_silent', silentPeak === 0, { silentPeak });
+    const dynamicSource = createBlankProject();
+    dynamicSource.tempo = 120;
+    dynamicSource.measures = 2;
+    dynamicSource.parts[0].notes = Array.from({ length: 4 }, (_, index) => ({
+      id: `dynamic-${index}`, midi: 60, start: index * 2, duration: 1, velocity: .75,
+      ...(index === 0 ? { dynamic: 'p' as const } : index === 3 ? { dynamic: 'f' as const } : {}),
+    }));
+    const dynamicImported = fromMusicXml(toMusicXml(dynamicSource));
+    const dynamicAudio = await renderProjectAudio(dynamicImported);
+    const explicitDynamics = structuredClone(dynamicImported);
+    let dynamicIndex = 0;
+    for (const note of explicitDynamics.parts[0].notes)
+      if (note.midi !== null) note.dynamic = dynamicIndex++ === 3 ? 'f' : 'p';
+    const explicitAudio = await renderProjectAudio(explicitDynamics);
+    const dynamicLevels = (buffer: AudioBuffer) => Array.from({ length: 4 }, (_, index) => {
+      const samples = buffer.getChannelData(0).slice(Math.floor((index + .06) * 44100), Math.floor((index + .26) * 44100));
+      return Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+    });
+    const levels = dynamicLevels(dynamicAudio.buffer), referenceLevels = dynamicLevels(explicitAudio.buffer);
+    check('imported_dynamic_persists_in_actual_render', levels[0] > .0001 && levels.every((level, index) => Math.abs(level / referenceLevels[index] - 1) < .02) && levels[3] > levels[1] * 1.3, {
+      levels, referenceLevels, printedMarks: dynamicImported.parts[0].notes.filter((n) => n.dynamic).length,
+    });
     const heldSource = createBlankProject();
     heldSource.tempo = 65;
     heldSource.measures = 12;

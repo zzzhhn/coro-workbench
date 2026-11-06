@@ -416,7 +416,7 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
     decoder_used = detailed["parts"].get("vocals", {}).get("decoderUsed", "not_applicable" if decoder_requested == "rosvot" else decoder_requested)
     quality["decoderRequested"] = decoder_requested
     quality["decoderProfile"] = "acoustic" if decoder_used == "acoustic_fallback" else decoder_used
-    quality["decoderVersion"] = "rosvot-rwbd-acoustic-alignment-score-2" if decoder_used == "rosvot" else DECODER_VERSIONS.get(quality["decoderProfile"], "not_applicable")
+    quality["decoderVersion"] = "rosvot-rwbd-acoustic-alignment-score-3" if decoder_used == "rosvot" else DECODER_VERSIONS.get(quality["decoderProfile"], "not_applicable")
     if decoder_used == "rosvot":
         quality["vocalRhythmVersion"] = detailed["parts"]["vocals"]["scoreRhythm"]["version"]
         quality["vocalRhythmMaxOnsetShiftSeconds"] = detailed["parts"]["vocals"]["scoreRhythm"].get("maximumOnsetShiftSeconds", 0)

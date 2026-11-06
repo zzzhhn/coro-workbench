@@ -99,7 +99,7 @@ describe('Phase 2 non-destructive notation projection', () => {
     ];
     const { result, decoded } = decodeScore(project);
     expect(result.staffMap!.length).toBeGreaterThan(1);
-    expect(result.staffMap!.every((staff) => staff.voiceIds.length <= 2)).toBe(true);
+    expect(result.staffMap!.every((staff) => staff.voiceIds.filter((id) => id !== result.harmonyVoiceId).length <= 2)).toBe(true);
     expect(decoded.get(project.parts[0].id)).toEqual(fingerprint(project.parts[0].notes));
   });
 
@@ -183,7 +183,7 @@ describe.skipIf(!existsSync(frozen))('Frozen user score regression (private loca
       'treble',
       'bass',
     ]);
-    expect(result.staffMap!.every((staff) => staff.voiceIds.length <= 2)).toBe(true);
+    expect(result.staffMap!.every((staff) => staff.voiceIds.filter((id) => id !== result.harmonyVoiceId).length <= 2)).toBe(true);
     expect(result.systemMeasures).toHaveLength(25);
     expect(audio.totalDuration * 4).toBe(196);
     expect(tune.warnings ?? []).toEqual([]);

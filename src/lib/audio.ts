@@ -1,5 +1,6 @@
 import type { NoteEvent, ScorePart, ScoreProject } from './types';
 import { validateProject } from './music';
+import { notePlaybackLevel, notesWithActiveDynamics } from './dynamics';
 
 type Context = AudioContext | OfflineAudioContext;
 type Bank = Record<string, string>;
@@ -205,8 +206,7 @@ function scheduleNote(
   offsetSeconds = 0,
 ): AudioScheduledSourceNode[] {
   if (note.midi === null || duration <= 0) return [];
-  const dynamics = { pp: 0.4, p: 0.52, mp: 0.67, mf: 0.8, f: 0.93, ff: 1 };
-  const volume = note.velocity * (note.dynamic ? dynamics[note.dynamic] : 0.85);
+  const volume = notePlaybackLevel(note);
   if (volume <= 0) return [];
   if (part.role === 'percussion') return percussion(context, destination, note.midi, time, volume);
   const bank = bankFor(part);
@@ -404,7 +404,7 @@ export class PlaybackEngine {
       this.updateMixer(project.parts);
     }
     this.events = project.parts
-      .flatMap((part) => part.notes.filter((note) => note.midi !== null).map((note) => ({ part, note })))
+      .flatMap((part) => notesWithActiveDynamics(part).filter((note) => note.midi !== null).map((note) => ({ part, note })))
       .sort((a, b) => a.note.start - b.note.start);
     this.anchorBeat = this.beat;
     const preRoll = options.countIn && options.mode === 'score' ? quarterBeats(project) : 0;
@@ -640,7 +640,7 @@ export async function renderProjectAudio(
     panner.pan.value = part.pan ?? 0;
     gain.connect(panner);
     panner.connect(master);
-    for (const note of part.notes)
+    for (const note of notesWithActiveDynamics(part))
       scheduleNote(
         context,
         gain,

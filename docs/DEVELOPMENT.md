@@ -7,8 +7,10 @@
   quarter-note beats, not seconds or measure-relative time. Null pitch is a rest.
 - `src/lib/music.ts`, `src/lib/engraving.ts`: MusicXML/ABC/MIDI conversion and
   note-to-glyph mappings. The canonical project, not ABC, is the source of truth.
-- `src/lib/arrange.ts`, `src/lib/vocalBreathing.ts`: vocal ranges, voice leading,
+- `src/lib/arrange.ts`, `src/lib/harmonyRhythm.ts`, `src/lib/vocalBreathing.ts`: vocal ranges, voice leading,
   melody adaptation, syllables and physical-time breath planning.
+- `src/lib/dynamics.ts`: persistent staff/voice dynamics for playback and audio/MIDI
+  export, without writing repeated markings into the canonical score.
 - `src/lib/audio.ts`: local sampled playback, score/source transport, loops,
   metronome and offline WAV rendering.
 - `src/lib/projectBundle.ts`: portable projects with separate original and
@@ -50,6 +52,13 @@ vocal score. The learned `rosvot` path now precedes joint rhythmic notation;
 engineering choice for rehearsal legibility, not a claim of universally higher
 transcription accuracy. The source and old results remain separate.
 
+Joint rhythm version3 prioritizes shared boundaries for touching events before
+rhythmic cost, with an audited minimum-break fallback when candidates cannot all
+connect. `toAbc` puts timed chord labels on an invisible annotation voice rather
+than splitting melody notes. That silent voice is included in `staffMap.voiceIds`
+and identified by `harmonyVoiceId`; consumers must map ABC audio tracks through
+`staffMap`, not assume one track per part. It has no canonical notes or new staff.
+
 Do not solve this by deleting all short notes, merging all repeated pitches,
 stretching rests away, or changing tempo solely to make glyphs larger. Genuine
 fast singing, repeated syllables and breath gaps must remain representable.
@@ -69,11 +78,21 @@ passing XML round trip proves faithful serialization, not that the model heard
 the song correctly. Keep source recognition, score normalization and vocal
 arrangement quality distinct in reports.
 
+The browser audio page includes an explicit-marking control for dynamic playback.
+`tests/browser-storage.html` runs the real app with isolated in-memory storage to
+test failed archival and recovery without modifying the user's browser projects.
+
 ## Project persistence
 
 The current workspace and recent list live in browser local storage. Media lives
 in IndexedDB or the backend `data/` tree. Do not change a saved project in place
 when re-running models: create a separate result and preserve user edits.
+
+If archival fails, imports and workspace switches must abort before replacing
+source/arrangement or clearing undo history. Do not replace that error with a
+success toast. Note dynamics persist until changed within their staff or explicit
+voice scope; a tied continuation does not set an accidental for a later attack
+in the next measure.
 
 `src/lib/localCodec.ts` compresses the workspace and recent-library JSON to avoid
 exhausting browser quotas with repeated note fields. Existing uncompressed

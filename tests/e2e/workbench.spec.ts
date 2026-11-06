@@ -59,7 +59,7 @@ test('mobile app fits viewport with independent score scrolling', async ({ page 
 test('real audio transport checks in an isolated original fixture', async ({ page }) => {
   await page.goto('/tests/browser-audio.html');
   await page.getByRole('button', { name: 'Run browser audio checks', exact: true }).click();
-  await expect(page.locator('#status')).toContainText('PASS 15/15', { timeout: 30000 });
+  await expect(page.locator('#status')).toContainText('PASS 16/16', { timeout: 30000 });
   const results = JSON.parse(await page.locator('#results').innerText()) as Array<{ pass: boolean }>;
   expect(results.every((result) => result.pass)).toBe(true);
 });
@@ -122,4 +122,19 @@ test('clicking Pause after editing a loop field commits the range without restar
   await expect(page.getByLabel('循环开始小节', { exact: true })).toHaveValue('6');
   await expect(page.getByRole('button', { name: '播放', exact: true })).toBeVisible();
   await expect(page.locator('.meter-bars .lit')).toHaveCount(0);
+});
+
+test('switching a mobile rehearsal part keeps the current measure in view', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByRole('button', { name: '排练室', exact: true }).click();
+  await page.getByRole('button', { name: '跳转第 6 小节', exact: true }).click();
+  await page.getByRole('button', { name: '显示声部面板', exact: true }).click();
+  await page.getByRole('button', { name: '练习 长笛 · 主旋律', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const area = document.querySelector('.score-scroll')!.getBoundingClientRect();
+    const line = [...document.querySelectorAll('.notation svg')].find((node) => node.getAttribute('aria-label')?.includes('第 5 小节起'));
+    const box = line?.getBoundingClientRect();
+    return Boolean(box && box.top < area.bottom && box.bottom > area.top);
+  })).toBe(true);
 });

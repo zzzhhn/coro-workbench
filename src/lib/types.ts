@@ -13,6 +13,7 @@ export interface NoteEvent {
   origin?: NoteOrigin;
   articulation?: 'staccato' | 'accent' | 'tenuto';
   dynamic?: 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff';
+  dynamicScope?: 'staff' | 'voice';
   staff?: number;
   voice?: string;
 }
@@ -126,6 +127,8 @@ export interface ScoreProject {
 export interface AbcRenderResult {
   abc: string;
   noteMap: Record<number, { partId: string; noteId: string }>;
+  /** Silent, timed chord-annotation lane, included in staffMap for ABC track mapping. */
+  harmonyVoiceId?: string;
   staffMap?: Array<{ partId: string; staffNumber: number; clef: Clef; voiceIds: string[] }>;
   systemMeasures?: number[];
   warnings?: string[];

@@ -4,6 +4,7 @@ import { arrangeForVoices, inferChords, inspectArrangement, recommendLeadPart } 
 import { createBlankProject, createDemoProject } from '../src/lib/demo';
 import { fromMusicXml, toAbc, toMusicXml, validateProject } from '../src/lib/music';
 import type { ArrangementOptions, NoteEvent, ScoreProject } from '../src/lib/types';
+import { createEngravingPlan } from '../src/lib/engraving';
 
 const BASE: ArrangementOptions = {
   preset: 'satb',
@@ -86,6 +87,21 @@ describe('non-destructive a cappella arranger', () => {
     );
     expect(melody[0].lyric).toBe('夜');
     expect(melody.every((note, index) => note.duration <= original[index].duration)).toBe(true);
+  });
+  it('projects a grand-staff source onto one vocal staff instead of carrying RH/LH metadata', () => {
+    const source = createBlankProject();
+    source.measures = 2;
+    source.parts[0].staves = [{ number: 1, clef: 'treble' }, { number: 2, clef: 'bass' }];
+    source.parts[0].notes = [
+      { ...note('rh', 67, 0, 2), staff: 1, voice: '1' },
+      { ...note('lh', 55, 2, 2), staff: 2, voice: '2' },
+    ];
+    source.chords = [{ start: 0, duration: 8, symbol: 'C', pitches: [48, 52, 55] }];
+    const before = structuredClone(source);
+    const result = arrangeForVoices(source, BASE);
+    expect(result.parts[0].notes.every((n) => n.staff === undefined && n.voice === undefined)).toBe(true);
+    expect(createEngravingPlan(result).staves.filter((staff) => staff.part.id === 'voice-1')).toHaveLength(1);
+    expect(source).toEqual(before);
   });
 
   it('style, difficulty, transpose and percussion choices change actual output', () => {
@@ -210,12 +226,14 @@ describe('non-destructive a cappella arranger', () => {
   it('keeps SATB abc and XML playback durations identical after style changes', () => {
     for (const style of ['pop', 'choral', 'jazz'] as const) {
       const result = arrangeForVoices(createDemoProject(), { ...BASE, style });
-      const tune = abcjs.parseOnly(toAbc(result).abc)[0];
+      const engraving = toAbc(result);
+      const tune = abcjs.parseOnly(engraving.abc)[0];
       const decoded = tune.setUpAudio({ chordsOff: true });
+      const trackParts = engraving.staffMap!.flatMap((staff) => staff.voiceIds.map(() => staff.partId));
       expect(tune.warnings ?? []).toEqual([]);
       expect(decoded.totalDuration * 4).toBeCloseTo(64, 5);
-      result.parts.forEach((part, index) => {
-        const actual = decoded.tracks[index]
+      result.parts.forEach((part) => {
+        const actual = decoded.tracks.flatMap((track, index) => trackParts[index] === part.id ? track : [])
           .filter((event) => event.cmd === 'note')
           .map((event) => [
             event.pitch,

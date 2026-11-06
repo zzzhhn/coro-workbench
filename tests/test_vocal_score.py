@@ -1,9 +1,11 @@
 import copy
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from server.vocal_score import clean_vocal_fragments, quantize_vocal_rhythm
+from server.vocal_score import _select_joint_rhythm_path, clean_vocal_fragments, quantize_vocal_rhythm
 
 
 def evidence(events, attacks=(), wavering=()):
@@ -66,6 +68,75 @@ def test_real_fast_notes_survive_in_order_without_by_start_deduplication():
     assert len(notes) == 8 and [n["midi"] for n in notes] == [int(n[2]) for n in events]
     assert all(abs(n["duration"] - .125) < 1e-7 for n in notes)
     assert info["maximumOnsetShiftSeconds"] < .025
+
+
+def test_touching_short_events_share_quantized_boundaries_without_losing_attacks():
+    # Independent synthetic durations: an isolated short event previously made
+    # the cost-only path insert a 1/64 rest despite a continuous input sequence.
+    events = [[.199, .294, 60, .8], [.294, .568, 61, .8],
+              [.568, .620, 62, .8], [.620, .711, 63, .8]]
+    before = copy.deepcopy(events)
+    notes, info = quantize_vocal_rhythm(events, {"bpm": 90, "offsetSeconds": 0}, 2)
+    assert [note["midi"] for note in notes] == [60, 61, 62, 63]
+    assert all(note["duration"] > 0 for note in notes)
+    assert all(abs(left["start"] + left["duration"] - right["start"]) < 1e-7
+               for left, right in zip(notes, notes[1:]))
+    assert info["touchingBoundaries"] == info["sharedTouchingBoundaries"] == 3
+    assert not info["touchingBoundaryFallback"] and info["unsharedTouchingBoundaries"] == []
+    assert events == before
+
+
+def test_limited_choice_fallback_breaks_only_unavoidable_touching_junctions():
+    rows = [[0, .3, 60, .8], [.3, .6, 61, .8], [.6, .9, 62, .8]]
+    # The first junction cannot meet with these bounded candidates. The second
+    # still shares a boundary even though a second break has a lower music cost.
+    options = [[(0., .5, 0.)], [(.625, 1., 0.), (.625, 1.125, 0.)],
+               [(1., 1.5, 9.), (1.25, 1.5, 0.)]]
+    selected = _select_joint_rhythm_path(rows, options, .5)
+    assert selected == [(0., .5, 0.), (.625, 1., 0.), (1., 1.5, 9.)]
+    assert len(selected) == len(rows)
+
+
+def test_infeasible_collision_path_is_explicit_instead_of_dropping_an_event():
+    rows = [[0, .3, 60, .8], [.3, .6, 61, .8]]
+    with pytest.raises(ValueError, match="No collision-free"):
+        _select_joint_rhythm_path(rows, [[(0., 1., 0.)], [(.5, .75, 0.)]], .5)
+
+
+def test_touching_boundary_policy_keeps_real_breaths_and_repeated_fast_attacks():
+    events = [[.2, .3, 60, .8], [.3, .4, 60, .8], [.4, .5, 61, .8],
+              [.8, .9, 60, .8], [.9, 1., 60, .8]]
+    notes, info = quantize_vocal_rhythm(events, {"bpm": 120, "offsetSeconds": 0}, 2)
+    assert [note["midi"] for note in notes] == [60, 60, 61, 60, 60]
+    for index in [0, 1, 3]:
+        assert notes[index]["start"] + notes[index]["duration"] == notes[index + 1]["start"]
+    assert (notes[3]["start"] - notes[2]["start"] - notes[2]["duration"]) * .5 >= .18
+    assert not info["touchingBoundaryFallback"]
+
+
+def test_local_saved_aligned_songs_do_not_gain_rests_at_touching_boundaries():
+    # Private recordings/results are deliberately not distributed. When local
+    # evidence exists, cover the actual cited passages without embedding song
+    # arrays in the public test suite or invoking any inference model.
+    root = Path(__file__).resolve().parents[1]
+    manifest = root / "evidence/phase7/four-aligned-vocal-songs.json"
+    if not manifest.is_file():
+        pytest.skip("optional private four-song aligned evidence is not installed")
+    for case in json.loads(manifest.read_text())["results"]:
+        project = json.loads((root / "data" / case["jobId"] / "project.json").read_text())
+        evidence = json.loads((root / "data" / case["jobId"] / "quality-evidence.json").read_text())
+        rows = [[event["source_start_seconds"], event["source_end_seconds"], event["midi_pitch"], .75]
+                for event in evidence["alignedVocalEvents"] if event["midi_pitch"] is not None]
+        duration = max(event["source_end_seconds"] for event in evidence["alignedVocalEvents"])
+        notes, info = quantize_vocal_rhythm(rows, evidence["grid"], duration, preserve_confidence=False)
+        assert [note["midi"] for note in notes] == [row[2] for row in rows]
+        assert not info["touchingBoundaryFallback"], case["filename"]
+        assert info["sharedTouchingBoundaries"] == info["touchingBoundaries"]
+        assert all(note["duration"] > 0 for note in notes)
+        assert len(notes) == len(next(part for part in project["parts"] if part["id"] == "vocals")["notes"])
+        for index in range(1, len(rows)):
+            if rows[index][0] - rows[index - 1][1] <= 1e-7:
+                assert abs(notes[index]["start"] - notes[index - 1]["start"] - notes[index - 1]["duration"]) < 1e-6
 
 
 def test_preserves_breath_and_handles_negative_audio_phase_without_changing_pitch():

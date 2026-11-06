@@ -307,7 +307,7 @@ export default function Inspector({
                         onChangeNote({ dynamic: (event.target.value as NoteEvent['dynamic']) || undefined })
                       }
                     >
-                      <option value="">默认</option>
+                      <option value="">继承前一力度</option>
                       {['pp', 'p', 'mp', 'mf', 'f', 'ff'].map((value) => (
                         <option key={value}>{value}</option>
                       ))}

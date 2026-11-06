@@ -182,11 +182,12 @@ describe('ABC engraving and selection map', () => {
 
   it('independently decodes ABC to the source note pitches and beat times, including percussion', () => {
     const source = createDemoProject();
-    const { abc } = toAbc(source);
+    const { abc, staffMap } = toAbc(source);
     const decoded = abcjs.parseOnly(abc)[0].setUpAudio({ chordsOff: true });
+    const trackParts = staffMap!.flatMap((staff) => staff.voiceIds.map(() => staff.partId));
     expect(decoded.totalDuration * 4).toBeCloseTo(64, 6);
-    source.parts.forEach((part, index) => {
-      const actual = decoded.tracks[index]
+    source.parts.forEach((part) => {
+      const actual = decoded.tracks.flatMap((track, index) => trackParts[index] === part.id ? track : [])
         .filter((event) => event.cmd === 'note')
         .map((event) => [
           event.pitch,
@@ -259,7 +260,7 @@ describe('ABC engraving and selection map', () => {
     ).toEqual(source.parts[0].notes.map((note) => note.midi));
   });
 
-  it('shows harmony changes inside held notes at their exact beat, keeping the tie', () => {
+  it('shows harmony changes inside held notes without splitting the held note', () => {
     const source = createBlankProject();
     source.measures = 1;
     source.parts[0].notes = [note('held', 60, 0, 4)];
@@ -268,7 +269,8 @@ describe('ABC engraving and selection map', () => {
       { start: 2, duration: 2, symbol: 'F', pitches: [53, 57, 60] },
     ];
     const { abc } = toAbc(source);
-    expect(abc).toContain('"C"C4- "F"C4');
+    expect(abc).toContain('C8');
+    expect(abc).toContain('"C"x4 "F"x4');
     const tune = abcjs.parseOnly(abc)[0];
     expect(tune.warnings ?? []).toEqual([]);
     const decoded = tune
@@ -321,7 +323,8 @@ describe('ABC engraving and selection map', () => {
   it('keeps percussion staves keyless across all systems without altering melodic keys or drum pitches', () => {
     const source = createDemoProject();
     source.key = 'D';
-    const tune = abcjs.parseOnly(toAbc(source).abc)[0];
+    const result = toAbc(source);
+    const tune = abcjs.parseOnly(result.abc)[0];
     const systems = tune.lines.filter((line) => line.staff);
     expect(systems).toHaveLength(4);
     systems.forEach((system) => {
@@ -331,8 +334,9 @@ describe('ABC engraving and selection map', () => {
       });
     });
     const audio = tune.setUpAudio({ chordsOff: true });
-    source.parts.forEach((part, index) => {
-      const pitches = audio.tracks[index]
+    const trackParts = result.staffMap!.flatMap((staff) => staff.voiceIds.map(() => staff.partId));
+    source.parts.forEach((part) => {
+      const pitches = audio.tracks.flatMap((track, index) => trackParts[index] === part.id ? track : [])
         .filter((event) => event.cmd === 'note')
         .map((event) => event.pitch)
         .sort((a, b) => a - b);

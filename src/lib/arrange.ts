@@ -16,6 +16,7 @@ import {
   validateProject,
 } from './music';
 import { MIN_BREATH_SECONDS, planVocalBreaths, vocalPhrases } from './vocalBreathing';
+import { harmonyNoteDuration, minimumHarmonySeconds, planHarmonySlots } from './harmonyRhythm';
 
 const EPSILON = 0.00001;
 const VOICE_COLORS = ['#b35c42', '#6e826e', '#5e8195', '#9a804e'];
@@ -519,13 +520,15 @@ export function arrangeForVoices(source: ScoreProject, options: ArrangementOptio
     const intended = note.midi! + octave;
     const midi = clampRegister(intended, leadRange);
     if (midi !== intended) folded++;
+    const { staff: _staff, voice: _voice, dynamicScope: _scope, ...musicalNote } = note;
     return {
-      ...note,
+      ...musicalNote,
       id: newId('lead'),
       midi,
       velocity: Math.max(0.35, Math.min(0.95, note.velocity)),
       origin: 'arranged',
       lyric: note.lyric || 'da',
+      ...(note.dynamicScope ? { dynamicScope: 'staff' as const } : {}),
     };
   });
   changes.push(`主旋律取自「${originalLead.name}」，以原节奏为基础；换气和音域调整单独列出。`);
@@ -561,20 +564,10 @@ export function arrangeForVoices(source: ScoreProject, options: ArrangementOptio
     (inferred && source.parts.filter((part) => part.role !== 'percussion').length === 1)
   )
     warnings.add('和声证据较少：单旋律不能唯一确定配和弦，当前是一个可编辑的编配方案。');
-  const grid =
-    options.style === 'choral' || options.difficulty === 'easy'
-      ? barLength
-      : options.style === 'jazz'
-        ? 1
-        : 2;
-  const boundaries = new Set<number>([0, totalBeats]);
-  for (let beat = 0; beat < totalBeats; beat += grid) boundaries.add(beat);
-  for (let bar = 0; bar <= project.measures; bar++) boundaries.add(bar * barLength);
-  project.chords.forEach((chord) => {
-    boundaries.add(Math.max(0, Math.min(totalBeats, chord.start)));
-    boundaries.add(Math.max(0, Math.min(totalBeats, chord.start + chord.duration)));
-  });
-  const slots = [...boundaries].sort((a, b) => a - b);
+  const rhythmPlan = planHarmonySlots(project.chords, totalBeats, barLength, project.tempo, options);
+  const slots = rhythmPlan.boundaries;
+  if (rhythmPlan.skippedPulseCuts)
+    changes.push(`省去 ${rhythmPlan.skippedPulseCuts} 个紧贴和弦变化的机械节奏切点，避免制造过短伴唱；和弦的原始起止不变。`);
   let previous: number[] | undefined;
   let unvoiced = 0;
   const harmonyRanges = parts.slice(1).map((part) => part.range!);
@@ -594,13 +587,9 @@ export function arrangeForVoices(source: ScoreProject, options: ArrangementOptio
       continue;
     }
     const isBarStart = Math.abs(start / barLength - Math.round(start / barLength)) < EPSILON;
-    const isPhraseEnd = Math.abs(end / (barLength * 4) - Math.round(end / (barLength * 4))) < EPSILON;
     pitches.forEach((midi, index) => {
       const bass = index === 2;
-      const sustained = options.style === 'choral' || options.difficulty === 'easy';
-      const gap = sustained ? 0 : options.style === 'jazz' ? 0.25 : 0.5;
-      const duration = Math.max(0.125, end - start - (isPhraseEnd ? 0.5 : gap));
-      if (duration > end - start) return;
+      const duration = harmonyNoteDuration(end - start, project.tempo, options);
       parts[index + 1].notes.push({
         id: newId('harmony'),
         midi,
@@ -617,7 +606,7 @@ export function arrangeForVoices(source: ScoreProject, options: ArrangementOptio
               ? 'doo'
               : 'oo',
         origin: 'arranged',
-        ...(start === 0 ? { dynamic: bass ? ('mf' as const) : ('mp' as const) } : {}),
+        ...(parts[index + 1].notes.length === 0 ? { dynamic: bass ? ('mf' as const) : ('mp' as const) } : {}),
         ...(options.style === 'jazz' && !bass ? { articulation: 'tenuto' as const } : {}),
       });
     });
@@ -625,14 +614,17 @@ export function arrangeForVoices(source: ScoreProject, options: ArrangementOptio
   }
   if (unvoiced)
     warnings.add(`${unvoiced} 个和声片段无法同时满足音域与声部不交叉，已留白而不是强行生成不可唱的音。`);
-  if (options.style === 'choral')
-    parts.slice(1).forEach((part) => {
-      part.notes = mergeSustains(part.notes);
-    });
+  let mergedSustains = 0;
+  parts.slice(1).forEach((part) => {
+    const count = part.notes.length;
+    part.notes = mergeSustains(part.notes);
+    mergedSustains += count - part.notes.length;
+  });
+  if (mergedSustains) changes.push(`连接 ${mergedSustains} 个无间隙的同音伴唱片段，保留连续元音，不机械重复起音。`);
   const targetPhraseSeconds = options.difficulty === 'easy' ? 8 : options.difficulty === 'advanced' ? 12 : 10;
   const breathing = parts.map((part) => {
     const planned = planVocalBreaths(part.notes, project.tempo, barLength, targetPhraseSeconds, () =>
-      newId('breath'),
+      newId('breath'), part.role === 'lead' ? 0 : minimumHarmonySeconds(options),
     );
     part.notes = planned.notes;
     if (planned.cuts.length)
