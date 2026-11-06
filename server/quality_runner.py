@@ -102,6 +102,7 @@ def main() -> None:
     parser.add_argument("--models", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--skip-voice-verification", action="store_true", help="Extract a new input's FCPE contour without claiming an independent CREPE check")
     args = parser.parse_args()
     inputs = json.loads(Path(args.input).read_text())
     models = Path(args.models).resolve()
@@ -131,7 +132,7 @@ def main() -> None:
             if not inputs.get(role):
                 continue
             evidence["engines"][role] = extract_f0(Path(inputs[role]), output / f"{role}-fcpe.npz", pitch)
-        if inputs.get("vocals"):
+        if inputs.get("vocals") and not args.skip_voice_verification:
             evidence["engines"]["voiceVerification"] = verify_dominant_voice(Path(inputs["vocals"]), output / "vocals-fcpe.npz", output / "voice-check.json")
     if inputs.get("piano"):
         checkpoint = models / "piano-regression.pth"

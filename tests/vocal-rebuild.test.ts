@@ -22,6 +22,11 @@ describe('existing-project vocal rebuild', () => {
     expect(readPendingVocalRebuild(storage)).toEqual(value);
     expect(requested).toBe(PENDING_VOCAL_REBUILD_KEY);
   });
+  it('retains an enhanced-input choice across reload without requiring it on old records', () => {
+    const value = { jobId: 'b'.repeat(32), sourceId: 'old', title: 'Song', beforeNotes: 450, hadArrangement: false, vocalSource: 'enhanced-vocals' };
+    expect(readPendingVocalRebuild({ getItem: () => JSON.stringify(value) })?.vocalSource).toBe('enhanced-vocals');
+    expect(readPendingVocalRebuild({ getItem: () => JSON.stringify({ ...value, vocalSource: 'remote' }) })).toBeUndefined();
+  });
   it.each(['invalid', 'null', '{"jobId":"../../file"}', JSON.stringify({ jobId: 'b'.repeat(32), sourceId: 'old', title: 'Song', beforeNotes: -1, hadArrangement: true })])('ignores damaged pending state: %s', (raw) => {
     expect(readPendingVocalRebuild({ getItem: () => raw })).toBeUndefined();
   });

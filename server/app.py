@@ -206,6 +206,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             engines["vocalNotes"] = vocal_note_health()
         except (ImportError, OSError, ValueError):
             engines["vocalNotes"] = {"ready": False, "backend": "ROSVOT", "note": "Learned vocal note runtime unavailable; acoustic decoder retained"}
+        try:
+            from .melband import runtime_health as enhanced_vocal_health
+            engines["enhancedVocals"] = enhanced_vocal_health()
+        except (ImportError, OSError, ValueError):
+            engines["enhancedVocals"] = {"ready": False, "engine": "Mel-Band-RoFormer"}
         ready = engines["basicPitch"]["ready"] and engines["ffmpeg"]["ready"]
         return {"status": "ok" if ready else "setup_required", "engines": engines, "localOnly": True, "activeJobs": manager.active_count(), "limits": {"maxUploadMB": 100, "maxDurationSeconds": config.MAX_DURATION_SECONDS, "maxAnalysisSeconds": config.MAX_ANALYSIS_SECONDS, "maxPendingJobs": config.MAX_PENDING_JOBS}, "privacy": "文件只保存在本机，分析不调用云端 API。"}
 
@@ -277,6 +282,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @app.post("/api/projects/{job_id}/vocal-rebuild", status_code=202)
     async def vocal_rebuild(job_id: str, request: Request):
         from .vocal_rebuild import MAX_REQUEST_BYTES, prepare_rebuild
+        from .vocal_input import resolve_input
         get_directory(job_id)
         size, chunks = 0, []
         async for chunk in request.stream():
@@ -288,19 +294,29 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             def reject_constant(value):
                 raise ValueError("工程包含非有限 JSON 数值。")
             body = json.loads(b"".join(chunks), parse_constant=reject_constant)
-            if not isinstance(body, dict) or set(body) != {"project"}:
-                raise ValueError("请求必须只包含 project 源乐谱快照。")
-            project, _, stem, _ = prepare_rebuild(directory, job_id, body["project"])
+            if not isinstance(body, dict) or 'project' not in body or not set(body) <= {"project", "vocalSource"}:
+                raise ValueError("请求必须包含 project 源乐谱快照，可选 vocalSource 人声输入。")
+            project, stored, stem, _ = prepare_rebuild(directory, job_id, body["project"])
+            vocal_source = body.get('vocalSource', 'current')
+            if not isinstance(vocal_source, str):
+                raise ValueError('人声输入选项必须是字符串。')
+            resolve_input(directory, stored, stem, vocal_source)
         except (ValueError, TypeError, KeyError, RecursionError, OSError) as error:
             raise HTTPException(422, str(error) if isinstance(error, ValueError) else "无法安全读取源工程。") from error
         from .rosvot import runtime_health as vocal_note_health
         if not vocal_note_health()["ready"]:
             raise HTTPException(503, "主唱词音引擎尚未安装或校验失败，请运行 bash scripts/setup-rosvot.sh 后再重建。原谱未改动。")
+        if vocal_source.startswith('enhanced'):
+            from .melband import runtime_health as enhanced_vocal_health
+            if not enhanced_vocal_health()['ready']:
+                raise HTTPException(503, '增强人声模型未安装，请运行 bash scripts/setup-melband.sh。原谱未改变。')
+            if vocal_source == 'enhanced-lead' and not (config.MODELS_DIR / 'lead-separation/kara2.onnx').is_file():
+                raise HTTPException(503, '主唱/伴唱模型未安装，请运行 bash scripts/setup-lead-separation.sh。')
         if not manager.reserve_upload():
             raise HTTPException(429, "本机分析队列已满（最多 4 个），请等待或取消已有任务。")
         new_id = uuid.uuid4().hex
         target = directory / new_id
-        result = {"id": new_id, "status": "queued", "progress": 0, "stage": "queued", "message": "等待从原音轨重建主唱，不重新分轨。", "createdAt": utc_now(), "updatedAt": utc_now()}
+        result = {"id": new_id, "status": "queued", "progress": 0, "stage": "queued", "message": "等待按所选人声输入重建，其他乐器不变。", "createdAt": utc_now(), "updatedAt": utc_now()}
         created = False
         try:
             target.mkdir(parents=True, mode=0o700)
@@ -309,7 +325,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             import soundfile as sf
             duration = float(sf.info(stem).duration)
             atomic_json(target / "previous-project.json", project)
-            atomic_json(target / "request.json", {"id": new_id, "action": "vocal-rebuild", "source_job_id": job_id, "project": project, "max_seconds": duration, "mode": "vocal-rebuild", "decoder": "rosvot"})
+            atomic_json(target / "request.json", {"id": new_id, "action": "vocal-rebuild", "source_job_id": job_id, "project": project, "max_seconds": duration, "mode": "vocal-rebuild", "decoder": "rosvot", "vocal_source": vocal_source})
             atomic_json(target / "status.json", result)
             manager.submit(new_id)
         except BaseException:
@@ -352,7 +368,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 if analyzed_audio.is_file() and not analyzed_audio.is_symlink():
                     with wave.open(str(analyzed_audio), "rb") as audio_file:
                         analyzed = audio_file.getnframes() / audio_file.getframerate()
-                results.append({"id": path.parent.name, "title": project.get("title", "未命名转写"), "filename": project.get("source", {}).get("filename", ""), "createdAt": state.get("createdAt", ""), "updatedAt": state.get("updatedAt", ""), "tempo": project.get("tempo"), "measures": project.get("measures"), "parts": len(project.get("parts", [])), "duration": full, "analyzedSeconds": analyzed, "mode": request.get("mode", "unknown"), "operation": request.get("action"), "decoder": quality.get("decoderProfile", request.get("decoder", "standard")), "hasRaw": (path.parent / "raw-project.json").is_file(), "uncertainRegions": len(analysis.get("uncertaintyIntervals") or []), "proposal": bool(analysis.get("transforms"))})
+                results.append({"id": path.parent.name, "title": project.get("title", "未命名转写"), "filename": project.get("source", {}).get("filename", ""), "createdAt": state.get("createdAt", ""), "updatedAt": state.get("updatedAt", ""), "tempo": project.get("tempo"), "measures": project.get("measures"), "parts": len(project.get("parts", [])), "duration": full, "analyzedSeconds": analyzed, "mode": request.get("mode", "unknown"), "operation": request.get("action"), "vocalSource": quality.get("vocalInputSource"), "decoder": quality.get("decoderProfile", request.get("decoder", "standard")), "hasRaw": (path.parent / "raw-project.json").is_file(), "uncertainRegions": len(analysis.get("uncertaintyIntervals") or []), "proposal": bool(analysis.get("transforms"))})
                 if len(results) >= limit:
                     break
             except (OSError, ValueError, KeyError, TypeError, wave.Error, EOFError):

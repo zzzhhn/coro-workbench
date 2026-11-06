@@ -1,6 +1,13 @@
 import type { ScoreProject } from './types';
 
 export const PENDING_VOCAL_REBUILD_KEY = 'coro.pending-vocal-rebuild.v1';
+export type VocalInputChoice = 'current' | 'original-vocals' | 'enhanced-lead' | 'enhanced-vocals';
+export const VOCAL_INPUT_LABELS: Record<VocalInputChoice, string> = {
+  current: '当前已保存人声',
+  'original-vocals': '原人声（含伴唱）',
+  'enhanced-lead': '增强分离后的主唱',
+  'enhanced-vocals': '增强人声（含伴唱）',
+};
 
 export interface PendingVocalRebuild {
   jobId: string;
@@ -8,6 +15,7 @@ export interface PendingVocalRebuild {
   title: string;
   beforeNotes: number;
   hadArrangement: boolean;
+  vocalSource?: VocalInputChoice;
 }
 
 export function vocalRebuildSourceId(project: ScoreProject): string | undefined {
@@ -25,6 +33,7 @@ export function readPendingVocalRebuild(storage: Pick<Storage, 'getItem'>): Pend
         typeof value.title !== 'string' || value.title.length > 500 ||
         !Number.isInteger(value.beforeNotes) || value.beforeNotes < 0 || value.beforeNotes > 100_000 ||
         typeof value.hadArrangement !== 'boolean') return undefined;
+    if (value.vocalSource !== undefined && !Object.hasOwn(VOCAL_INPUT_LABELS, value.vocalSource)) return undefined;
     return value;
   } catch { return undefined; }
 }

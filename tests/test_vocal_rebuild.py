@@ -97,6 +97,47 @@ def test_missing_vocal_runtime_gives_setup_instruction_before_queueing(api, monk
     assert len([p for p in root.iterdir() if len(p.name) == 32]) == 1
 
 
+def test_explicit_original_vocals_choice_is_queued_without_changing_source(api):
+    client, app, submitted, root, project = api
+    sf.write(root / SOURCE / 'stem-vocals.wav', np.zeros((32000, 2)), 16000)
+    response = client.post(f'/api/projects/{SOURCE}/vocal-rebuild', json={'project': project, 'vocalSource': 'original-vocals'})
+    assert response.status_code == 202
+    new = response.json()['id']
+    assert read_json(root / new / 'request.json')['vocal_source'] == 'original-vocals'
+    assert read_json(root / SOURCE / 'project.json') == project
+
+
+def test_missing_enhancement_runtime_is_clear_before_queue(api, monkeypatch):
+    from server import melband
+    client, app, submitted, root, project = api
+    sf.write(root / SOURCE / 'analysis.wav', np.zeros((32000, 2)), 16000)
+    monkeypatch.setattr(melband, 'runtime_health', lambda: {'ready': False})
+    response = client.post(f'/api/projects/{SOURCE}/vocal-rebuild', json={'project': project, 'vocalSource': 'enhanced-vocals'})
+    assert response.status_code == 503 and 'setup-melband.sh' in response.json()['detail']
+    assert submitted == [] and app.state.manager.pending_uploads == 0
+
+
+@pytest.mark.parametrize('choice', ['arbitrary.wav', 'https://example.com/voice', 2])
+def test_unknown_input_choice_never_queues_a_job(api, choice):
+    client, app, submitted, root, project = api
+    response = client.post(f'/api/projects/{SOURCE}/vocal-rebuild', json={'project': project, 'vocalSource': choice})
+    assert response.status_code == 422 and submitted == []
+
+
+def test_changing_input_preserves_other_parts_and_labels_old_curves(saved, monkeypatch):
+    root, source, project = saved
+    sf.write(source / 'stem-vocals.wav', np.zeros((32000, 2)), 16000)
+    calls = mock_infer(monkeypatch)
+    target, request = queued(root, project)
+    request['vocal_source'] = 'original-vocals'
+    output = rebuild_vocals(target, request, JobStatus(target))
+    assert calls == [source / 'stem-vocals.wav']
+    assert output['parts'][0]['stemUrl'] == f'/api/audio/{SOURCE}/stem-vocals.wav'
+    assert output['parts'][1:] == project['parts'][1:]
+    assert output['source']['analysis']['quality']['priorPitchCurvesForSelectedInput'] is False
+    assert output['source']['analysis']['quality']['vocalInputSource'] == 'original-vocals'
+
+
 def test_rebuild_preserves_manual_edits_and_maps_with_source_tempo(saved, monkeypatch):
     root, source_dir, project = saved
     project["tempo"] = 40
@@ -309,6 +350,26 @@ def test_derived_contour_only_cache_recovers_signed_original(saved, monkeypatch)
     assert evidence["denseVoiceAudit"]["verificationRerun"] is False
     assert evidence["denseVoiceAudit"]["validatesCurrentNotes"] is False
     assert evidence["denseVoiceAudit"]["reusedFromJob"] == SOURCE
+
+
+def test_rebuilding_changed_input_again_keeps_the_old_curve_source_explicit(saved, monkeypatch):
+    root, source, project = saved
+    write_dense(source, source / 'stem-lead.wav')
+    sf.write(source / 'stem-vocals.wav', np.ones((32000, 2)) * .02, 16000)
+    mock_infer(monkeypatch)
+    target, request = queued(root, project)
+    request['vocal_source'] = 'original-vocals'
+    first = rebuild_vocals(target, request, JobStatus(target))
+    atomic_json(target / 'status.json', {'status': 'complete', 'project': first})
+    second_dir = root / ('d' * 32)
+    second_dir.mkdir()
+    atomic_json(second_dir / 'status.json', {'status': 'queued'})
+    second = rebuild_vocals(second_dir, {'source_job_id': NEW, 'project': first}, JobStatus(second_dir))
+    quality = second['source']['analysis']['quality']
+    assert quality['priorPitchEvidenceAvailable'] is True
+    assert quality['priorPitchCurvesForSelectedInput'] is False
+    evidence = read_json(second_dir / 'quality-evidence.json')
+    assert evidence['priorPitchCurveSourceStemUrl'] == f'/api/audio/{SOURCE}/stem-lead.wav'
 
 
 def test_corrupt_prior_evidence_rejected_without_failing_rebuild(saved, monkeypatch):

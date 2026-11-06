@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, CheckCircle, CircleNotch, WarningCircle } from '@phosphor-icons/react';
 import Modal from './Modal';
-import { cancelJob, getJob, rebuildVocal } from '../lib/api';
+import { cancelJob, getHealth, getJob, rebuildVocal } from '../lib/api';
 import { validateProject } from '../lib/music';
-import { PENDING_VOCAL_REBUILD_KEY, readPendingVocalRebuild, vocalRebuildSourceId, type PendingVocalRebuild } from '../lib/vocalRebuild';
+import { PENDING_VOCAL_REBUILD_KEY, readPendingVocalRebuild, vocalRebuildSourceId, type PendingVocalRebuild, type VocalInputChoice, VOCAL_INPUT_LABELS } from '../lib/vocalRebuild';
 import type { AnalysisJob, ScoreProject } from '../lib/types';
 
 export default function VocalRebuildDialog({ project, hasArrangement, onClose, onOpen, onBeforeStart }: {
@@ -20,11 +20,23 @@ export default function VocalRebuildDialog({ project, hasArrangement, onClose, o
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState('');
   const [cacheWarning, setCacheWarning] = useState('');
+  const [vocalSource, setVocalSource] = useState<VocalInputChoice>(pending?.vocalSource ?? 'current');
+  const [enhancerReady, setEnhancerReady] = useState(false);
   const beforeNotes = pending?.beforeNotes ?? snapshot.parts.find((part) => part.id === 'vocals')?.notes.filter((note) => note.midi !== null).length ?? 0;
   const manualNotes = snapshot.parts.find((part) => part.id === 'vocals')?.notes.filter((note) => note.origin === 'manual' || note.lyric).length ?? 0;
   const running = Boolean(pending && (!job || ['queued', 'running'].includes(job.status)));
   const complete = job?.status === 'complete' && job.project;
   const busy = submitting || running;
+  const enhanced = vocalSource.startsWith('enhanced');
+
+  useEffect(() => {
+    let active = true;
+    void getHealth().then((health) => {
+      const engine = health.engines.enhancedVocals;
+      if (active) setEnhancerReady(typeof engine === 'object' && engine?.ready === true);
+    }).catch(() => { if (active) setEnhancerReady(false); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!pending) return;
@@ -70,8 +82,8 @@ export default function VocalRebuildDialog({ project, hasArrangement, onClose, o
       const errors = validateProject(snapshot);
       if (errors.length) throw new Error(errors.join('\n'));
       onBeforeStart();
-      const created = await rebuildVocal(snapshot);
-      const record = { jobId: created.id, sourceId: snapshot.id, title: snapshot.title, beforeNotes, hadArrangement: hasArrangement };
+      const created = await rebuildVocal(snapshot, vocalSource);
+      const record = { jobId: created.id, sourceId: snapshot.id, title: snapshot.title, beforeNotes, hadArrangement: hasArrangement, vocalSource };
       setJob(created);
       setPending(record);
       try { localStorage.setItem(PENDING_VOCAL_REBUILD_KEY, JSON.stringify(record)); }
@@ -97,9 +109,22 @@ export default function VocalRebuildDialog({ project, hasArrangement, onClose, o
   return (
     <Modal title="重建主唱节奏" eyebrow="REBUILD VOCAL" onClose={close}>
       <p className="modal-description">{pending?.title ?? snapshot.title}</p>
+      <label className="field-label">
+        用于转谱的人声
+        <select aria-label="重建人声输入" value={vocalSource} onChange={(event) => setVocalSource(event.target.value as VocalInputChoice)} disabled={busy || Boolean(complete)}>
+          <option value="current">当前已保存人声 · 快速</option>
+          <option value="original-vocals">原人声（含伴唱）· 不重新分离</option>
+          <option value="enhanced-lead" disabled={!enhancerReady}>增强分离后的主唱 · 较慢</option>
+          <option value="enhanced-vocals" disabled={!enhancerReady}>增强人声（含伴唱）· 较慢</option>
+        </select>
+        <small>{enhanced ? '从原录音的同一分析段重新分离人声，耗时更长；含伴唱的选项仍可能跟到另一条人声，不保证一定更准。'
+          : vocalSource === 'original-vocals' ? '适合怀疑主唱分离漏掉了歌词或音符时对照；多重人声也可能让转谱跟到伴唱。'
+            : '复用当前音轨。若主唱明显缺失，可尝试原人声或增强分离，生成独立副本对照。'}</small>
+        {!enhancerReady && <small>增强分离需先安装本机 Mel-Band-RoFormer（scripts/setup-melband.sh）。</small>}
+      </label>
       <div className="rebuild-scope">
-        <strong>只重建主唱，不重跑分轨</strong>
-        <p>复用本机已分离的主唱分析段，用词音边界与原声对齐重建节奏；未分析的尾部不会补转。其他乐器、和弦、调号、拍号和你的播放速度保持不变。</p>
+        <strong>{enhanced ? '增强人声分离，再重建主唱' : '只重建主唱，不重跑分轨'}</strong>
+        <p>使用「{VOCAL_INPUT_LABELS[vocalSource]}」处理同一分析段，未分析的尾部不会补转。其他乐器、和弦、调号、拍号和你的播放速度保持不变。</p>
         <p>结果另存一份，旧总谱{(pending?.hadArrangement ?? hasArrangement) ? '和已有阿卡贝拉编配' : ''}仍保留在工程库。不会把新主唱悄悄塞进旧编配。</p>
       </div>
       {!pending && (

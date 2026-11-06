@@ -36,6 +36,7 @@ See package metadata and the installed licenses for the exact versions in
 | Beat This! / FCPE / CREPE | Separate upstream code and checkpoint provenance; see the setup scripts and installed package notices. |
 | Piano transcription | MIT package; downloaded piano checkpoint is CC BY 4.0, [Zenodo 4034264](https://zenodo.org/records/4034264). |
 | KARA2 | UVR lead/backing separation, ONNX repack from musetric; preserve downloaded model card and provenance. |
+| Mel-Band-RoFormer | Optional Kimberley Jensen full-vocal weights. Author HF metadata declares MIT; the pinned author code checkout has no top-level LICENSE. The installer downloads source and weights locally; neither is bundled in this repository. Review author terms before redistribution. See `docs/MELBAND_SETUP.md`. |
 | Chordino / sonic-annotator | GPL-2.0-or-later components. Installed as separate local processes; distribution can require notices and corresponding source. Do not describe the complete application bundle as permissively licensed. |
 | Audiveris | AGPL-3.0 optical music recognition. Separate local installation, including its Java runtime. Review obligations before distributing a product with it. |
 | YourMT3+ | Experimental, separately installed. Upstream code and model-card license statements differ; review before commercial redistribution. |

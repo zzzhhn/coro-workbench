@@ -9,6 +9,10 @@ transcription or feature parity with a professional notation publisher.
   winds and brass can remain combined. Instrument classifier labels are candidates.
 - Main-vocal separation can contain backing vocals, leakage, missing fundamentals
   and octave errors. No algorithm here proves singer identity.
+- Optional MelBand separation is a selectable alternative, not a default quality
+  guarantee. In a layered-vocal test passage, full-vocal and lead-only inputs
+  produced substantial octave differences even after enhanced separation. More
+  audible vocal content or a larger model does not identify the intended melody.
 - ROSVOT predicts learned word/note boundaries; it does not transcribe lyrics.
   Its checkpoint was trained on Mandarin M4Singer. English and other styles can
   differ substantially from the training distribution.

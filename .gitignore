@@ -27,6 +27,7 @@ work/
 !/docs/LIMITATIONS.md
 !/docs/CHORDINO_SETUP.md
 !/docs/VOCAL_REBUILD_API.md
+!/docs/MELBAND_SETUP.md
 *.coro
 *.coro.json
 *.wav

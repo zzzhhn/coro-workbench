@@ -33,6 +33,7 @@ export function pitchVerificationSummary(analysis: SourceInfo['analysis']) {
       detail: [
         quality.verificationStatus === 'prior_cached' ? '本次未重新运行独立校验，以下是同一原音频的已有曲线证据。' : '',
         quality.priorPitchAudioBindingVerified === false ? '旧记录没有完整的音轨绑定哈希；曲线按原工程来源保留，复制文件已核对。' : '',
+        quality.priorPitchCurvesForSelectedInput === false ? '注意：曲线沿用旧人声分支，不是本次选择的新输入音轨。' : '',
         joint !== undefined ? `其中 ${joint.toFixed(1)} 秒有共同发声证据。` : '',
         joint && agreement !== undefined && agreement <= 1
           ? `这部分帧的音高一致率为 ${(agreement * 100).toFixed(1)}%（误差不超过 50 音分）。`

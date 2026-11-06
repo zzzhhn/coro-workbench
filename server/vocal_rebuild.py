@@ -225,19 +225,23 @@ def rebuild_vocals(directory: Path, request: dict, status: JobStatus) -> dict:
     import soundfile as sf
 
     root = directory.parent
-    status.update(5, "vocal-source", "正在核对已保存的主唱音轨与源乐谱，不重新分轨。")
+    status.update(5, "vocal-source", "正在核对源乐谱与所选人声输入，其他乐器不变。")
     project, stored, stem, source_dir = prepare_rebuild(root, request["source_job_id"], request["project"])
     atomic_json(directory / "previous-project.json", project)
     shutil.copyfile(safe_file(root, source_dir / "raw-project.json"), directory / "raw-project.json")
+    from .vocal_input import materialize_input, contour_path
+    reference_stem = stem
+    choice = request.get('vocal_source', 'current')
+    stem, input_report = materialize_input(directory, stored, stem, choice, status)
     duration = float(sf.info(stem).duration)
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError("保存的主唱音轨时长无效。")
-    status.update(20, "vocal-notes", "正在用原主唱音轨重建词与音符边界。")
+    status.update(20, "vocal-notes", "正在使用所选人声重建词与音符边界。")
     learned = infer_rosvot(stem, directory / "vocal-note-model", timeout_seconds=max(180., duration * 3), cancel_check=status.check_cancelled)
     status.check_cancelled()
     events = learned["events"]
     alignment = {"version": "not_available", "boundaryEdits": [], "reason": "No stored FCPE contour"}
-    contour = stem.parent / ("lead-identity/lead-models/vocals-fcpe.npz" if stem.name == "stem-lead.wav" else "quality-models/vocals-fcpe.npz")
+    contour = contour_path(stem)
     status.update(70, "vocal-alignment", "正在按保存的音高进入与收音证据对齐边界。")
     if contour.exists() or contour.is_symlink():
         import numpy as np
@@ -266,6 +270,11 @@ def rebuild_vocals(directory: Path, request: dict, status: JobStatus) -> dict:
     vocals = next(part for part in project["parts"] if part["id"] == "vocals")
     before = sum(note["midi"] is not None for note in vocals["notes"])
     vocals["notes"] = notes
+    if stem != reference_stem:
+        relative = stem.relative_to(root)
+        if len(relative.parts) != 2:
+            raise ValueError('新的人声音轨没有安全的本机播放路径。')
+        vocals['stemUrl'] = f'/api/audio/{relative.parts[0]}/{relative.parts[1]}'
     bar = project["timeSignature"][0] * 4 / project["timeSignature"][1]
     project["measures"] = max(project["measures"], math.ceil(max(n["start"] + n["duration"] for n in notes) / bar - 1e-9))
     if project["measures"] > 2048:
@@ -281,13 +290,36 @@ def rebuild_vocals(directory: Path, request: dict, status: JobStatus) -> dict:
                    vocalRhythmChangedBoundaries=sum(abs(row["scoreStartSeconds"] - row["sourceStartSeconds"]) > 1e-6 or abs(row["scoreEndSeconds"] - row["sourceEndSeconds"]) > 1e-6 for row in rhythm["boundaryChanges"]),
                    modelEvidenceUrl=f"/api/projects/{directory.name}/evidence", verificationRerun=False,
                    verificationStatus="prior_cached", vocalNotesVerified=False)
+    quality['vocalInputSource'] = stored.get('source', {}).get('analysis', {}).get('quality', {}).get('vocalInputSource', 'current') if choice == 'current' else choice
+    quality['priorPitchCurvesForSelectedInput'] = not input_report['inputChanged'] and quality.get('priorPitchCurvesForSelectedInput', True) is True
     evidence = {"vocalRebuildFromJob": source_dir.name, "sourceStemUrl": next(p for p in stored["parts"] if p["id"] == "vocals")["stemUrl"],
                 "parts": {"vocals": {"decoderUsed": "rosvot", "learnedVocalNotes": learned, "alignedVocalEvents": events,
                                       "vocalBoundaryAlignment": alignment, "scoreRhythm": rhythm}},
-                "verificationRerun": False, "validatesCurrentNotes": False}
+                "verificationRerun": False, "validatesCurrentNotes": False, "vocalInput": input_report}
+    if input_report['inputChanged']:
+        evidence['previousInputUncertaintyIntervals'] = analysis.pop('uncertaintyIntervals', [])
+        quality['vocals.leadIdentityAccepted'] = False
+        quality['vocals.leadIdentityPartial'] = False
+        changed_warning = '本次更换了人声输入，旧输入的分歧区间保存在模型证据中；新输入未进行独立完整核对，未标记不代表准确。'
+        if changed_warning not in project['source']['warnings']:
+            project['source']['warnings'].append(changed_warning)
     status.update(95, "vocal-evidence", "正在保存独立的新结果，并复用已校验的原音高证据。")
     try:
-        copied = _copy_prior_dense(root, source_dir, stem, directory, evidence)
+        curve_reference = reference_stem
+        previous_evidence_path = source_dir / 'quality-evidence.json'
+        if previous_evidence_path.is_file():
+            previous_evidence = read_json(safe_file(root, previous_evidence_path))
+            reference_url = previous_evidence.get('priorPitchCurveSourceStemUrl')
+            if reference_url is not None:
+                match = STEM_URL.fullmatch(str(reference_url))
+                if not match:
+                    raise ValueError('旧音高曲线的音轨来源无效，未复用。')
+                curve_reference = safe_file(root, root / match[1] / match[2])
+        copied = _copy_prior_dense(root, source_dir, curve_reference, directory, evidence)
+        if copied:
+            relative = curve_reference.relative_to(root)
+            evidence['priorPitchCurveSourceStemUrl'] = f'/api/audio/{relative.parts[0]}/{relative.parts[1]}'
+            quality['priorPitchCurvesForSelectedInput'] = stem == curve_reference
     except (OSError, ValueError, KeyError, TypeError) as error:
         # A missing/corrupt optional prior audit must never masquerade as a new
         # verification pass or prevent a valid new vocal transcription.
@@ -304,6 +336,14 @@ def rebuild_vocals(directory: Path, request: dict, status: JobStatus) -> dict:
         project["source"]["warnings"].append(warning)
     if warning not in analysis["transforms"]:
         analysis["transforms"].append(warning)
+    if quality['vocalInputSource'] in ('original-vocals', 'enhanced-vocals'):
+        source_warning = '本次转写使用包含伴唱的完整人声，可能跟到伴唱旋律；请与分离主唱对照，不视作已确认主唱。'
+        if source_warning not in project['source']['warnings']:
+            project['source']['warnings'].append(source_warning)
+    if input_report['inputChanged']:
+        analysis['transforms'].append(f"本次改用人声输入 {choice}，仅替换主唱音符及其试听音轨，其他乐器与原录音不变；旧输入结果仍可对照。")
+    if choice.startswith('enhanced') and 'Mel-Band-RoFormer vocal input' not in project['source'].get('engine', ''):
+        project['source']['engine'] = project['source'].get('engine', '') + ' + Mel-Band-RoFormer vocal input'
     from .audio_quality import note_quality
     quality.update(note_quality(project["parts"]))
     status.check_cancelled()

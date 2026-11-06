@@ -32,6 +32,10 @@
 - `server/vocal_rebuild.py`: reuses a saved vocal stem with a current edited
   project snapshot. It creates a new source document without reseparating audio
   or changing other parts; see `VOCAL_REBUILD_API.md`.
+- `server/vocal_input.py`: authoritative saved/enhanced input selection, new-input
+  FCPE extraction and source-timeline preservation.
+- `server/melband.py`, `server/melband_runner.py`: optional isolated MPS/CPU
+  full-vocal separation; it is not a lead-singer identity classifier.
 - `server/chordino.py`, `server/audio_harmony.py`: accompaniment-audio harmony,
   explicit no-chord gaps, slash bass and source-time provenance.
 - `server/pitch_evidence.py`, `server/voice_verification.py`: stored independent
@@ -55,6 +59,10 @@ fast singing, repeated syllables and breath gaps must remain representable.
 Unit tests contain synthetic, owned fixtures. Some integration tests optionally
 read local evidence, which is not distributed. Never add private song arrays or
 recordings to the public repository just to make those optional tests run.
+
+`pytest.ini` scopes the default Python run to `tests/`. Downloaded third-party
+tool tests and private experiment checks are not counted as product regressions;
+they can still be run separately with an explicit path.
 
 Check normal UI interactions and real browser audio as well as unit tests. A
 passing XML round trip proves faithful serialization, not that the model heard

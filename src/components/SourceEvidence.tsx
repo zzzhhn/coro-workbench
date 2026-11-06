@@ -5,6 +5,7 @@ import { downloadFile, parseProject } from '../lib/storage';
 import { resolveLocalAsset } from '../lib/projectBundle';
 import { Headphones } from '@phosphor-icons/react';
 import { pitchVerificationSummary } from '../lib/verificationSummary';
+import { VOCAL_INPUT_LABELS, type VocalInputChoice } from '../lib/vocalRebuild';
 
 export default function SourceEvidence({
   project,
@@ -32,6 +33,9 @@ export default function SourceEvidence({
     text.replace(/^(前序版本记录：)+/, '前序版本记录：'),
   ))];
   const verification = pitchVerificationSummary(analysis);
+  const inputChoice = analysis?.quality?.vocalInputSource;
+  const inputLabel = typeof inputChoice === 'string' ? VOCAL_INPUT_LABELS[inputChoice as VocalInputChoice] : undefined;
+  const currentInput = project.parts.find((part) => part.id === 'vocals')?.stemUrl;
   const pages = project.source.pages ?? [];
   const rawUrl = analysis?.rawProjectUrl;
   const identityTracks = [
@@ -140,6 +144,10 @@ export default function SourceEvidence({
               <strong>主唱：词音边界 + 联合节奏</strong>
               <p>先辨识演唱中的词与音符边界，再整理相邻起止。没有按固定短时值删掉快速音；原始模型音符仍保留在证据中，歌词未识别。</p>
               <p>下方 FCPE / CREPE 曲线来自独立音高模型，便于对照原声，不是这份主唱谱的正确率。</p>
+              {inputLabel && <p>本次转写输入：{inputLabel}。更换输入不代表已确认主唱身份。</p>}
+              {inputLabel && currentInput && /^(?:\/api\/audio\/[a-f0-9]{32}\/stem-(?:lead|vocals)\.wav|local:bundle-[a-f0-9-]+)$/.test(currentInput) && (
+                <button className="secondary-button" onClick={() => void listenBranch(currentInput, inputLabel)}><Headphones size={16} />听本次转写输入</button>
+              )}
               {typeof analysis.quality.vocalAlignedBoundaries === 'number' && analysis.quality.vocalAlignmentVersion !== 'not_available' && (
                 <p>已按原声的音高进入、收音和再起音对齐 {analysis.quality.vocalAlignedBoundaries} 处边界；没有给整曲统一加延迟，也没有因此增加或删除音符。</p>
               )}
@@ -198,6 +206,7 @@ export default function SourceEvidence({
                   ? '可打开原始模型结果对照；生成或修正没有覆盖原音频。'
                   : '此工程保留处理说明；原始模型结果与详细模型证据需在原工作台另行保存，不在此便携工程中。'}
               </p>
+              {analysis.quality?.vocalRebuildFromJob && <p>以下包含旧版本的处理记录；当前输入以本次重建说明为准。</p>}
               <ul>
                 {displayedTransforms.map((transform, index) => (
                   <li key={index}>{transform}</li>

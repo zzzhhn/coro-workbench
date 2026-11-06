@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowRight, CircleNotch, FileAudio, WarningCircle } from '@phosphor-icons/react';
 import { getJob, jsonResponse } from '../lib/api';
 import type { ScoreProject } from '../lib/types';
+import { VOCAL_INPUT_LABELS, type VocalInputChoice } from '../lib/vocalRebuild';
 
 interface ProjectRow {
   id: string;
@@ -14,6 +15,7 @@ interface ProjectRow {
   analyzedSeconds: number;
   mode: string;
   operation?: string;
+  vocalSource?: VocalInputChoice;
   decoder: string;
   proposal: boolean;
   uncertainRegions: number;
@@ -101,6 +103,7 @@ export default function LocalResults({
                       ? '标准提案'
                       : '原始模型'}
                 {row.uncertainRegions > 0 ? ` · ${row.uncertainRegions} 段待定` : ''}
+                {row.vocalSource && row.vocalSource !== 'current' ? ` · ${VOCAL_INPUT_LABELS[row.vocalSource] ?? row.vocalSource}` : ''}
               </small>
             </span>
             {opening === row.id ? <CircleNotch className="spin" size={17} /> : <ArrowRight size={16} />}

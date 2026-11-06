@@ -47,6 +47,16 @@ Optional instrument-family experiment:
 bash scripts/setup-yourmt3.sh
 ```
 
+Optional enhanced vocal separation, isolated from the base Torch environment:
+
+```bash
+bash scripts/setup-melband.sh
+```
+
+This downloads about 1 GB of author weights. Choose an enhanced input explicitly in
+the vocal-rebuild dialog; it does not replace the default input automatically.
+See `MELBAND_SETUP.md` for MPS/CPU support, exact hashes and source-license caveats.
+
 Read the license notes before using optional engines in a redistributed product.
 Audiveris setup currently targets macOS ARM64.
 

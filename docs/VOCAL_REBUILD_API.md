@@ -1,6 +1,21 @@
 # Existing-project vocal rebuild API
 
-`POST /api/projects/{job_id}/vocal-rebuild`, JSON `{ "project": ScoreProject }`, returns the normal queued `AnalysisJob` (HTTP 202). Poll/cancel with existing `/api/jobs/{new_id}` GET/DELETE routes. Requests are limited to 30 MiB and reject non-finite JSON numbers. No upload, separation, beat detection or independent CREPE verification runs.
+`POST /api/projects/{job_id}/vocal-rebuild`, JSON `{ "project": ScoreProject }`, returns the normal queued `AnalysisJob` (HTTP 202). Poll/cancel with existing `/api/jobs/{new_id}` GET/DELETE routes. Requests are limited to 30 MiB and reject non-finite JSON numbers. The default saved-input path does not upload, separate audio, detect beats or run independent CREPE verification.
+
+An optional `vocalSource` field accepts `current` (the default), `original-vocals`,
+`enhanced-lead`, or `enhanced-vocals`. The first two reuse a saved stem. Enhanced
+choices run the optional MelBand separator on the authoritative original analysis
+segment; `enhanced-lead` additionally runs KARA2. Both extract a fresh FCPE contour
+from the newly selected input before alignment. No other instrumental stem is
+retranscribed, and no new independent CREPE verification is claimed. Missing
+engines produce a setup instruction before the job is queued.
+
+Changing the input also updates the vocal part's `stemUrl` to the selected local
+audio; other part metadata remains intact. Old pitch curves retain their explicit
+source stem and are labelled as reference evidence for the old input, not a check
+of the new input. Old uncertainty intervals move into the local model evidence
+rather than being painted onto a different source's notes. Full vocals can include
+backing singers and are not automatically identified as the main melody.
 
 The snapshot must be a source audio score (no `arrangement`) whose `source.analysis.rawProjectUrl` is exactly `/api/projects/{job_id}/raw`, with the same original-audio URL as the stored complete result. A separated vocal part must exist in the stored result. Only its server-authoritative local `stemUrl` is used; caller audio paths are never opened. Changed source offset / inserted-measure timeline mappings are rejected. Practice tempo is preserved; notation uses `originalAudio.tempo` and `offsetSeconds`, including intentional beat reinterpretation.
 
