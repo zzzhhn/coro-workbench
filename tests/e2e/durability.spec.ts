@@ -158,9 +158,10 @@ for (const ready of [false, true]) {
     await page.getByRole('radio', { name: /分轨转谱/ }).click();
     await expect(page.getByLabel('主唱分段策略')).toHaveValue('game');
     await expect(page.getByRole('button', { name: '开始转谱', exact: true })).toBeDisabled();
-    await expect(page.getByRole('option', { name: /词音节奏/ })).toBeDisabled();
-    if (ready) await expect(page.getByRole('option', { name: /发音边界/ })).toBeEnabled();
-    else await expect(page.getByRole('option', { name: /发音边界/ })).toBeDisabled();
+    // Playwright's enabled-state matcher follows an option's enclosing label
+    // to the enabled select. Check the native option property itself.
+    await expect(page.getByRole('option', { name: /词音节奏/ })).toHaveJSProperty('disabled', true);
+    await expect(page.getByRole('option', { name: /发音边界/ })).toHaveJSProperty('disabled', !ready);
     // Missing GAME must not silently select a legacy engine. A deliberate
     // comparison choice still works when that engine is available.
     await page.getByLabel('主唱分段策略').selectOption(ready ? 'phoneme' : 'standard');
