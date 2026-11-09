@@ -8,6 +8,22 @@ import { pitchVerificationSummary } from '../lib/verificationSummary';
 import { VOCAL_INPUT_LABELS, type VocalInputChoice } from '../lib/vocalRebuild';
 import { pitchEvidenceJobId } from '../lib/pitchReview';
 
+type PipelineManifest = {
+  timeline: Array<{ stage: string; label: string; layer: string; seconds: number | null }>;
+  components: Record<string, string | string[]>;
+  runtime?: { revision?: string; codeHash?: string } | null;
+  outputs?: { leadNotationVersion?: string; scoreQuantizerVersion?: string };
+};
+
+const LAYER_LABELS: Record<string, string> = {
+  input: '输入',
+  recognition: '识别',
+  notation: '记谱推断',
+  presentation: '声部呈现',
+  layout: '排版',
+  unclassified: '其他',
+};
+
 export default function SourceEvidence({
   project,
   onImportCopy,
@@ -29,6 +45,7 @@ export default function SourceEvidence({
   const [page, setPage] = useState(0);
   const [pageUrl, setPageUrl] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [pipeline, setPipeline] = useState<PipelineManifest | null>();
   const analysis = project.source.analysis;
   const displayedTransforms = [...new Set((analysis?.transforms ?? []).map((text) =>
     text.replace(/^(前序版本记录：)+/, '前序版本记录：'),
@@ -122,6 +139,17 @@ export default function SourceEvidence({
       setBusy(false);
     }
   };
+  useEffect(() => {
+    if (!expanded || !evidenceJobId || pipeline !== undefined) return;
+    let live = true;
+    fetch(`/api/projects/${evidenceJobId}/pipeline`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => live && setPipeline(value))
+      .catch(() => live && setPipeline(null));
+    return () => {
+      live = false;
+    };
+  }, [expanded, evidenceJobId, pipeline]);
   const getEvidence = async () => {
     if (!evidenceJobId) return;
     try {
@@ -247,6 +275,27 @@ export default function SourceEvidence({
                   <li key={index}>{transform}</li>
                 ))}
               </ul>
+              {pipeline && (
+                <section className="pipeline-trace" aria-label="本次实际运行流程">
+                  <strong>本次实际流程</strong>
+                  <ol>
+                    {pipeline.timeline
+                      .filter((span) => !['queued', 'complete'].includes(span.stage))
+                      .map((span, index) => (
+                        <li key={index} data-layer={span.layer}>
+                          <span>{span.label}</span>
+                          <em>{LAYER_LABELS[span.layer] ?? span.layer}</em>
+                          {span.seconds !== null && <small>{Math.round(span.seconds)} 秒</small>}
+                        </li>
+                      ))}
+                  </ol>
+                  <p>
+                    代码 {pipeline.runtime?.revision ?? '未知'} · 主唱记谱{' '}
+                    {pipeline.outputs?.leadNotationVersion ?? '—'} · 伴奏记谱 {pipeline.outputs?.scoreQuantizerVersion ?? '—'}
+                    。这里记录的是来源和版本，不代表音乐正确性。
+                  </p>
+                </section>
+              )}
               {analysis.rhythm && (
                 <p>
                   节拍来源：{analysis.rhythm.method}；第 1 拍相对原音频{' '}

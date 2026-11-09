@@ -29,6 +29,8 @@ def main() -> int:
                 from .pipeline import analyze_audio
                 project = analyze_audio(directory, request, status)
             status.finish(project)
+            from .pipeline_manifest import write_manifest
+            write_manifest(directory, request, project)
         return 0
     except Cancelled:
         return 0

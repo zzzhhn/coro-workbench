@@ -1130,6 +1130,42 @@
 .source-evidence-body p {
   margin: 5px 0 10px;
 }
+.pipeline-trace {
+  margin: 4px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #e8e3db;
+  border-radius: var(--radius);
+  background: #fffdf9;
+}
+.pipeline-trace ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.pipeline-trace li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  border-left: 3px solid #b9b2a6;
+  background: #f6f3ee;
+  line-height: 1.6;
+}
+.pipeline-trace li[data-layer='recognition'] {
+  border-left-color: #3b6ea5;
+}
+.pipeline-trace li[data-layer='notation'] {
+  border-left-color: #b5762a;
+}
+.pipeline-trace li em,
+.pipeline-trace li small {
+  color: #9a917f;
+  font-style: normal;
+  font-size: 10px;
+}
 .source-evidence-body .field-label {
   max-width: 210px;
 }

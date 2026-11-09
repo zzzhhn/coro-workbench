@@ -476,6 +476,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 continue
         return {"projects": results, "localOnly": True}
 
+    @app.get("/api/projects/{job_id}/pipeline")
+    def pipeline_manifest(job_id: str):
+        path = get_directory(job_id) / "pipeline-manifest.json"
+        if not path.is_file() or path.is_symlink():
+            raise HTTPException(404, "该任务没有流水线记录（早于记录功能的任务）。")
+        return FileResponse(path, media_type="application/json", filename="pipeline-manifest.json")
+
     @app.get("/api/projects/{job_id}/evidence")
     def quality_evidence(job_id: str):
         path = get_directory(job_id) / "quality-evidence.json"
