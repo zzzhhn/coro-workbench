@@ -98,6 +98,34 @@ holdout, reference duration agreement drops 1211 → 1139. Frame agreement with 
 activations (reference-free) is F .615 → .609 and low-register recall .805 → .743.
 10 of the 17 uncovered long bass notes are missing or octave-displaced in recognition.
 
+## Vocal v5 status (branch codex/vocal-reattack-align)
+
+Offline candidates (each fixed before scoring, development song only):
+
+| Candidate | Layer | 1–70 exact / F / dotted | Decision |
+|---|---|---|---|
+| v4 | — | 239 / .73 / 23 | baseline |
+| A: replace events with GAME align | recognition | 154 / .39 / 38 | rejected |
+| B: align same-pitch splits | recognition | 229 / .64 / 42 | rejected, too many false splits |
+| C: B + consonant/onset gate | recognition | 229 / .67 / 30 | rejected |
+| D: text-free SOFA edges, self-calibrated | recognition | 239 / .73 / 22 | no gain |
+| Step 3: scoop keeps same-pitch re-attack | notation inference | 227 / .68 / 29 | rejected in one pre-registered run |
+
+What ships: GAME align output and text-free syllable edges saved as raw evidence
+only (the score is unchanged), plus a fix for SOFA revision checks on release-tarball
+installs, which broke uploads that supplied an LRC. Bare Whisper ASR stays an
+offline tool: its timestamps are phrase-level drafts, not note boundaries.
+
+## Review discipline
+
+- Any run that reads a reference score is logged, one line per run, in the
+  branch's private REVIEW.md, with its purpose.
+- A rule is written down before its numbers are seen. It is accepted or
+  abandoned in one run per song, with no retuning.
+- Fragile's MIDI is Bobby's a cappella arrangement, not a piano or band
+  transcription. Use it as a vocal-line holdout only. For piano holdout checks,
+  use reference-free invariants and frame agreement with model activations.
+
 ## Next candidates (not started)
 
 Ranked by the research report (`evidence/research-20261109/REPORT.md`, private):
