@@ -121,6 +121,62 @@ def section_metrics(ref: list[dict], est: list[dict], lo: float, hi: float, *, m
     return result
 
 
+def error_taxonomy(ref: list[dict], est: list[dict], lo: float, hi: float) -> dict:
+    """Classify every reference and estimated note in [lo, hi) into one error type.
+
+    Inductive diagnosis: it says which layer to work on (recognition vs notation),
+    not how good the score sounds. Classes are exclusive per note, in priority:
+    exact > merged re-attack > onset shift > octave > wrong pitch > missed.
+    """
+    R = [n for n in ref if lo <= n['start'] < hi]
+    E = [n for n in est if n.get('midi') is not None and lo <= n['start'] < hi]
+    used_ref, used_est = set(), set()
+    counts = {k: 0 for k in ('exact', 'mergedReattack', 'onsetShift', 'octave', 'wrongPitch', 'missed',
+                             'extra', 'split')}
+    shifts = []
+    for i, j in _match(R, E, 0.01):
+        used_ref.add(int(i)); used_est.add(int(j)); counts['exact'] += 1
+    reattacks = set(_reattacks(R))
+    for i in sorted(reattacks - used_ref):
+        r = R[i]
+        if any(e['midi'] == r['midi'] and e['start'] < r['start'] - 0.01 < r['start'] < e['start'] + e['duration'] + 0.01
+               for e in est):
+            used_ref.add(i); counts['mergedReattack'] += 1
+    remaining = lambda: ([i for i in range(len(R)) if i not in used_ref], [j for j in range(len(E)) if j not in used_est])
+    ri, ej = remaining()
+    for a, b in _match([R[i] for i in ri], [E[j] for j in ej], 1.0):
+        i, j = ri[a], ej[b]
+        used_ref.add(i); used_est.add(j); counts['onsetShift'] += 1
+        shifts.append(int(round((E[j]['start'] - R[i]['start']) * 4)))
+    ri, ej = remaining()
+    for a, b in _match([R[i] for i in ri], [E[j] for j in ej], 0.26, same_pitch=False):
+        used_ref.add(ri[a]); used_est.add(ej[b]); counts['octave'] += 1
+    ri, ej = remaining()
+    if ri and ej:
+        cost = np.full((len(ri), len(ej)), 99.0)
+        for a, i in enumerate(ri):
+            for b, j in enumerate(ej):
+                if abs(R[i]['start'] - E[j]['start']) <= 0.26 and abs(R[i]['midi'] - E[j]['midi']) <= 7:
+                    cost[a, b] = abs(R[i]['start'] - E[j]['start'])
+        for a, b in zip(*linear_sum_assignment(cost)):
+            if cost[a, b] < 99:
+                used_ref.add(ri[a]); used_est.add(ej[b]); counts['wrongPitch'] += 1
+    ri, ej = remaining()
+    counts['missed'] = len(ri)
+    for j in ej:
+        e = E[j]
+        # An unmatched estimate inside a matched reference note of the same pitch is a split fragment.
+        if any(r['midi'] == e['midi'] and r['start'] < e['start'] < r['start'] + r['duration'] for r in R):
+            counts['split'] += 1
+        else:
+            counts['extra'] += 1
+    histogram = {}
+    for value in shifts:
+        histogram[value] = histogram.get(value, 0) + 1
+    return {'ref': len(R), 'est': len(E), **counts,
+            'onsetShiftSixteenths': dict(sorted(histogram.items()))}
+
+
 def project_part_notes(project: dict, selector) -> list[dict]:
     notes = []
     for part in project['parts']:
@@ -147,6 +203,7 @@ def evaluate(projects: dict[str, dict], reference: ReferenceMap, sections: list[
             est = project_part_notes(project, ROLE_SELECTORS[role])
             row[role] = {f'{a}-{b}': section_metrics(ref, est, *reference.bar_range(a, b), monophonic=role == 'lead')
                          for a, b in sections}
+            row[role + 'Errors'] = {f'{a}-{b}': error_taxonomy(ref, est, *reference.bar_range(a, b)) for a, b in sections}
         report['candidates'][name] = row
     return report
 
@@ -189,10 +246,17 @@ def main(argv=None) -> int:
                              'Single global alignment; tempo drift in the recording is not modelled.']
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
+        args.output.write_text(json.dumps(report, ensure_ascii=False, indent=1, default=lambda v: v.item() if hasattr(v, 'item') else str(v)) + '\n')
     for role in tracks:
         print(f'\n[{role}] exact/ref, F, written dotted notes')
         print(format_table(report, role))
+        print(f'[{role}] error taxonomy (last section)')
+        last = report['sections'][-1]
+        for name, row in report['candidates'].items():
+            if role + 'Errors' in row:
+                e = row[role + 'Errors'][last]
+                print(f"  {name[:30]:30s} " + ' '.join(f'{k}={e[k]}' for k in
+                      ('exact', 'mergedReattack', 'onsetShift', 'octave', 'wrongPitch', 'missed', 'extra', 'split')))
     return 0
 
 

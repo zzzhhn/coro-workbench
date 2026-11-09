@@ -54,3 +54,18 @@ def test_piano_metrics_report_sustained_bass_coverage(tmp_path):
     assert (a['refSustainedBass'], a['sustainedBassCovered'], a['estSubBeatLow'], a['arpeggioMarks']) == (1, 0, 1, 1)
     assert (b['sustainedBassCovered'], b['estSubBeatLow'], b['arpeggioMarks']) == (1, 0, 0)
     assert a['exact'] == b['exact'] == 2
+
+
+def test_error_taxonomy_separates_layers():
+    ref = [{'start': 0, 'duration': .5, 'midi': 60}, {'start': .5, 'duration': .5, 'midi': 60},
+           {'start': 1, 'duration': 1, 'midi': 62}, {'start': 2, 'duration': 1, 'midi': 64},
+           {'start': 3, 'duration': .5, 'midi': 65}, {'start': 3.5, 'duration': .5, 'midi': 67}]
+    est = [{'start': 0, 'duration': 1, 'midi': 60},       # exact; swallows the re-attack at .5
+           {'start': 1.25, 'duration': .75, 'midi': 62},  # one sixteenth late
+           {'start': 2, 'duration': .5, 'midi': 52},      # octave error
+           {'start': 2.5, 'duration': .5, 'midi': 52},    # unexplained extra
+           {'start': 3, 'duration': .5, 'midi': 66}]      # wrong pitch; 67 missed
+    e = score_eval.error_taxonomy(ref, est, 0, 4)
+    assert (e['exact'], e['mergedReattack'], e['onsetShift'], e['octave'], e['wrongPitch'], e['missed']) == (1, 1, 1, 1, 1, 1)
+    assert e['onsetShiftSixteenths'] == {1: 1}
+    assert e['extra'] == 1
