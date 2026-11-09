@@ -30,12 +30,14 @@ flowchart TD
     SOFA --> SS
   end
 
-  subgraph Piano["Piano · branch codex/piano-notation"]
+  subgraph Piano["Piano · multiscore-rhythm-4 (merged, PR #4)"]
     MT --> PC[Stem/mix consensus, ByteDance · recognition]
-    PC --> PR[infer_part_rhythm · notation inference]
-    PR -.-> PD[Key-release / pedal / written durations; sustained bass with evidence · notation inference]
-    PD -.-> PH[Voice → hand → staff · part presentation]
-    PH -.-> PL[Stem direction and collision fixes · layout]
+    PC --> PR[Rhythm grid and onset quantisation · notation inference]
+    PR --> PA{Rolled gesture? onsets sweep in pitch order · notation inference}
+    PA --> PH[Moving hand split, Viterbi with span/finger/held-key priors · notation inference]
+    PH --> PV[Two written voices per hand; outer line keeps measured hold · part presentation]
+    PV --> PL[Covered grand-staff rests become spacers · layout]
+    PV -.-> PD[Pedal-aware sustained bass; recognition misses G1/A1 first · open]
   end
 
   MT --> STR[String sustain consensus · recognition]
@@ -80,6 +82,21 @@ What this suggests about which layer to work on:
   more string notes than the hand score writes. Some may be real
   doublings the arranger omitted. Do not treat them as errors without
   listening.
+
+## Piano v5 result (Kong Er, development song)
+
+| Bars 1–70 | v4 | v5 |
+|---|---:|---:|
+| exact / ref (unchanged recognition) | 672/1072 | 672/1072 |
+| duration agree | 396 | 450 |
+| arpeggio marks | 197 | 93 |
+| max voices per staff-bar | 5 | 2 |
+| sustained bass covered | 16/33 | 16/33 |
+
+Open trade-off: the inner left-hand voice is written to the next attack. On the Fragile
+holdout, reference duration agreement drops 1211 → 1139. Frame agreement with ByteDance
+activations (reference-free) is F .615 → .609 and low-register recall .805 → .743.
+10 of the 17 uncovered long bass notes are missing or octave-displaced in recognition.
 
 ## Next candidates (not started)
 

@@ -143,6 +143,9 @@ CORO_BACKEND_PORT=8775 CORO_FRONTEND_PORT=5183 npm start
 
 Each worktree keeps its own `data/`. A backend fails interrupted jobs in its data
 directory on startup, so sharing one would break another checkout's analysis.
+Scripts stored under the linked `evidence/` or `work/` resolve to the main checkout
+through `Path(__file__).resolve()`. Use `Path.cwd()` as the import root in
+experiments, and print the imported module's `__file__` before trusting an A/B.
 
 Every analysis worker takes a machine-wide lock (`~/.cache/coro/analysis.lock`)
 before loading models, so uploads from different checkouts queue rather than

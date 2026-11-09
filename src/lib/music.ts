@@ -730,7 +730,14 @@ export function toAbc(
               group.start < start + barLength - EPSILON && group.start + group.duration > start + EPSILON));
             const emptyVoiceBar = Math.abs(segment.start - start) < EPSILON
               && Math.abs(segment.duration - barLength) < EPSILON;
-            const invisibleSpacer = !first && (laneIndex > 0 || (emptyVoiceBar && otherVoiceSounds));
+            // On a keyboard grand staff, a rest in the upper lane while the
+            // other lane on the same staff is sounding is implied; drawing it
+            // stacks rest glyphs above the staff. Same duration, same audio.
+            const grandStaffRestCovered = !first && (part.staves?.length ?? 0) > 1
+              && lanes.some((other, index) => index !== laneIndex && other.lane.some(group =>
+                group.start < segment.start + segment.duration - EPSILON
+                && group.start + group.duration > segment.start + EPSILON));
+            const invisibleSpacer = !first && (laneIndex > 0 || (emptyVoiceBar && otherVoiceSounds) || grandStaffRestCovered);
             if (!invisibleSpacer) prefix += segment.tupletPrefix ?? '';
             const duration = abcDuration(invisibleSpacer ? segment.duration : segment.notatedDuration ?? segment.duration);
             const pitches = segment.notes.filter((note) => note.midi !== null);
