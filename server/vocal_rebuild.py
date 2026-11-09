@@ -12,6 +12,10 @@ from pathlib import Path
 from .storage import JOB_ID, JobStatus, atomic_json, read_json, utc_now
 
 MAX_REQUEST_BYTES = 30 * 1024 * 1024
+VOCAL_DECODERS = {
+    'phoneme': 'phoneme-boundaries-fcpe-readable-2',
+    'rosvot': 'rosvot-rwbd-acoustic-alignment-readable-5',
+}
 STEM_URL = re.compile(r"/api/audio/([a-f0-9]{32})/(stem-(?:lead|vocals)\.wav)")
 LOCAL_ASSET_URL = re.compile(
     r"(?:/api/audio/[a-f0-9]{32}/(?:original|analysis|stem-(?:vocals|lead|backing|bass|drums|other|guitar|piano))\.wav"
@@ -139,7 +143,10 @@ def prepare_rebuild(root: Path, source_id: str, snapshot: dict) -> tuple[dict, d
     stored = state.get("project")
     if state.get("status") != "complete" or not isinstance(stored, dict) or (source_dir / "cancelled").exists():
         raise ValueError("仅可重建已经完成的原音频转写。")
-    if project["source"]["analysis"].get("rawProjectUrl") != f"/api/projects/{source_id}/raw":
+    analysis = project["source"]["analysis"]
+    has_source = (analysis.get("rawProjectUrl") == f"/api/projects/{source_id}/raw"
+                  or (analysis.get("quality") or {}).get("modelEvidenceUrl") == f"/api/projects/{source_id}/evidence")
+    if not has_source:
         raise ValueError("当前源乐谱与所选任务不匹配，请重新打开该源结果。")
     original = stored.get("originalAudio") or {}
     if (project["originalAudio"]["url"] != original.get("url") or not re.fullmatch(r"/api/audio/[a-f0-9]{32}/original\.wav", str(original.get("url", "")))):
@@ -219,8 +226,40 @@ def _copy_prior_dense(root: Path, source_dir: Path, stem: Path, target: Path, ev
     return True
 
 
+def phoneme_contour(root: Path, stem: Path, *, verify_hashes: bool = True) -> Path:
+    from .vocal_input import contour_path
+
+    candidate = contour_path(stem)
+    if not candidate.exists() and not candidate.is_symlink():
+        raise ValueError('当前人声轨没有对应的 FCPE 连续音高缓存，无法使用发音边界重建。')
+    contour = safe_file(root, candidate)
+    lead = stem.name == 'stem-lead.wav'
+    evidence_path = stem.parent / 'quality-evidence.json'
+    if evidence_path.exists() or evidence_path.is_symlink():
+        previous = read_json(safe_file(root, evidence_path)).get('denseVoiceAudit') or {}
+        signature = previous.get('cacheSignature') or {}
+        # A derived score may carry verification of a prior waveform.
+        if (not previous.get('reusedFromJob') and previous.get('inputSource') == ('separated_lead' if lead else 'separated_vocals')
+                and signature.get('leadSha256') and signature.get('fcpeSha256')):
+            if verify_hashes:
+                from .voice_verification import file_sha256
+                if signature['leadSha256'] != file_sha256(stem) or signature['fcpeSha256'] != file_sha256(contour):
+                    raise ValueError('当前人声轨或 FCPE 连续音高与保存的核对记录不符。')
+            return contour
+    # Legacy sampled checks and newly enhanced inputs store an explicit input
+    # record. Compare its identity and never use the recorded path to open files.
+    manifest = stem.parent / ('lead-identity/inputs.json' if lead else 'quality-models/inputs.json')
+    if not manifest.exists() and not manifest.is_symlink():
+        manifest = contour.parent / 'inputs.json'
+    if not manifest.exists() and not manifest.is_symlink():
+        raise ValueError('缺少 FCPE 连续音高的输入记录，无法核对它是否属于当前人声轨。')
+    input_path = read_json(safe_file(root, manifest)).get('vocals')
+    if not isinstance(input_path, str) or Path(input_path).parts[-2:] != (stem.parent.name, stem.name):
+        raise ValueError('FCPE 连续音高的输入记录与当前人声轨不符。')
+    return contour
+
+
 def rebuild_vocals(directory: Path, request: dict, status: JobStatus) -> dict:
-    from .rosvot import infer_rosvot
     from .vocal_score import quantize_vocal_rhythm
     import soundfile as sf
 
@@ -236,14 +275,28 @@ def rebuild_vocals(directory: Path, request: dict, status: JobStatus) -> dict:
     duration = float(sf.info(stem).duration)
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError("保存的主唱音轨时长无效。")
-    status.update(20, "vocal-notes", "正在使用所选人声重建词与音符边界。")
-    learned = infer_rosvot(stem, directory / "vocal-note-model", timeout_seconds=max(180., duration * 3), cancel_check=status.check_cancelled)
+    decoder = request.get('decoder', 'rosvot')  # Existing queued jobs use ROSVOT.
+    if decoder not in VOCAL_DECODERS:
+        raise ValueError('未知主唱重建引擎。')
+    output = directory / 'vocal-note-model'
+    inference_options = {'timeout_seconds': max(180., duration * 3), 'cancel_check': status.check_cancelled}
+    if decoder == 'phoneme':
+        from .phoneme import infer_phoneme
+        status.update(20, 'vocal-notes', '正在用发音边界模型和对应的 FCPE 音高重识别主唱。')
+        contour = phoneme_contour(root, stem)
+        learned = infer_phoneme(stem, output, contour_path=contour, **inference_options)
+    else:
+        from .rosvot import infer_rosvot
+        status.update(20, 'vocal-notes', '正在用 ROSVOT 重识别主唱词音边界。')
+        learned = infer_rosvot(stem, output, **inference_options)
     status.check_cancelled()
     events = learned["events"]
     alignment = {"version": "not_available", "boundaryEdits": [], "reason": "No stored FCPE contour"}
+    if decoder == 'phoneme':
+        alignment = {'version': 'phoneme-native-boundaries', 'boundaryEdits': [], 'reason': 'Phoneme model returns source-aligned boundaries'}
     contour = contour_path(stem)
-    status.update(70, "vocal-alignment", "正在按保存的音高进入与收音证据对齐边界。")
-    if contour.exists() or contour.is_symlink():
+    if decoder == 'rosvot' and (contour.exists() or contour.is_symlink()):
+        status.update(70, "vocal-alignment", "正在按保存的音高进入与收音证据对齐边界。")
         import numpy as np
         from .vocal_alignment import align_vocal_notes
         from .lead_note_proposal import frame_acoustic_evidence
@@ -284,16 +337,20 @@ def rebuild_vocals(directory: Path, request: dict, status: JobStatus) -> dict:
     analysis = project["source"]["analysis"]
     analysis["rawProjectUrl"] = f"/api/projects/{directory.name}/raw"
     quality = analysis.setdefault("quality", {})
+    quality.pop('scoreRebuildFromJob', None)
+    quality['vocals.abstained'] = False
     quality.update(vocalRebuildFromJob=source_dir.name, beforeVocalNotes=before, afterVocalNotes=len(notes),
-                   decoderProfile="rosvot", decoderVersion="rosvot-rwbd-acoustic-alignment-score-2", vocalAlignmentVersion=alignment["version"],
+                   decoderRequested=decoder, decoderProfile=decoder, decoderVersion=VOCAL_DECODERS[decoder], vocalAlignmentVersion=alignment["version"],
                    vocalAlignedBoundaries=len(alignment["boundaryEdits"]), vocalRhythmVersion=rhythm["version"],
+                   vocalRhythmMaxOnsetShiftSeconds=rhythm['maximumOnsetShiftSeconds'], vocalRhythmMaxOffsetShiftSeconds=rhythm['maximumOffsetShiftSeconds'],
                    vocalRhythmChangedBoundaries=sum(abs(row["scoreStartSeconds"] - row["sourceStartSeconds"]) > 1e-6 or abs(row["scoreEndSeconds"] - row["sourceEndSeconds"]) > 1e-6 for row in rhythm["boundaryChanges"]),
-                   modelEvidenceUrl=f"/api/projects/{directory.name}/evidence", verificationRerun=False,
+                   modelEvidenceUrl=f"/api/projects/{directory.name}/evidence", nativeEventsJobId=directory.name, verificationRerun=False,
                    verificationStatus="prior_cached", vocalNotesVerified=False)
     quality['vocalInputSource'] = stored.get('source', {}).get('analysis', {}).get('quality', {}).get('vocalInputSource', 'current') if choice == 'current' else choice
     quality['priorPitchCurvesForSelectedInput'] = not input_report['inputChanged'] and quality.get('priorPitchCurvesForSelectedInput', True) is True
     evidence = {"vocalRebuildFromJob": source_dir.name, "sourceStemUrl": next(p for p in stored["parts"] if p["id"] == "vocals")["stemUrl"],
-                "parts": {"vocals": {"decoderUsed": "rosvot", "learnedVocalNotes": learned, "alignedVocalEvents": events,
+                "grid": {"bpm": bpm, "offsetSeconds": project['originalAudio']['offsetSeconds']},
+                "parts": {"vocals": {"decoderUsed": decoder, "learnedVocalNotes": learned, "alignedVocalEvents": events,
                                       "vocalBoundaryAlignment": alignment, "scoreRhythm": rhythm}},
                 "verificationRerun": False, "validatesCurrentNotes": False, "vocalInput": input_report}
     if input_report['inputChanged']:
@@ -348,5 +405,7 @@ def rebuild_vocals(directory: Path, request: dict, status: JobStatus) -> dict:
     quality.update(note_quality(project["parts"]))
     status.check_cancelled()
     atomic_json(directory / "quality-evidence.json", evidence)
+    atomic_json(directory / "analysis-evidence.json", {"mode": "vocal-rebuild", "analyzedDurationSeconds": duration,
+                                                       "originalDurationSeconds": project['originalAudio']['duration']})
     atomic_json(directory / "project.json", project)
     return project

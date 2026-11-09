@@ -1,5 +1,4 @@
 import { createBlankProject } from '../src/lib/demo';
-import { decodeLocalState } from '../src/lib/localCodec';
 
 const fixture = createBlankProject();
 fixture.title = 'Storage Guard Fixture';
@@ -9,17 +8,26 @@ let fail = true;
 let rejected = 0;
 const status = document.querySelector('#guard-report')!;
 const report = () => {
-  const library = decodeLocalState(memory.get('coro.library.v1') ?? '[]') as Array<{ source: { title: string } }>;
-  status.textContent = JSON.stringify({ archiveFailure: fail, rejectedWrites: rejected, archivedTitles: library.map((item) => item.source.title) }, null, 2);
+  status.textContent = JSON.stringify({ archiveFailure: fail, rejectedWrites: rejected });
 };
 Object.defineProperty(window, 'localStorage', { configurable: true, value: {
   getItem: (key: string) => memory.get(key) ?? null,
   setItem: (key: string, value: string) => {
-    if (key === 'coro.library.v1' && fail) { rejected++; report(); throw new DOMException('Simulated quota failure', 'QuotaExceededError'); }
     memory.set(key, value); report();
   },
   removeItem: (key: string) => memory.delete(key),
 } });
+const realDatabase = window.indexedDB, suffix = crypto.randomUUID();
+const databases = new Set<string>();
+Object.defineProperty(window, 'indexedDB', { configurable: true, value: {
+  open: (name: string, version?: number) => {
+    if (fail && name === 'coro-projects') { rejected++; report(); throw new DOMException('Simulated write failure', 'QuotaExceededError'); }
+    const isolated = `${name}-guard-${suffix}`;
+    databases.add(isolated);
+    return realDatabase.open(isolated, version);
+  },
+} });
+window.addEventListener('pagehide', () => { for (const name of databases) realDatabase.deleteDatabase(name); });
 document.querySelector('#allow-archive')!.addEventListener('click', () => { fail = false; report(); });
 report();
 void import('../src/main');

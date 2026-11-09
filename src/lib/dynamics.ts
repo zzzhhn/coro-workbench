@@ -2,6 +2,11 @@ import type { NoteEvent, ScorePart } from './types';
 
 const LEVELS = { pp: .4, p: .52, mp: .67, mf: .8, f: .93, ff: 1 };
 
+/** MIDI and sampled playback use the same sounding length for printed staccato. */
+export function noteGateRatio(note: NoteEvent): number {
+  return note.articulation === 'staccato' ? .45 : 1;
+}
+
 export function notePlaybackLevel(note: NoteEvent): number {
   return note.velocity * (note.dynamic ? LEVELS[note.dynamic] : .85);
 }

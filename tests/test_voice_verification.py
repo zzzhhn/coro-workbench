@@ -153,7 +153,8 @@ def test_full_request_without_separated_lead_is_explicitly_not_applicable(tmp_pa
     np.savez(model_dir / "rhythm.npz", beats=np.array([]), downbeats=np.array([]))
     monkeypatch.setattr(quality_module, "run_quality_models", lambda *args, **kwargs: model_dir)
     project = {"id": "no-lead", "tempo": 120., "measures": 1, "parts": [{"id": "mix", "name": "Mix", "role": "instrument", "notes": [{"id": "n1", "midi": 60, "start": 0., "duration": 1., "velocity": .8}]}], "source": {"warnings": [], "engine": "test"}, "originalAudio": {"tempo": 120., "offsetSeconds": 0}}
-    result = quality_module.improve_project(tmp_path, project, {"mode": mode, "tempo": 120., "verification": "full"}, {}, {})
+    raw = {'multi': {'events': [{'start': 0., 'end': .5, 'midi': 60, 'program': 0, 'isDrum': False}]}} if mode == 'multi' else {}
+    result = quality_module.improve_project(tmp_path, project, {"mode": mode, "tempo": 120., "verification": "full"}, {}, raw)
     q = result["source"]["analysis"]["quality"]
     assert q["verificationMode"] == "full" and q["verificationStatus"] == "not_applicable"
     assert "vocals.denseVerifiedSeconds" not in q

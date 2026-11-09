@@ -6,6 +6,7 @@ export default defineConfig({
   workers: 1,
   timeout: 60000,
   use: {
+    channel: process.env.CORO_TEST_BROWSER === 'chrome' ? 'chrome' : undefined,
     baseURL: 'http://127.0.0.1:5173',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',

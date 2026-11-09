@@ -1,0 +1,111 @@
+"""Reconcile keyboard attacks across the mixture and its separated piano view.
+
+Two views of the same model are corroboration, not independent ground truth.
+The original predictions and every suppressed duplicate stay in the audit.
+"""
+from __future__ import annotations
+
+import copy
+
+from .multi_sources import source_share
+
+VERSION = 'piano-two-view-consensus-1'
+
+
+def reconcile_piano(events, stem_notes, mixture_notes, envelopes):
+    result = copy.deepcopy(events)
+    decisions, pending = [], []
+
+    def matches(a, b, tolerance=.08):
+        return a['midi'] == b['midi'] and abs(a['start'] - b['start']) <= tolerance
+
+    def strong(note):
+        return note.get('activation', 0) >= .8 and note['end'] - note['start'] >= .09
+
+    pairs = []
+    for note in stem_notes:
+        choices = [n for n in mixture_notes if strong(n) and matches(n, note)]
+        if strong(note) and choices:
+            other = min(choices, key=lambda n: abs(n['start'] - note['start']))
+            pairs.append((note, other))
+
+    # A shared separation label does not establish a performer. Only collapse
+    # duplicate acoustic/electric *classifications of the same measured attack*.
+    electric = [n for n in result if n['program']==2 and not n['isDrum'] and n.get('sourceId')=='piano']
+    acoustic = [n for n in result if n['program']==0 and not n['isDrum'] and n.get('sourceId')=='piano']
+    duplicate_fingerprint = [n for n in electric if any(matches(n,a,.022) for a in acoustic)]
+    corroborated = [n for n in duplicate_fingerprint if source_share(envelopes,'piano',n)>=.55
+                    and any(matches(n,a) and matches(n,b) for a,b in pairs)]
+    # A short electric phrase with a few unisons is not an alias. Near-complete
+    # attack containment across an extended passage, plus measured piano
+    # corroboration, distinguishes the decoder's duplicate class stream.
+    class_alias = (len(electric)>=6 and len(duplicate_fingerprint)>=len(electric)*.95
+                   and max(n['start'] for n in electric)-min(n['start'] for n in electric)>=8
+                   and len(corroborated)>=max(2,len(electric)*.1))
+    removed = set()
+    for i, note in enumerate(result):
+        if note['program'] != 2 or note['isDrum'] or note.get('sourceId') not in (None, 'piano'):
+            continue
+        own = [n for n in result if n['program'] == 0 and not n['isDrum']
+               and n.get('sourceId') == note.get('sourceId') and matches(n, note, .022)
+               and min(n['end'], note['end']) - max(n['start'], note['start'])
+               >= .8 * min(n['end'] - n['start'], note['end'] - note['start'])]
+        support = any(matches(note, a) and matches(note, b) for a, b in pairs)
+        if own and ((support and source_share(envelopes, 'piano', note) >= .55)
+                    or (class_alias and note.get('sourceId')=='piano')):
+            target = min(own, key=lambda n: abs(n['start'] - note['start']))
+            removed.add(i)
+            target['evidenceOrigins'] = sorted(set(target.get('evidenceOrigins', ['yourmt3_mix']))
+                                               | {'piano_crnn_stem', 'piano_crnn_mix'})
+            decisions.append({'action': 'duplicate_class', 'before': note.copy(), 'after': target.copy(),
+                              'reason': 'Extended duplicate class fingerprint' if class_alias else
+                              'Same attack and source, acoustic and electric decoder aliases, corroborated in both audio views'})
+    result = [n for i, n in enumerate(result) if i not in removed]
+    shortened = 0
+    for event in result:
+        if event['isDrum'] or event['program'] not in (0,2) or event.get('sourceId') not in (None,'piano'):
+            continue
+        support=[(a,b) for a,b in pairs if matches(event,a) and matches(event,b)
+                 and abs(a['end']-b['end'])<=.08]
+        if not support:
+            continue
+        a,b=min(support,key=lambda pair:abs(pair[0]['start']-event['start']))
+        end=(a['end']+b['end'])/2
+        if event['end']-end>.15 and end-event['start']>=.09:
+            before=event.copy()
+            event['acousticEnd']=event['end']
+            event['end']=end
+            shortened+=1
+            decisions.append({'action':'corroborated_release','before':before,'after':event.copy(),
+                              'reason':'Both piano views agree on an earlier release; native tail retained as acousticEnd'})
+    added = 0
+    for note, mixture in pairs:
+        if any(not n['isDrum'] and n['program'] in (0, 2) and matches(n, note, .12) for n in result):
+            continue
+        reason = None
+        share = min(source_share(envelopes, 'piano', n) for n in (note, mixture))
+        if share < .55:
+            reason = 'competing_source'
+        elif any(n['program'] in (0, 2) and not n['isDrum']
+                 and n['midi'] == note['midi'] and n['start'] < note['start'] < n['end']
+                 for n in result):
+            reason = 'possible_retrigger_of_sustain'
+        elif any(n['program'] in (0, 2) and not n['isDrum']
+                 and abs(n['start'] - note['start']) <= .12
+                 and abs(n['midi'] - note['midi']) in (12, 19, 24, 28, 31, 36) for n in result):
+            reason = 'unresolved_harmonic_doubling'
+        if reason:
+            pending.append({'event': note.copy(), 'sourceShare': share, 'reason': reason})
+            continue
+        candidate = dict(note, sourceId='piano', sourceLabel='钢琴分离轨',
+                         evidenceOrigins=['piano_crnn_stem', 'piano_crnn_mix'])
+        result.append(candidate)
+        added += 1
+        decisions.append({'action': 'add_consensus', 'after': candidate.copy(), 'sourceShare': share,
+                          'reason': 'Strong matching attack in mixture and piano stem, without an existing piano attack or sustain'})
+    return sorted(result, key=lambda n: (n['start'], n['program'], n['midi'])), {
+        'version': VERSION, 'removedDuplicateClasses': len(removed), 'addedConsensusNotes': added,
+        'duplicateClassFingerprint': class_alias,
+        'corroboratedReleases': shortened,
+        'decisions': decisions, 'pendingCandidates': pending, 'claimsIndependentModels': False,
+    }

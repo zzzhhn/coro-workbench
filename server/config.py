@@ -12,6 +12,7 @@ MODELS_DIR = Path(os.environ.get("CORO_MODELS_DIR", ROOT / "models")).resolve()
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_DURATION_SECONDS = 600
 MAX_ANALYSIS_SECONDS = 300
+MAX_MULTI_ANALYSIS_SECONDS = 600
 MAX_PENDING_JOBS = 4
 DEMUCS_NAME = "htdemucs_6s"
 DEMUCS_FILE = "5c90dfd2-34c22ccb.th"
@@ -39,6 +40,7 @@ def basic_pitch_path() -> Path | None:
 
 
 def engine_health() -> dict:
+    from .game import runtime_health as game_health
     bp_path = basic_pitch_path()
     bp_version = package_version("basic-pitch")
     ort_version = package_version("onnxruntime")
@@ -49,6 +51,7 @@ def engine_health() -> dict:
     multi_ready = (yourmt3 / ".venv" / "bin" / "python").is_file() and (yourmt3 / "verified-manifest.json").is_file() and (yourmt3 / "model_helper.py").is_file() and (yourmt3 / "amt" / "logs" / "2024" / "mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops" / "checkpoints" / "last.ckpt").is_file()
     quality_root = MODELS_DIR / "audio-quality"
     return {
+        "game": game_health(),
         "basicPitch": {
             "ready": bool(bp_version and ort_version and bp_path and bp_path.is_file()),
             "version": bp_version,

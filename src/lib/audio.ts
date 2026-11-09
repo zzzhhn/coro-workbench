@@ -1,6 +1,7 @@
 import type { NoteEvent, ScorePart, ScoreProject } from './types';
 import { validateProject } from './music';
-import { notePlaybackLevel, notesWithActiveDynamics } from './dynamics';
+import { noteGateRatio, notePlaybackLevel } from './dynamics';
+import { performanceNotes } from './performance';
 
 type Context = AudioContext | OfflineAudioContext;
 type Bank = Record<string, string>;
@@ -240,7 +241,7 @@ function scheduleNote(
   }
   const gain = context.createGain();
   const attack = sustained ? 0.045 : 0.005;
-  const hold = Math.max(attack, duration * (note.articulation === 'staccato' ? 0.45 : 0.94));
+  const hold = Math.max(attack, duration * noteGateRatio(note) * (note.articulation === 'staccato' ? 1 : .94));
   const release = bank === 'acoustic_grand_piano' ? 0.2 : 0.09;
   gain.gain.setValueAtTime(0, time);
   gain.gain.linearRampToValueAtTime(
@@ -404,7 +405,7 @@ export class PlaybackEngine {
       this.updateMixer(project.parts);
     }
     this.events = project.parts
-      .flatMap((part) => notesWithActiveDynamics(part).filter((note) => note.midi !== null).map((note) => ({ part, note })))
+      .flatMap((part) => performanceNotes(part, project.tempo).filter((note) => note.midi !== null).map((note) => ({ part, note })))
       .sort((a, b) => a.note.start - b.note.start);
     this.anchorBeat = this.beat;
     const preRoll = options.countIn && options.mode === 'score' ? quarterBeats(project) : 0;
@@ -640,7 +641,7 @@ export async function renderProjectAudio(
     panner.pan.value = part.pan ?? 0;
     gain.connect(panner);
     panner.connect(master);
-    for (const note of notesWithActiveDynamics(part))
+    for (const note of performanceNotes(part, project.tempo))
       scheduleNote(
         context,
         gain,

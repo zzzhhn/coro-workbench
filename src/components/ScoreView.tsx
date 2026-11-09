@@ -5,6 +5,7 @@ import type { ScoreProject } from '../lib/types';
 import type { Selection } from '../lib/editor';
 import { beatsPerBar, toAbc } from '../lib/music';
 import { fitEngravingSystems, prepareEngravingTune } from '../lib/engraving';
+import type { MeasureRange } from '../lib/scoreWindow';
 import { overlapsUncertainSource } from './workspaceView';
 
 interface Props {
@@ -16,7 +17,8 @@ interface Props {
   zoom: number;
   showConfidence: boolean;
   readingMode?: boolean;
-  onSelect: (selection: Selection) => void;
+  measureRange?: MeasureRange;
+  onSelect: (selection: Selection, beat?: number) => void;
 }
 
 export default function ScoreView({
@@ -28,6 +30,7 @@ export default function ScoreView({
   zoom,
   showConfidence,
   readingMode = false,
+  measureRange,
   onSelect,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
@@ -36,7 +39,7 @@ export default function ScoreView({
   onSelectRef.current = onSelect;
   const [error, setError] = useState('');
   const [renderVersion, setRenderVersion] = useState(0);
-  const lastScrolledBar = useRef(-1);
+  const lastScrolledSystem = useRef(-1);
   const [width, setWidth] = useState(1000);
   const [engravedWidth, setEngravedWidth] = useState(0);
   const mobile = typeof window !== 'undefined' && window.innerWidth < 760;
@@ -62,20 +65,22 @@ export default function ScoreView({
   // Mixing is independent of engraving; moving a fader must not rebuild the score.
   const signature = useMemo(() => JSON.stringify(notationProject), [notationProject]);
   const visibleSignature = visiblePartIds?.join('|');
+  const firstMeasure = measureRange?.start;
+  const lastMeasure = measureRange?.end;
   const renderData = useMemo(() => {
     try {
       return {
         result: toAbc(
           notationProject,
           visiblePartIds?.filter((id) => project.parts.some((part) => part.id === id)),
-          { barsPerSystem: mobile ? 2 : 4, staffSep: 37, systemSep: 34 },
+          { barsPerSystem: mobile ? 2 : 4, staffSep: 37, systemSep: 34, measureRange },
         ),
         error: '',
       };
     } catch (cause) {
       return { result: undefined, error: cause instanceof Error ? cause.message : '乐谱数据无效。' };
     }
-  }, [signature, visibleSignature, mobile]);
+  }, [signature, visibleSignature, mobile, firstMeasure, lastMeasure]);
   const abcResult = renderData.result;
   const noteLookup = useMemo(
     () =>
@@ -97,6 +102,10 @@ export default function ScoreView({
     observer.observe(wrapper);
     return () => observer.disconnect();
   }, []);
+
+  useLayoutEffect(() => {
+    container.current?.closest<HTMLElement>('.score-scroll')?.scrollTo({ top: 0 });
+  }, [project.id, firstMeasure]);
 
   useLayoutEffect(() => {
     if (!container.current || !abcResult) return;
@@ -127,7 +136,7 @@ export default function ScoreView({
         clickListener: (element) => {
           if (element.startChar === undefined) return;
           const mapped = abcResult.noteMap[element.startChar];
-          if (mapped) onSelectRef.current(mapped);
+          if (mapped) onSelectRef.current(mapped, abcResult.noteSegments?.[element.startChar]?.start);
         },
         ariaLabel: `${project.title}，可交互五线谱。点击音符编辑，键盘上下键改变音高。`,
       });
@@ -137,7 +146,7 @@ export default function ScoreView({
       for (const [index, svg] of [...container.current.querySelectorAll('svg')].entries()) {
         svg.setAttribute(
           'aria-label',
-          `${project.title}，第 ${abcResult.systemMeasures?.[index] ?? index * (mobile ? 2 : 4) + 1} 小节起`,
+          `${project.title}，第 ${abcResult.systemMeasures?.[index] ?? (firstMeasure ?? 1) + index * (mobile ? 2 : 4)} 小节起`,
         );
       }
       const selectables = tune.current?.getSelectableArray() ?? [];
@@ -202,30 +211,42 @@ export default function ScoreView({
         }
       }
       // A new part/layout changes scroll coordinates even at the same beat.
-      lastScrolledBar.current = -1;
+      lastScrolledSystem.current = -1;
       setRenderVersion((value) => value + 1);
     } catch (cause) {
+      if (import.meta.env.DEV) console.error('Score engraving failed', cause);
       setError(cause instanceof Error ? cause.message : '乐谱渲染失败，请检查音符数据。');
     }
     return () => {
       tune.current = null;
     };
-  }, [abcResult, width, mobile, singlePart]);
+  }, [abcResult, width, mobile, singlePart, firstMeasure]);
 
   useEffect(() => {
     const nodes = container.current?.querySelectorAll<SVGElement>('[data-note-id]');
+    let selectedGlyph: SVGElement | undefined;
     nodes?.forEach((node) => {
-      node.classList.toggle(
-        'selected-note',
+      const selected =
         node.dataset.partId === selection?.partId &&
-          (node.dataset.noteId === selection?.noteId ||
-            Boolean(
-              selection &&
-              node.dataset.noteIds &&
-              (JSON.parse(node.dataset.noteIds) as string[]).includes(selection.noteId),
-            )),
-      );
+        (node.dataset.noteId === selection?.noteId ||
+          Boolean(
+            selection &&
+            node.dataset.noteIds &&
+            (JSON.parse(node.dataset.noteIds) as string[]).includes(selection.noteId),
+          ));
+      node.classList.toggle('selected-note', selected);
+      if (selected && (!selectedGlyph || (beat >= Number(node.dataset.start) && beat < Number(node.dataset.end))))
+        selectedGlyph = node;
     });
+    // Keep keyboard selection visible on a low staff when it crosses into a new window.
+    const scroll = container.current?.closest<HTMLElement>('.score-scroll');
+    if (!scroll || !selectedGlyph || playing) return;
+    const bounds = selectedGlyph.getBoundingClientRect();
+    const area = scroll.getBoundingClientRect();
+    if (bounds.top < area.top || bounds.bottom > area.bottom) {
+      const offset = bounds.top < area.top ? bounds.top - area.top - 14 : bounds.bottom - area.bottom + 14;
+      scroll.scrollTo({ top: scroll.scrollTop + offset, behavior: 'instant' });
+    }
   }, [selection, renderVersion]);
 
   useEffect(() => {
@@ -234,7 +255,7 @@ export default function ScoreView({
       if (!live || !container.current) return;
       const boxes = fitEngravingSystems([...container.current.querySelectorAll<SVGSVGElement>('svg')]);
       setEngravedWidth(Math.ceil(Math.max(0, ...boxes.map((box) => box.width))));
-      lastScrolledBar.current = -1;
+      lastScrolledSystem.current = -1;
       setRenderVersion((value) => value + 1);
     });
     return () => {
@@ -244,15 +265,13 @@ export default function ScoreView({
 
   useEffect(() => {
     const nodes = container.current?.querySelectorAll<SVGElement>('[data-note-id]');
-    let first: SVGElement | undefined;
     nodes?.forEach((node) => {
       const active =
         playing && beat >= Number(node.dataset.start) - 0.03 && beat < Number(node.dataset.end) - 0.025;
       node.classList.toggle('sounding-note', active);
-      if (active && !first) first = node;
     });
     const scroll = container.current?.closest<HTMLElement>('.score-scroll');
-    const currentBar = Math.floor(beat / beatsPerBar(project));
+    const currentBar = Math.max(0, Math.min(project.measures - 1, Math.floor(beat / beatsPerBar(project))));
     const systemIndex = abcResult?.systemMeasures?.length
       ? abcResult.systemMeasures.reduce(
           (last, measure, index) => (measure <= currentBar + 1 ? index : last),
@@ -260,31 +279,26 @@ export default function ScoreView({
         )
       : Math.floor(currentBar / (mobile ? 2 : 4));
     const system = container.current?.querySelectorAll('svg')[systemIndex];
-    if (scroll && system && lastScrolledBar.current !== currentBar) {
+    if (scroll && system && lastScrolledSystem.current !== systemIndex) {
       const bounds = system.getBoundingClientRect();
       const area = scroll.getBoundingClientRect();
       const atStart = beat < 0.05;
-      if (atStart) scroll.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-      else if (bounds.top < area.top - 35 || bounds.top > area.bottom - 100) {
+      if (atStart && !selection) scroll.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      else if (bounds.bottom < area.top + 20 || bounds.top > area.bottom - 100) {
         scroll.scrollTo({
           top: scroll.scrollTop + bounds.top - area.top - 20,
           behavior:
             playing && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'instant',
         });
       }
-      lastScrolledBar.current = currentBar;
+      lastScrolledSystem.current = systemIndex;
     }
   }, [beat, playing, renderVersion, project.id, mobile, abcResult]);
 
-  useEffect(() => {
-    lastScrolledBar.current = -1;
-    container.current?.closest<HTMLElement>('.score-scroll')?.scrollTo({ top: 0, left: 0 });
-  }, [project.id]);
-
   const measure = Math.min(project.measures, Math.floor(beat / beatsPerBar(project)) + 1);
-  // Dense systems can be wider than the requested staff width. On phones, pan
-  // the score instead of shrinking every staff to the widest system's ratio.
-  const minimumWidth = mobile ? Math.max(singlePart ? 330 : 465, engravedWidth + 36) : 690;
+  // Dense systems can exceed the requested staff width on any screen. Pan the
+  // score instead of shrinking every staff to the widest system's ratio.
+  const minimumWidth = Math.max(mobile ? (singlePart ? 330 : 465) : 690, engravedWidth + (mobile ? 36 : 60));
   return (
     <div
       className={`score-paper ${showConfidence ? 'show-confidence' : ''} ${readingMode ? 'reading-score' : ''}`}
@@ -293,20 +307,13 @@ export default function ScoreView({
         minWidth: `${Math.max(minimumWidth, (minimumWidth * zoom) / 100)}px`,
       }}
     >
-      <div className="paper-kicker">
-        <span>{singlePart ? '分声部谱' : '完整总谱'}</span>
-        <span>
-          {project.arrangement ? project.arrangement.options.preset.toUpperCase() : '原曲'} /{' '}
-          {project.measures} 小节
-        </span>
-      </div>
       <div className="paper-heading">
         <h2>{project.title}</h2>
-        <p>{project.composer}</p>
+        {project.composer && <p>{project.composer}</p>}
       </div>
       {abcResult?.warnings?.length ? (
         <details className="engraving-notice">
-          <summary>已自动整理谱表与复音布局 · 原音符保留（{abcResult.warnings.length} 项说明）</summary>
+          <summary>谱表布局说明（{abcResult.warnings.length}）</summary>
           <ul>
             {abcResult.warnings.map((warning, index) => (
               <li key={index}>{warning}</li>
@@ -328,7 +335,6 @@ export default function ScoreView({
               ? '原创合成示例 · 非音频识别结果'
               : '自动转谱请先校对，再交给歌者。'}
         </span>
-        <span>Coro · {project.measures} bars</span>
       </div>
       <div className="sr-only" aria-live="off">
         当前第 {measure} 小节

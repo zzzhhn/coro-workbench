@@ -43,7 +43,7 @@ def test_upload_stores_only_generated_path(client):
     assert len(job_id) == 32
     assert (directory / job_id / "source.wav").is_file()
     request = json.loads((directory / job_id / "request.json").read_text())
-    assert request["decoder"] == "rosvot" and request["verification"] == "full"
+    assert request["decoder"] == "standard" and request["verification"] == "full"
     assert not (directory.parent / "original.wav").exists()
     status = transport.get(f"/api/jobs/{job_id}").json()
     assert status["status"] == "queued"
@@ -53,6 +53,16 @@ def test_upload_stores_only_generated_path(client):
 def test_invalid_analysis_options(client, data):
     transport, _, _ = client
     assert fake_upload(transport, data=data).status_code == 422
+
+
+def test_whole_song_limit_is_specific_to_multi_mode(client, monkeypatch):
+    transport, _, directory = client
+    monkeypatch.setattr(config, 'engine_health', lambda: {'basicPitch': {'ready': True}, 'ffmpeg': {'ready': True}, 'yourMT3': {'ready': True}})
+    result = fake_upload(transport, data={'mode': 'multi', 'max_seconds': '600'})
+    assert result.status_code == 202
+    assert json.loads((directory / result.json()['id'] / 'request.json').read_text())['max_seconds'] == 600
+    assert fake_upload(transport, data={'mode': 'multi', 'max_seconds': '601'}).status_code == 422
+    assert fake_upload(transport, data={'mode': 'quick', 'max_seconds': '600'}).status_code == 422
 
 
 def test_rejects_bad_extension_and_empty_file(client):
@@ -80,6 +90,31 @@ def test_multi_missing_fails_without_substituting_baseline(client):
     result = fake_upload(transport, data={"mode": "multi"})
     assert result.status_code == 503
     assert "多乐器族群" in result.json()["detail"]
+
+
+def test_phoneme_option_requires_separated_audio_and_its_runtime(client, monkeypatch):
+    from server import phoneme, audio_quality
+    transport, _, directory = client
+    assert fake_upload(transport, data={'decoder': 'phoneme'}).status_code == 422
+    monkeypatch.setattr(phoneme, 'runtime_health', lambda: {'ready': False})
+    assert fake_upload(transport, data={'mode': 'separate', 'decoder': 'phoneme'}).status_code == 503
+    monkeypatch.setattr(phoneme, 'runtime_health', lambda: {'ready': True})
+    monkeypatch.setattr(audio_quality, 'quality_engine_ready', lambda: True)
+    result = fake_upload(transport, data={'mode': 'separate', 'decoder': 'phoneme'})
+    assert result.status_code == 202
+    request = json.loads((directory / result.json()['id'] / 'request.json').read_text())
+    assert request['decoder'] == 'phoneme'
+
+
+def test_missing_requested_rosvot_is_rejected_before_queuing_long_analysis(client, monkeypatch):
+    from server import rosvot, audio_quality
+    transport, _, directory = client
+    monkeypatch.setattr(rosvot, 'runtime_health', lambda: {'ready': False})
+    monkeypatch.setattr(audio_quality, 'quality_engine_ready', lambda: True)
+    response = fake_upload(transport, data={'mode': 'separate', 'decoder': 'rosvot'})
+    assert response.status_code == 503
+    assert 'ROSVOT' in response.json()['detail']
+    assert not list(directory.glob('*/request.json'))
 
 
 def test_multi_family_labels_do_not_claim_individual_orchestra():

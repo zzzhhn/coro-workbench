@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
+import { archiveWorkspace, readLibrary, deleteLibraryEntry, recordBundleExport, workspaceFingerprint } from '../src/lib/library';
 import { createDemoProject } from '../src/lib/demo';
+import { localAudioJobId } from '../src/lib/audioSource';
 import {
-  archiveWorkspace,
   parseProject,
-  readLibrary,
   readWorkspace,
   saveWorkspace,
   serializeProject,
@@ -11,16 +12,28 @@ import {
 } from '../src/lib/storage';
 
 afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()));
 function memoryStore() {
   const store = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
   });
   return store;
 }
 
 describe('local project preservation and import safety', () => {
+  it('preserves the local GAME raw comparison across save and reload', () => {
+    const project = createDemoProject();
+    const id = 'a'.repeat(32);
+    project.source.analysis = { transforms: [], rawProjectUrl: `/api/projects/${id}/game-raw` };
+    const loaded = parseProject(serializeProject(project));
+    expect(loaded.source.analysis?.rawProjectUrl).toBe(`/api/projects/${id}/game-raw`);
+    expect(localAudioJobId(loaded)).toBe(id);
+    project.source.analysis.rawProjectUrl = 'https://example.com/game-raw';
+    expect(parseProject(serializeProject(project)).source.analysis?.rawProjectUrl).toBeUndefined();
+  });
   it('removes ephemeral blob URLs from saved data without changing live project', () => {
     memoryStore();
     const project = createDemoProject();
@@ -76,37 +89,37 @@ describe('local project preservation and import safety', () => {
     project.parts[0].color = 'url(https://example.com/tracker.png)';
     expect(() => parseProject(JSON.stringify(project))).toThrow('颜色');
   });
-  it('keeps the source and arrangement as separate archived documents', () => {
+  it('keeps the source and arrangement as separate archived documents', async () => {
     memoryStore();
     const source = createDemoProject();
     const arrangement = structuredClone(source);
     arrangement.id = 'new';
     arrangement.title = 'vocal';
-    archiveWorkspace({ source, arrangement, active: 'arrangement', savedAt: 'now' });
-    const library = readLibrary();
+    await archiveWorkspace({ source, arrangement, active: 'arrangement', savedAt: 'now' });
+    const library = (await readLibrary()).map(entry => entry.workspace);
     expect(library).toHaveLength(1);
     expect(library[0].source.title).not.toBe(library[0].arrangement!.title);
-    archiveWorkspace({ source: { ...source, title: 'updated' }, active: 'source', savedAt: 'later' });
-    expect(readLibrary()).toHaveLength(1);
-    expect(readLibrary()[0].source.title).toBe('updated');
+    await archiveWorkspace({ source: { ...source, title: 'updated' }, active: 'source', savedAt: 'later' });
+    expect(await readLibrary()).toHaveLength(1);
+    expect((await readLibrary())[0].workspace.source.title).toBe('updated');
   });
   it('round-trips supported project information exactly', () => {
     const project = createDemoProject();
     expect(parseProject(serializeProject(project))).toEqual(project);
   });
-  it('migrates a legacy workspace and recent library to compact storage', () => {
+  it('migrates a legacy library once and retains a compact active workspace', async () => {
     const store = memoryStore();
     const state = { source: createDemoProject(), active: 'source' as const, savedAt: 'old' };
     store.set('coro.session.v1', JSON.stringify(state));
     store.set('coro.library.v1', JSON.stringify([state]));
     expect(readWorkspace()).toEqual(state);
-    expect(readLibrary()).toEqual([state]);
+    expect((await readLibrary()).map(entry => entry.workspace)).toEqual([state]);
     saveWorkspace(state);
-    archiveWorkspace(state);
+    await archiveWorkspace(state);
     expect(store.get('coro.session.v1')).toMatch(/^coro-z1:/);
-    expect(store.get('coro.library.v1')).toMatch(/^coro-z1:/);
+    expect(store.has('coro.library.v1')).toBe(false);
     expect(readWorkspace()).toEqual(state);
-    expect(readLibrary()).toEqual([state]);
+    expect((await readLibrary()).map(entry => entry.workspace)).toEqual([state]);
   });
   it('saves a complete dense score when plain JSON would exceed the available quota', () => {
     const store = new Map<string, string>();
@@ -123,5 +136,38 @@ describe('local project preservation and import safety', () => {
     });
     saveWorkspace(state);
     expect(readWorkspace()).toEqual(state);
+  });
+  it('retains more than twelve manually edited projects and immutable named versions', async () => {
+    memoryStore();
+    const source = createDemoProject();
+    source.parts[0].notes[0].lyric = 'keep my edit';
+    const first = { source, active: 'source' as const, savedAt: '2026-11-01' };
+    await archiveWorkspace(first);
+    const version = await archiveWorkspace(first, 'Before rehearsal');
+    for (let i = 1; i <= 15; i++) await archiveWorkspace({ ...first, source: { ...source, id: `new-${i}` }, savedAt: `2026-11-${String(i + 1).padStart(2, '0')}` });
+    expect(await readLibrary()).toHaveLength(17);
+    expect((await readLibrary()).find(entry => entry.id === `project:${source.id}`)?.workspace.source.parts[0].notes[0].lyric).toBe('keep my edit');
+    await archiveWorkspace({ ...first, source: { ...source, title: 'Changed' } });
+    expect((await readLibrary()).find(entry => entry.id === version.id)?.workspace.source.title).toBe(source.title);
+    await deleteLibraryEntry(version.id);
+    expect(await readLibrary()).toHaveLength(16);
+  });
+  it('does not erase a corrupt legacy library or pretend migration succeeded', async () => {
+    const memory = memoryStore();
+    memory.set('coro.library.v1', '{broken');
+    await expect(readLibrary()).rejects.toThrow();
+    expect(memory.get('coro.library.v1')).toBe('{broken');
+    const state = { source: createDemoProject(), active: 'source' as const, savedAt: 'now' };
+    memory.set('coro.library.v1', JSON.stringify([state]));
+    expect(await readLibrary()).toHaveLength(1);
+  });
+  it('records generated bundles without claiming future edits are backed up', async () => {
+    memoryStore();
+    const state = { source: createDemoProject(), active: 'source' as const, savedAt: 'now' };
+    await recordBundleExport(state);
+    expect((await readLibrary())[0].exportReceipt?.fingerprint).toBe(await workspaceFingerprint(state));
+    state.source.parts[0].notes[0].midi = 62;
+    await archiveWorkspace(state);
+    expect((await readLibrary())[0].exportReceipt?.fingerprint).not.toBe(await workspaceFingerprint(state));
   });
 });

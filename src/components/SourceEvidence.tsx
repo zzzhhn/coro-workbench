@@ -6,6 +6,7 @@ import { resolveLocalAsset } from '../lib/projectBundle';
 import { Headphones } from '@phosphor-icons/react';
 import { pitchVerificationSummary } from '../lib/verificationSummary';
 import { VOCAL_INPUT_LABELS, type VocalInputChoice } from '../lib/vocalRebuild';
+import { pitchEvidenceJobId } from '../lib/pitchReview';
 
 export default function SourceEvidence({
   project,
@@ -17,7 +18,7 @@ export default function SourceEvidence({
   onVocalRebuild,
 }: {
   project: ScoreProject;
-  onImportCopy: (project: ScoreProject) => boolean | void;
+  onImportCopy: (project: ScoreProject) => Promise<boolean>;
   onMessage: (message: string, error?: boolean) => void;
   onSeek?: (seconds: number) => void;
   onAudio?: (url: string, name: string) => void;
@@ -33,11 +34,37 @@ export default function SourceEvidence({
     text.replace(/^(前序版本记录：)+/, '前序版本记录：'),
   ))];
   const verification = pitchVerificationSummary(analysis);
+  const multiscore = analysis?.quality?.decoderProfile === 'yourmt3';
   const inputChoice = analysis?.quality?.vocalInputSource;
   const inputLabel = typeof inputChoice === 'string' ? VOCAL_INPUT_LABELS[inputChoice as VocalInputChoice] : undefined;
   const currentInput = project.parts.find((part) => part.id === 'vocals')?.stemUrl;
   const pages = project.source.pages ?? [];
   const rawUrl = analysis?.rawProjectUrl;
+  const evidenceJobId = pitchEvidenceJobId(project);
+  const nativeJob = analysis?.quality?.nativeEventsJobId;
+  const nativeJobId = typeof nativeJob === 'string' && /^[a-f0-9]{32}$/.test(nativeJob) ? nativeJob : undefined;
+  const learnedDecoder = analysis?.quality?.decoderProfile === 'phoneme' || analysis?.quality?.decoderProfile === 'rosvot';
+  const modelEvidenceUrl = analysis?.quality?.modelEvidenceUrl;
+  const modelJobId = typeof modelEvidenceUrl === 'string' ? modelEvidenceUrl.match(/^\/api\/projects\/([a-f0-9]{32})\/evidence$/)?.[1] : undefined;
+  const rhythmJobId = learnedDecoder && !analysis?.quality?.scoreRebuildFromJob
+    ? modelJobId ?? evidenceJobId : nativeJobId ?? evidenceJobId;
+  const rebuildScore = async () => {
+    if (!rhythmJobId) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${rhythmJobId}/score-rhythm`, { method: 'POST' });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || '本机识别缓存不可用，无法重新整理节奏。');
+      }
+      if (await onImportCopy(parseProject(await response.text())))
+        onMessage('已打开新的节奏整理谱本；之前的编辑稿保存在工程库。');
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : '总谱节奏整理失败', true);
+    } finally {
+      setBusy(false);
+    }
+  };
   const identityTracks = [
     ['leadAudioUrl', '主唱分支'],
     ['backingAudioUrl', '伴唱分支'],
@@ -71,7 +98,7 @@ export default function SourceEvidence({
   }, [pages[page], page]);
   if (!analysis && !pages.length) return null;
   const getRaw = async (open: boolean) => {
-    if (!rawUrl || !/^\/api\/projects\/[a-f0-9]{32}\/raw$/.test(rawUrl)) return;
+    if (!rawUrl || !/^\/api\/projects\/[a-f0-9]{32}\/(?:raw|game-raw)$/.test(rawUrl)) return;
     setBusy(true);
     try {
       const response = await fetch(rawUrl);
@@ -81,7 +108,7 @@ export default function SourceEvidence({
         const raw = parseProject(text);
         raw.id = crypto.randomUUID();
         raw.title += ' · 原始模型副本';
-        if (onImportCopy(raw) !== false)
+        if (await onImportCopy(raw))
           onMessage('已打开原始模型副本；之前工程保存在工程库。');
       } else
         downloadFile(
@@ -96,9 +123,9 @@ export default function SourceEvidence({
     }
   };
   const getEvidence = async () => {
-    if (!rawUrl || !/^\/api\/projects\/[a-f0-9]{32}\/raw$/.test(rawUrl)) return;
+    if (!evidenceJobId) return;
     try {
-      const response = await fetch(rawUrl.replace(/\/raw$/, '/evidence'));
+      const response = await fetch(`/api/projects/${evidenceJobId}/evidence`);
       if (!response.ok) throw new Error('模型证据在本机尚不可用。');
       downloadFile(await response.blob(), 'model-disagreements.json', 'application/json');
     } catch (error) {
@@ -131,9 +158,15 @@ export default function SourceEvidence({
             原始转写
           </button>
         )}
-        {onVocalRebuild && (
+        {onVocalRebuild && analysis?.quality?.decoderProfile !== 'game' && (
           <button className="text-button" onClick={onVocalRebuild} title="复用已分离主唱，另存一份节奏重建结果；其他声部不变">
             重建主唱节奏
+          </button>
+        )}
+        {rhythmJobId && analysis?.quality?.decoderProfile !== 'game' && (multiscore || (analysis?.quality?.vocalRhythmVersion && currentInput)) && (
+          <button className="text-button" disabled={busy} onClick={() => void rebuildScore()}
+            title="复用本机原始识别缓存，另存新谱；当前编辑稿保留">
+            {busy ? '正在整理…' : multiscore ? '重新整理总谱节奏' : '重新整理主唱节奏'}
           </button>
         )}
       </div>
@@ -156,7 +189,7 @@ export default function SourceEvidence({
               )}
             </div>
           )}
-          {verification && (
+          {verification && !multiscore && (
             <div className="pitch-verification">
               <strong>{verification.title}</strong>
               <p>{verification.detail}</p>
@@ -183,7 +216,7 @@ export default function SourceEvidence({
           )}
           {analysis?.uncertaintyIntervals?.length ? (
             <section className="uncertain-intervals">
-              <strong>这些段落仍有主唱 / 八度分歧</strong>
+              <strong>{multiscore ? '这些段落的音符或乐器归属仍待核对' : '这些段落仍有主唱 / 八度分歧'}</strong>
               {analysis.uncertaintyIntervals.map((interval, index) => (
                 <button key={index} title={interval.reason} onClick={() => onSeek?.(interval.startSeconds)}>
                   <span>
@@ -204,6 +237,8 @@ export default function SourceEvidence({
                 这是带编辑取舍的谱面提案，不是已验证的原版总谱。
                 {rawUrl
                   ? '可打开原始模型结果对照；生成或修正没有覆盖原音频。'
+                  : evidenceJobId
+                  ? '基础模型没有可打开的总谱；原音频与详细模型证据仍可用于校对。'
                   : '此工程保留处理说明；原始模型结果与详细模型证据需在原工作台另行保存，不在此便携工程中。'}
               </p>
               {analysis.quality?.vocalRebuildFromJob && <p>以下包含旧版本的处理记录；当前输入以本次重建说明为准。</p>}
@@ -218,9 +253,9 @@ export default function SourceEvidence({
                   {analysis.rhythm.offsetSeconds.toFixed(3)} 秒。节拍置信度并非转谱准确率。
                 </p>
               )}
-              {rawUrl && (
+              {evidenceJobId && (
                 <div className="note-actions">
-                  {onPitchReview && project.source.kind === 'audio' && (
+                  {onPitchReview && project.source.kind === 'audio' && !['yourmt3', 'game'].includes(String(analysis.quality?.decoderProfile)) && (
                     <button
                       className="secondary-button"
                       onClick={() => onPitchReview(analysis.uncertaintyIntervals?.[0]?.startSeconds ?? 0)}
@@ -228,9 +263,9 @@ export default function SourceEvidence({
                       校对原曲主唱音高 <ArrowSquareOut size={15} />
                     </button>
                   )}
-                  <button className="secondary-button" disabled={busy} onClick={() => void getRaw(true)}>
+                  {rawUrl && <button className="secondary-button" disabled={busy} onClick={() => void getRaw(true)}>
                     打开原始模型副本 <ArrowSquareOut size={15} />
-                  </button>
+                  </button>}
                   <button className="secondary-button" onClick={() => void getEvidence()}>
                     模型分歧证据 <ArrowDown size={15} />
                   </button>

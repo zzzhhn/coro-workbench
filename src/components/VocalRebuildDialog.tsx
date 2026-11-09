@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, CheckCircle, CircleNotch, WarningCircle } from '@phosphor-icons/react';
 import Modal from './Modal';
-import { cancelJob, getHealth, getJob, rebuildVocal } from '../lib/api';
+import { cancelJob, getHealth, getJob, rebuildVocal, type EngineHealth } from '../lib/api';
 import { validateProject } from '../lib/music';
-import { PENDING_VOCAL_REBUILD_KEY, readPendingVocalRebuild, vocalRebuildSourceId, type PendingVocalRebuild, type VocalInputChoice, VOCAL_INPUT_LABELS } from '../lib/vocalRebuild';
+import { PENDING_VOCAL_REBUILD_KEY, readPendingVocalRebuild, vocalRebuildSourceId, type PendingVocalRebuild, type VocalInputChoice, type VocalRebuildDecoder, VOCAL_INPUT_LABELS } from '../lib/vocalRebuild';
 import type { AnalysisJob, ScoreProject } from '../lib/types';
 
 export default function VocalRebuildDialog({ project, hasArrangement, onClose, onOpen, onBeforeStart }: {
   project: ScoreProject;
   hasArrangement: boolean;
   onClose: () => void;
-  onOpen: (project: ScoreProject) => void;
-  onBeforeStart: () => void;
+  onOpen: (project: ScoreProject) => Promise<boolean>;
+  onBeforeStart: () => Promise<void>;
 }) {
   const [snapshot] = useState(() => structuredClone(project));
   const [pending, setPending] = useState<PendingVocalRebuild | undefined>(() => readPendingVocalRebuild(localStorage));
@@ -21,20 +21,30 @@ export default function VocalRebuildDialog({ project, hasArrangement, onClose, o
   const [error, setError] = useState('');
   const [cacheWarning, setCacheWarning] = useState('');
   const [vocalSource, setVocalSource] = useState<VocalInputChoice>(pending?.vocalSource ?? 'current');
-  const [enhancerReady, setEnhancerReady] = useState(false);
+  const [health, setHealth] = useState<EngineHealth | null>();
+  const [chosenDecoder, setChosenDecoder] = useState<VocalRebuildDecoder | undefined>(pending?.decoder ?? (pending ? 'rosvot' : undefined));
   const beforeNotes = pending?.beforeNotes ?? snapshot.parts.find((part) => part.id === 'vocals')?.notes.filter((note) => note.midi !== null).length ?? 0;
   const manualNotes = snapshot.parts.find((part) => part.id === 'vocals')?.notes.filter((note) => note.origin === 'manual' || note.lyric).length ?? 0;
   const running = Boolean(pending && (!job || ['queued', 'running'].includes(job.status)));
   const complete = job?.status === 'complete' && job.project;
   const busy = submitting || running;
   const enhanced = vocalSource.startsWith('enhanced');
+  const ready = (name: string) => {
+    const engine = health?.engines[name];
+    return typeof engine === 'boolean' ? engine : (engine?.ready ?? engine?.available ?? false);
+  };
+  const enhancerReady = ready('enhancedVocals');
+  const phonemeReady = ready('phonemeNotes');
+  const rosvotReady = ready('vocalNotes');
+  const decoder = chosenDecoder ?? (phonemeReady ? 'phoneme' : rosvotReady ? 'rosvot' : undefined);
+  const decoderReady = decoder === 'phoneme' ? phonemeReady : decoder === 'rosvot' && rosvotReady;
+  const enhancedPitchMissing = enhanced && decoder === 'phoneme' && !ready('quality');
+  const canStart = decoderReady && (!enhanced || enhancerReady) && !enhancedPitchMissing;
 
   useEffect(() => {
     let active = true;
-    void getHealth().then((health) => {
-      const engine = health.engines.enhancedVocals;
-      if (active) setEnhancerReady(typeof engine === 'object' && engine?.ready === true);
-    }).catch(() => { if (active) setEnhancerReady(false); });
+    void getHealth().then((result) => { if (active) setHealth(result); })
+      .catch(() => { if (active) setHealth(null); });
     return () => { active = false; };
   }, []);
 
@@ -75,15 +85,15 @@ export default function VocalRebuildDialog({ project, hasArrangement, onClose, o
     onClose();
   };
   const begin = async () => {
-    if (busy) return;
+    if (busy || !canStart || !decoder) return;
     setSubmitting(true);
     setError('');
     try {
       const errors = validateProject(snapshot);
       if (errors.length) throw new Error(errors.join('\n'));
-      onBeforeStart();
-      const created = await rebuildVocal(snapshot, vocalSource);
-      const record = { jobId: created.id, sourceId: snapshot.id, title: snapshot.title, beforeNotes, hadArrangement: hasArrangement, vocalSource };
+      await onBeforeStart();
+      const created = await rebuildVocal(snapshot, vocalSource, decoder);
+      const record = { jobId: created.id, sourceId: snapshot.id, title: snapshot.title, beforeNotes, hadArrangement: hasArrangement, vocalSource, decoder };
       setJob(created);
       setPending(record);
       try { localStorage.setItem(PENDING_VOCAL_REBUILD_KEY, JSON.stringify(record)); }
@@ -98,12 +108,11 @@ export default function VocalRebuildDialog({ project, hasArrangement, onClose, o
     catch (cause) { setError(cause instanceof Error ? cause.message : '取消失败，请重试。'); }
     finally { setCancelling(false); }
   };
-  const open = () => {
+  const open = async () => {
     if (!complete) return;
     const errors = validateProject(complete);
     if (errors.length) { setError(errors.join('\n')); return; }
-    clearPending();
-    onOpen(complete);
+    if (await onOpen(complete)) clearPending();
   };
 
   return (
@@ -121,6 +130,17 @@ export default function VocalRebuildDialog({ project, hasArrangement, onClose, o
           : vocalSource === 'original-vocals' ? '适合怀疑主唱分离漏掉了歌词或音符时对照；多重人声也可能让转谱跟到伴唱。'
             : '复用当前音轨。若主唱明显缺失，可尝试原人声或增强分离，生成独立副本对照。'}</small>
         {!enhancerReady && <small>增强分离需先安装本机 Mel-Band-RoFormer（scripts/setup-melband.sh）。</small>}
+      </label>
+      <label className="field-label">
+        主唱分段
+        <select aria-label="主唱重建引擎" value={decoder ?? ''} onChange={(event) => setChosenDecoder(event.target.value as VocalRebuildDecoder)} disabled={busy || Boolean(complete)}>
+          {!decoder && <option value="" disabled>{health === undefined ? '正在检查本机引擎…' : '没有可用引擎'}</option>}
+          <option value="phoneme" disabled={!phonemeReady}>发音边界 + FCPE{phonemeReady ? '' : ' · 未就绪'}</option>
+          <option value="rosvot" disabled={!rosvotReady}>ROSVOT 词音节奏{rosvotReady ? '' : ' · 未就绪'}</option>
+        </select>
+        {!pending && health === null && <small>无法连接本机引擎。请在项目目录运行 npm start。</small>}
+        {!pending && health && !decoderReady && <small>请安装本机发音边界或 ROSVOT 引擎，再重建主唱。</small>}
+        {!pending && enhancedPitchMissing && <small>增强音轨需要重新提取 FCPE 音高。请先运行 scripts/setup-audio-quality.sh。</small>}
       </label>
       <div className="rebuild-scope">
         <strong>{enhanced ? '增强人声分离，再重建主唱' : '只重建主唱，不重跑分轨'}</strong>
@@ -156,7 +176,7 @@ export default function VocalRebuildDialog({ project, hasArrangement, onClose, o
         <button className="secondary-button" disabled={submitting} onClick={close}>{running ? '后台继续' : complete ? '暂不切换' : '返回原谱'}</button>
         {running ? <button className="secondary-button" disabled={cancelling} onClick={() => void stop()}>{cancelling ? '正在取消…' : '取消重建'}</button>
           : complete ? <button className="primary-button" onClick={open}>打开新副本 <ArrowRight size={17} /></button>
-            : <button className="primary-button" disabled={submitting || !vocalRebuildSourceId(snapshot)} onClick={() => void begin()}>{submitting ? <CircleNotch className="spin" size={17} /> : null}另存并重建主唱</button>}
+            : <button className="primary-button" disabled={submitting || !canStart || !vocalRebuildSourceId(snapshot)} onClick={() => void begin()}>{submitting ? <CircleNotch className="spin" size={17} /> : null}另存并重建主唱</button>}
       </div>
     </Modal>
   );

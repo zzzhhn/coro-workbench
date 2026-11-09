@@ -8,6 +8,102 @@ import pytest
 from server.vocal_score import _select_joint_rhythm_path, clean_vocal_fragments, quantize_vocal_rhythm
 
 
+def test_slow_sung_phrase_does_not_turn_small_lateness_into_tied_32nds():
+    spb = 60 / 65
+    events = [[i * spb + .12, (i + 1) * spb + .12, 60 + i, .9] for i in range(4)]
+    notes, audit = quantize_vocal_rhythm(events, {'bpm': 65, 'offsetSeconds': 0}, 5)
+    assert [(n['start'], n['duration']) for n in notes] == [(i, 1) for i in range(4)]
+    assert audit['boundaryChanges'][0]['sourceStartSeconds'] == .12
+
+
+def test_short_vowels_get_the_same_metrical_onset_tolerance_as_long_vowels():
+    events = [[i * .5 + .1, i * .5 + .24, 60 + i, .9] for i in range(4)]
+    notes, _ = quantize_vocal_rhythm(events, {'bpm': 60, 'offsetSeconds': 0}, 3)
+    assert [(n['start'], n['duration']) for n in notes] == [(i * .5, .25) for i in range(4)]
+
+
+def test_delayed_sixteenth_attacks_can_reach_their_coarse_grid():
+    events = [[.10, .28, 60, .9], [.30, .48, 62, .9], [.55, .73, 60, .9], [.80, .98, 64, .9]]
+    before = copy.deepcopy(events)
+    notes, audit = quantize_vocal_rhythm(events, {'bpm': 65, 'offsetSeconds': 0}, 2)
+    assert [(note['start'], note['duration']) for note in notes] == [(i / 4, .25) for i in range(4)]
+    assert [note['midi'] for note in notes] == [row[2] for row in before]
+    assert events == before
+    assert [(item['sourceStartSeconds'], item['sourceEndSeconds']) for item in audit['boundaryChanges']] == [
+        tuple(row[:2]) for row in before
+    ]
+    assert max(audit['maximumOnsetShiftSeconds'], audit['maximumOffsetShiftSeconds']) <= .16
+
+
+@pytest.mark.parametrize('beats', [
+    [0., .5, 1., 1.125, 1.5, 2.],  # isolated 32nd inside a slower phrase
+    [0., .5, 1., 1.125, 1.25, 1.75, 2.5],  # two adjacent 32nds
+    [.5 + i / 8 for i in range(9)],  # dense run of eight 32nds
+])
+def test_true_32nd_attacks_keep_their_relative_spacing_at_a_slow_tempo(beats):
+    spb = 60 / 65
+    events = [[a * spb, b * spb, 60 + i % 3, .9] for i, (a, b) in enumerate(zip(beats, beats[1:]))]
+    notes, _ = quantize_vocal_rhythm(events, {'bpm': 65, 'offsetSeconds': 0}, 3)
+    assert [note['midi'] for note in notes] == [row[2] for row in events]
+    for index, (start, end) in enumerate(zip(beats, beats[1:])):
+        if end - start == .125:
+            assert (notes[index]['start'], notes[index]['duration']) == (start, .125)
+
+
+def test_strict_acoustic_mode_retains_a_64th_run():
+    spb = .5
+    beats = [.5 + i / 16 for i in range(9)]
+    events = [[a * spb, b * spb, 60 + i % 3, .9] for i, (a, b) in enumerate(zip(beats, beats[1:]))]
+    notes, audit = quantize_vocal_rhythm(events, {'bpm': 120, 'offsetSeconds': 0}, 2,
+                                        timing_tolerance_seconds=.01)
+    assert [(n['start'], n['duration'], n['midi']) for n in notes] == [
+        (a, b-a, row[2]) for a, b, row in zip(beats, beats[1:], events)
+    ]
+    assert max(audit['maximumOnsetShiftSeconds'], audit['maximumOffsetShiftSeconds']) <= .01
+
+
+def test_rest_quantization_does_not_compress_a_syllable_to_one_third_its_body():
+    events = [[.4, .725, 62, .8], [1.05, 1.31, 64, .8], [1.525, 1.72, 66, .8]]
+    notes, _ = quantize_vocal_rhythm(events, {'bpm': 60, 'offsetSeconds': 0}, 3)
+    assert notes[0]['duration'] >= .25
+    assert notes[1]['start'] - notes[0]['start'] - notes[0]['duration'] >= .18
+
+
+@pytest.mark.parametrize('bpm', [30, 60, 90, 120, 180, 240])
+def test_bounded_notation_keeps_every_attack_within_25ms(bpm):
+    events = [[.94, 1.01, 60, .9], [1.02, 1.09, 60, .8],
+              [1.09, 1.27, 62, .9], [1.53, 1.97, 64, .8]]
+    notes, audit = quantize_vocal_rhythm(events, {'bpm': bpm, 'offsetSeconds': 0}, 3.,
+                                        timing_tolerance_seconds=.025)
+    assert [note['midi'] for note in notes] == [60, 60, 62, 64]
+    assert audit['maximumOnsetShiftSeconds'] <= .025 + 1e-6
+    assert audit['maximumOffsetShiftSeconds'] <= .025 + 1e-6
+    assert all(note['duration'] > 0 for note in notes)
+    assert all(a['start'] + a['duration'] <= b['start'] + 1e-6 for a, b in zip(notes, notes[1:]))
+    assert (notes[-1]['start'] - notes[-2]['start'] - notes[-2]['duration']) * 60 / bpm >= .18
+
+
+def test_bounded_notation_does_not_pull_a_measured_attack_towards_a_distant_simple_beat():
+    events = [[.07, .39, 60, .9], [.39, .83, 62, .9]]
+    _, audit = quantize_vocal_rhythm(events, {'bpm': 120, 'offsetSeconds': 0}, 2.,
+                                    timing_tolerance_seconds=.025)
+    assert audit['maximumOnsetShiftSeconds'] <= .025
+    assert audit['sharedTouchingBoundaries'] == 1
+
+
+@pytest.mark.parametrize('limit', [float('nan'), 0, -.1, .2])
+def test_invalid_timing_bound_is_rejected(limit):
+    with pytest.raises(ValueError, match='Timing tolerance'):
+        quantize_vocal_rhythm([[0, 1, 60, .9]], {'bpm': 120, 'offsetSeconds': 0}, 2,
+                              timing_tolerance_seconds=limit)
+
+
+def test_bounded_notation_does_not_hide_a_grid_that_starts_after_the_audio():
+    with pytest.raises(ValueError, match='timing bound'):
+        quantize_vocal_rhythm([[0, .5, 60, .9]], {'bpm': 120, 'offsetSeconds': .2}, 2,
+                              timing_tolerance_seconds=.025)
+
+
 def evidence(events, attacks=(), wavering=()):
     times = np.arange(.005, 4., .01)
     f0 = np.zeros(len(times))
@@ -34,6 +130,12 @@ def test_short_same_pitch_dropout_fragments_become_one_note_not_extra_syllables(
 def test_same_pitch_short_reattacks_and_true_breath_are_not_joined():
     events = [[.2, .6, 63, .9], [.6, .67, 63, .9], [.67, .82, 63, .9], [1., 1.4, 63, .9]]
     notes, _ = clean_vocal_fragments(events, *evidence(events, attacks=(.6, .67)))
+    assert notes == events
+
+
+def test_two_short_repeated_notes_are_not_a_fragment_of_a_sustained_note():
+    events = [[.94, 1.01, 60, .9], [1.02, 1.09, 60, .9]]
+    notes, _ = clean_vocal_fragments(events, *evidence(events))
     assert notes == events
 
 

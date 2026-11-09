@@ -12,6 +12,9 @@ export interface NoteEvent {
   confidence?: number;
   origin?: NoteOrigin;
   articulation?: 'staccato' | 'accent' | 'tenuto';
+  arpeggio?: boolean;
+  /** Measured attack delay from the start of the roll, in quarter-note beats. */
+  arpeggioOffset?: number;
   dynamic?: 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff';
   dynamicScope?: 'staff' | 'voice';
   staff?: number;
@@ -20,6 +23,7 @@ export interface NoteEvent {
 
 export interface ScorePart {
   id: string;
+  sourceId?: string;
   name: string;
   shortName: string;
   instrument: string;
@@ -60,6 +64,11 @@ export interface SourceInfo {
       downbeatTimesSeconds?: number[];
       method: string;
       confidence?: number;
+      notationUnitFactor?: number;
+      detectedBpm?: number;
+      beatTrackerOffsetSeconds?: number;
+      onsetPhaseCorrectionSeconds?: number;
+      onsetPhaseSupportPrograms?: number[];
     };
     transforms: string[];
     rawProjectUrl?: string;
@@ -122,6 +131,12 @@ export interface ScoreProject {
   arrangement?: { options: ArrangementOptions; report: ArrangementReport };
   createdAt: string;
   updatedAt: string;
+  pitchReview?: {
+    checkpoints: Record<string, 'pending' | 'confirmed' | 'modified' | 'uncertain'>;
+    start: number;
+    length: number;
+    cursor: number;
+  };
 }
 
 export interface AbcRenderResult {
@@ -131,6 +146,7 @@ export interface AbcRenderResult {
   harmonyVoiceId?: string;
   staffMap?: Array<{ partId: string; staffNumber: number; clef: Clef; voiceIds: string[] }>;
   systemMeasures?: number[];
+  staffLayout?: Array<{ partId: string; auxiliary: boolean }>;
   warnings?: string[];
   noteSegments?: Record<
     number,

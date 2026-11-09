@@ -21,8 +21,8 @@ export interface EngravingStaff {
   name: string;
   shortName: string;
   voices: EngravingVoice[];
-  compact: boolean;
   automatic: boolean;
+  auxiliary: boolean;
 }
 
 export interface EngravingPlan {
@@ -57,6 +57,10 @@ export function groupNoteLanes(notes: NoteEvent[]): EngravingGroup[][] {
       previous.notes.push(note);
     else groups.push({ start: note.start, duration: note.duration, notes: [note] });
   }
+  return packNoteGroups(groups);
+}
+
+function packNoteGroups(groups: EngravingGroup[]): EngravingGroup[][] {
   const lanes: EngravingGroup[][] = [];
   const ends: number[] = [];
   for (const group of groups) {
@@ -71,67 +75,22 @@ export function groupNoteLanes(notes: NoteEvent[]): EngravingGroup[][] {
   return lanes.length ? lanes : [[]];
 }
 
-function synchronizedGroups(notes: NoteEvent[]): EngravingGroup[] {
-  const events = new Map<number, { add: NoteEvent[]; remove: NoteEvent[] }>();
-  notes.forEach((note) => {
-    for (const [time, key] of [
-      [note.start, 'add'],
-      [note.start + note.duration, 'remove'],
-    ] as const) {
-      if (!events.has(time)) events.set(time, { add: [], remove: [] });
-      events.get(time)![key].push(note);
-    }
-  });
-  const boundaries = [...events.keys()].sort((a, b) => a - b);
-  const active = new Map<string, NoteEvent>();
-  const groups: EngravingGroup[] = [];
-  for (let index = 0; index < boundaries.length - 1; index++) {
-    const start = boundaries[index];
-    events.get(start)!.remove.forEach((note) => active.delete(note.id));
-    events.get(start)!.add.forEach((note) => active.set(note.id, note));
-    if (!active.size) continue;
-    const sounding = [...active.values()].sort(
-      (a, b) => (b.midi ?? -1) - (a.midi ?? -1) || a.start - b.start,
-    );
-    groups.push({ start, duration: boundaries[index + 1] - start, notes: sounding });
-  }
-  return groups;
-}
-
-// Chord synchronization reduces notation voices, not musical events. Repeated
-// overlapping pitches remain in different layers so their note-offs stay distinct.
-function compactLanes(notes: NoteEvent[]): EngravingGroup[][] {
-  const layers: NoteEvent[][] = [];
-  const endings: Map<number, number>[] = [];
-  const pitched = notes
-    .filter((note) => note.midi !== null)
-    .sort((a, b) => a.start - b.start || b.duration - a.duration);
-  for (const note of pitched) {
-    let layer = endings.findIndex((ends) => (ends.get(note.midi!) ?? -Infinity) <= note.start + EPSILON);
-    if (layer < 0) {
-      layer = layers.length;
-      layers.push([]);
-      endings.push(new Map());
-    }
-    layers[layer].push(note);
-    endings[layer].set(note.midi!, note.start + note.duration);
-  }
-  const result = layers.map(synchronizedGroups);
-  const rests = notes.filter((note) => note.midi === null);
-  if (rests.length) result.push(...groupNoteLanes(rests));
-  return result.length ? result : [[]];
-}
-
 function meanPitch(groups: EngravingGroup[]): number {
   const notes = groups.flatMap((group) => group.notes).filter((note) => note.midi !== null);
   return notes.reduce((sum, note) => sum + note.midi!, 0) / (notes.length || 1);
 }
 
-export function createEngravingPlan(project: ScoreProject, partIds?: string[]): EngravingPlan {
+export function createEngravingPlan(
+  project: ScoreProject,
+  partIds?: string[],
+  beatWindow?: { start: number; end: number },
+): EngravingPlan {
   const parts = project.parts.filter((part) => !partIds || partIds.includes(part.id));
   const staves: EngravingStaff[] = [];
   const warnings: string[] = [];
   let dense = false;
+  const generatedLayering = project.source.kind === 'audio'
+    && project.source.analysis?.quality?.decoderProfile === 'yourmt3';
   parts.forEach((part, partIndex) => {
     const pitched = part.notes.filter((note) => note.midi !== null);
     const low = Math.min(...pitched.map((note) => note.midi!));
@@ -159,6 +118,9 @@ export function createEngravingPlan(project: ScoreProject, partIds?: string[]): 
           ]
         : getNotationStaffs(part);
     if (inferredGrand) warnings.push(`${part.name}：仅阅谱自动分为高、低音谱表，全部原始音符与音高保留。`);
+    // A declared keyboard grand staff already identifies the two hands.
+    // Additional rhythmic lanes are voices on that staff, not another hand.
+    const declaredGrand = keyboard && part.staves?.length === 2 && part.role !== 'percussion';
     let nextStaff = Math.max(...definitions.map((staff) => staff.number)) + 1;
     definitions.forEach((definition, staffIndex) => {
       const notes = part.notes.filter((note) =>
@@ -169,32 +131,38 @@ export function createEngravingPlan(project: ScoreProject, partIds?: string[]): 
       const sourceVoices = [...new Set(notes.map((note) => note.voice ?? ''))];
       const namedVoices = sourceVoices.some(Boolean);
       const rawLanes = groupNoteLanes(notes);
-      let compact = false;
       let voices: Array<{ groups: EngravingGroup[]; sourceVoice?: string }>;
       if (namedVoices) {
         voices = sourceVoices.flatMap((sourceVoice) => {
           const subset = notes.filter((note) => (note.voice ?? '') === sourceVoice);
           const lanes = groupNoteLanes(subset);
-          if (lanes.length > 2) {
-            compact = true;
-            return compactLanes(subset).map((groups) => ({ groups, sourceVoice: sourceVoice || undefined }));
-          }
           return lanes.map((groups) => ({ groups, sourceVoice: sourceVoice || undefined }));
         });
-      } else if (rawLanes.length > 2) {
-        compact = true;
-        voices = compactLanes(notes).map((groups) => ({ groups }));
       } else voices = rawLanes.map((groups) => ({ groups }));
-      if (compact) {
+      // Keep independent rhythms independent. Synchronizing all on/off
+      // boundaries turns one held note into dozens of tied fragments.
+      if (voices.length > 2) {
         dense = true;
         warnings.push(
-          `${part.name}：${rawLanes.length} 条重叠时值线改为带逐音延音线的同步和弦；未删除、缩短或移调任何音符。`,
+          `${part.name}：独立节奏分层记谱，长音不随其他声部反复切分；未删除、缩短或移调任何音符。`,
         );
       }
-      for (let offset = 0; offset < voices.length; offset += 2) {
+      // The generated layer IDs separate runs from holds across the whole
+      // track. Reuse a reading lane when those groups do not overlap inside
+      // the current window, keeping the original written staff and note IDs.
+      if (beatWindow && generatedLayering && !keyboard && voices.length > 2
+          && sourceVoices.every((voice) => /^(held|run|low)-\d+$/.test(voice))) {
+        const groups = voices.flatMap((voice) => voice.groups)
+          .filter((group) => group.start < beatWindow.end - EPSILON
+            && group.start + group.duration > beatWindow.start + EPSILON)
+          .sort((a, b) => a.start - b.start || b.duration - a.duration);
+        voices = packNoteGroups(groups).map((groups) => ({ groups }));
+      }
+      const voicesPerStaff = declaredGrand ? voices.length : 2;
+      for (let offset = 0; offset < voices.length; offset += voicesPerStaff) {
         const number = offset ? nextStaff++ : definition.number;
         const selected = voices
-          .slice(offset, offset + 2)
+          .slice(offset, offset + voicesPerStaff)
           .sort((a, b) => meanPitch(b.groups) - meanPitch(a.groups));
         const extra = offset > 0;
         if (extra) warnings.push(`${part.name}：独立同音或原谱声部较多，增加辅助谱表保留全部声部。`);
@@ -202,8 +170,8 @@ export function createEngravingPlan(project: ScoreProject, partIds?: string[]): 
           ? ` · ${number}`
           : definitions.length > 1
             ? staffIndex === 0
-              ? ' · RH'
-              : ' · LH'
+              ? (keyboard ? ' · RH' : ' · 高音部')
+              : (keyboard ? ' · LH' : ' · 低音部')
             : '';
         staves.push({
           part,
@@ -212,16 +180,17 @@ export function createEngravingPlan(project: ScoreProject, partIds?: string[]): 
           name: part.name + suffix,
           shortName:
             part.shortName +
-            (extra ? ` ${number}` : definitions.length > 1 ? (staffIndex === 0 ? ' RH' : ' LH') : ''),
-          compact,
+            (extra ? ` ${number}` : definitions.length > 1 ? (keyboard ? (staffIndex === 0 ? ' RH' : ' LH') : (staffIndex === 0 ? ' 高音部' : ' 低音部')) : ''),
           automatic: inferredGrand || extra,
+          auxiliary: extra,
           voices: selected.map((voice, index) => ({
             ...voice,
             id:
               definitions.length === 1 && !extra
                 ? `P${partIndex + 1}V${index + 1}`
                 : `P${partIndex + 1}S${number}V${index + 1}`,
-            ...(selected.length === 2 ? { stem: index === 0 ? ('up' as const) : ('down' as const) } : {}),
+            ...(selected.length > 1 && index === 0 ? { stem: 'up' as const }
+              : selected.length > 1 && index === selected.length - 1 ? { stem: 'down' as const } : {}),
           })),
         });
       }
@@ -234,14 +203,48 @@ export function createEngravingPlan(project: ScoreProject, partIds?: string[]): 
 // The canonical event IDs identify the actual continuation before engraving.
 export function prepareEngravingTune(tune: TuneObject, result: AbcRenderResult): TuneObject {
   if (!result.noteSegments) return tune;
+  for (const line of tune.lines) {
+    if (!line.staff || line.staff.length !== result.staffLayout?.length) continue;
+    type Staff = NonNullable<typeof line.staff>[number] & { brace?: 'start' | 'continue' | 'end'; bracket?: 'start' | 'continue' | 'end' };
+    const original = line.staff as Staff[];
+    const kept = original.map((staff, index) => ({ staff, layout: result.staffLayout![index] }))
+      .filter(({ staff, layout }) => !layout.auxiliary || (staff.voices ?? []).some(voice =>
+        voice.some(event => event.el_type === 'note' && 'pitches' in event && Boolean(event.pitches?.length))));
+    if (kept.length === original.length) continue;
+    const bracketed = original.some(staff => staff.bracket);
+    kept.forEach(({ staff, layout }, index) => {
+      delete staff.brace;
+      delete staff.bracket;
+      const peers = kept.filter(item => item.layout.partId === layout.partId);
+      if (peers.length > 1) staff.brace = peers[0].staff === staff ? 'start' : peers.at(-1)!.staff === staff ? 'end' : 'continue';
+      if (bracketed && kept.length > 1) staff.bracket = index === 0 ? 'start' : index === kept.length - 1 ? 'end' : 'continue';
+    });
+    line.staff = kept.map(item => item.staff);
+  }
   type Pitch = { startTie?: object; endTie?: boolean; pitch: number; midipitch?: number };
-  type Event = { el_type: string; startChar?: number; pitches?: Pitch[] };
+  type Event = { el_type: string; startChar?: number; pitches?: Pitch[]; duration?: number;
+    rest?: { type: string }; startTriplet?: number; endTriplet?: boolean; tripletMultiplier?: number; tripletR?: number };
   const occurrences = new Map<string, Array<{ pitch: Pitch; start: number; end: number }>>();
   for (const line of tune.lines)
     for (const staff of line.staff ?? [])
       for (const voice of staff.voices ?? [])
         for (const candidate of voice ?? []) {
           const event = candidate as Event;
+          // abcjs only supplies heads/flags through 128th notes. Measured
+          // polyphonic boundaries can be finer. Use a supported head with an
+          // explicit single-event tuplet ratio; the engraving spacing is
+          // unchanged, as are canonical timing and the selectable note map.
+          if (event.el_type === 'note' && event.duration && event.duration < 1 / 128
+              && !event.startTriplet && !['invisible', 'spacer'].includes(event.rest?.type ?? '')) {
+            const actual = event.duration;
+            const ticks = Math.max(1, Math.round(actual * 4 * 960));
+            const divisor = (a: number, b: number): number => b ? divisor(b, a % b) : a;
+            event.duration = 1 / 128;
+            event.startTriplet = 30 / divisor(30, ticks);
+            event.tripletMultiplier = actual * 128;
+            event.tripletR = 1;
+            event.endTriplet = true;
+          }
           if (!event.pitches || event.startChar === undefined) continue;
           const segment = result.noteSegments[event.startChar];
           if (!segment) continue;
@@ -275,6 +278,30 @@ export interface EngravingBox {
   y: number;
   width: number;
   height: number;
+}
+
+/** Opt-in reading correction: multi-voice staff names can sit above their staff
+ * in abcjs 6.7.2. Match the rendered staff's line/voice identity, not note Y. */
+export function alignEngravingStaffNames(systems: SVGSVGElement[]): number {
+  let moved = 0;
+  for (const svg of systems) {
+    for (const label of svg.querySelectorAll<SVGTextElement>('text.abcjs-voice-name')) {
+      if (label.hasAttribute('transform')) continue;
+      const classes = [...label.classList];
+      const line = classes.find(name => /^abcjs-l\d+$/.test(name));
+      const voice = classes.find(name => /^abcjs-v\d+$/.test(name));
+      if (!line || !voice) continue;
+      const staff = svg.querySelector<SVGGElement>(`g.abcjs-staff.${line}.${voice}`);
+      if (!staff) continue;
+      const staffBox = staff.getBBox(), labelBox = label.getBBox();
+      const delta = staffBox.y + staffBox.height / 2 - labelBox.y - labelBox.height / 2;
+      if (Number.isFinite(delta) && Math.abs(delta) > 1) {
+        label.setAttribute('transform', `translate(0 ${delta})`);
+        moved++;
+      }
+    }
+  }
+  return moved;
 }
 
 export function expandedViewBox(view: EngravingBox, ink: EngravingBox, sharedRight?: number): EngravingBox {

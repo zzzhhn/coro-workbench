@@ -90,7 +90,7 @@ def read_pitch_window(directory: Path, start: float, end: float) -> dict:
         raise ValueError("请选择有效的原音频时间范围。")
     if end - start > MAX_WINDOW_SECONDS:
         raise ValueError("音高对照每次最多显示24秒，请缩小范围。")
-    _, arrays, duration, integrity, periodicity_threshold, activation_threshold = _read_contours(directory)
+    audit, arrays, duration, integrity, periodicity_threshold, activation_threshold = _read_contours(directory)
     if start >= duration:
         raise ValueError("所选时间超出已核对的分析段。")
     times = arrays["time"]
@@ -120,9 +120,10 @@ def read_pitch_window(directory: Path, start: float, end: float) -> dict:
         "frameStepSeconds": round(float(np.median(np.diff(times))), 6),
         "frames": frames,
         "integrity": integrity,
-        "method": "Stored FCPE and independent CREPE on the separated lead; voiced/energy gates retained",
+        "inputSource": audit.get("inputSource", "separated_lead"),
+        "method": "Stored FCPE and independent CREPE on the selected vocal waveform; voiced/energy gates retained",
         "groundTruthAvailable": False,
-        "note": "两条线是模型证据，不是正确答案。空白表示低发声证据或静音，不应自动补音；只显示原调主唱。",
+        "note": "两条线是当前选定人声的模型证据，不是正确答案或歌手身份确认。空白表示低发声证据或静音，不应自动补音；保留原调。",
     }
 
 

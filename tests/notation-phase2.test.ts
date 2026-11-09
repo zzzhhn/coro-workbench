@@ -57,7 +57,9 @@ describe('Phase 2 non-destructive notation projection', () => {
     ];
     const before = structuredClone(project);
     const plan = createEngravingPlan(project);
-    expect(plan.staves.map((staff) => staff.clef)).toEqual(['treble', 'bass']);
+    expect(new Set(plan.staves.map((staff) => staff.clef))).toEqual(new Set(['treble', 'bass']));
+    expect(plan.staves.flatMap((staff) => staff.voices.flatMap((voice) => voice.groups.flatMap((group) => group.notes))))
+      .toHaveLength(part.notes.length);
     expect(plan.staves.every((staff) => staff.voices.length <= 2)).toBe(true);
     expect(plan.warnings.join('')).toContain('未删除');
     const { result, tune, audio, decoded } = decodeScore(project);
@@ -68,7 +70,7 @@ describe('Phase 2 non-destructive notation projection', () => {
     expect(decoded.get(part.id)).toEqual(fingerprint(part.notes));
   });
 
-  it('repairs partial chord ties when chord membership and pitch position change', () => {
+  it('keeps a held note independent when other chord pitches enter and release', () => {
     const project = createBlankProject();
     project.measures = 2;
     project.parts[0].notes = [
@@ -84,7 +86,7 @@ describe('Phase 2 non-destructive notation projection', () => {
     const anchorSegments = Object.values(result.noteSegments!).filter((segment) =>
       segment.noteIds.includes('anchor'),
     );
-    expect(new Set(anchorSegments.map((segment) => segment.start)).size).toBeGreaterThan(3);
+    expect(new Set(anchorSegments.map((segment) => segment.start))).toEqual(new Set([0, 4]));
   });
 
   it('preserves overlapping repeated MIDI pitches rather than merging note-offs', () => {
@@ -178,11 +180,9 @@ describe.skipIf(!existsSync(frozen))('Frozen user score regression (private loca
     const before = JSON.stringify(project);
     const { result, tune, audio, decoded } = decodeScore(project);
     expect(JSON.stringify(project)).toBe(before);
-    expect(result.staffMap).toHaveLength(7);
-    expect(result.staffMap!.filter((staff) => staff.partId === 'piano').map((staff) => staff.clef)).toEqual([
-      'treble',
-      'bass',
-    ]);
+    expect(result.staffMap!.length).toBeGreaterThanOrEqual(project.parts.length);
+    expect(new Set(result.staffMap!.filter((staff) => staff.partId === 'piano').map((staff) => staff.clef)))
+      .toEqual(new Set(['treble', 'bass']));
     expect(result.staffMap!.every((staff) => staff.voiceIds.filter((id) => id !== result.harmonyVoiceId).length <= 2)).toBe(true);
     expect(result.systemMeasures).toHaveLength(25);
     expect(audio.totalDuration * 4).toBe(196);

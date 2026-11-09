@@ -38,12 +38,23 @@ def saved(tmp_path):
     return tmp_path, directory, project
 
 
+def test_rescued_vocal_keeps_rebuild_source_without_an_openable_raw_score(saved):
+    root, directory, project = saved
+    del project['source']['analysis']['rawProjectUrl']
+    project['source']['analysis']['quality']['modelEvidenceUrl'] = f'/api/projects/{SOURCE}/evidence'
+    assert prepare_rebuild(root, SOURCE, project)[2] == directory / 'stem-lead.wav'
+    project['source']['analysis']['quality']['modelEvidenceUrl'] = f'/api/projects/{NEW}/evidence'
+    with pytest.raises(ValueError, match='不匹配'):
+        prepare_rebuild(root, SOURCE, project)
+
+
 @pytest.fixture
 def api(saved, monkeypatch):
     root, directory, project = saved
     app = create_app(root)
-    from server import rosvot
+    from server import phoneme, rosvot
     monkeypatch.setattr(rosvot, "runtime_health", lambda: {"ready": True})
+    monkeypatch.setattr(phoneme, "runtime_health", lambda: {"ready": False})
     submitted = []
     monkeypatch.setattr(app.state.manager, "submit", submitted.append)
     with TestClient(app) as client:
@@ -70,6 +81,55 @@ def queued(root, project):
     target.mkdir()
     atomic_json(target / "status.json", {"id": NEW, "status": "queued"})
     return target, {"id": NEW, "action": "vocal-rebuild", "source_job_id": SOURCE, "project": project}
+
+
+def add_cached_contour(source):
+    identity = source / 'lead-identity'
+    models = identity / 'lead-models'
+    models.mkdir(parents=True)
+    atomic_json(identity / 'inputs.json', {'vocals': str(source / 'stem-lead.wav')})
+    path = models / 'vocals-fcpe.npz'
+    times = np.arange(200) / 100
+    np.savez(path, time=times, f0=np.full(len(times), 261.63), activation=np.ones(len(times)))
+    return path
+
+
+def test_available_phoneme_is_default_and_explicit_missing_decoder_never_queues(api, monkeypatch):
+    from server import phoneme, rosvot
+    client, _, submitted, root, project = api
+    add_cached_contour(root / SOURCE)
+    monkeypatch.setattr(phoneme, 'runtime_health', lambda: {'ready': True})
+    monkeypatch.setattr(rosvot, 'runtime_health', lambda: {'ready': False})
+    response = client.post(f'/api/projects/{SOURCE}/vocal-rebuild', json={'project': project, 'decoder': 'rosvot'})
+    assert response.status_code == 503 and submitted == []
+
+    response = client.post(f'/api/projects/{SOURCE}/vocal-rebuild', json={'project': project})
+    assert response.status_code == 202
+    assert read_json(root / submitted[0] / 'request.json')['decoder'] == 'phoneme'
+
+
+def test_phoneme_rebuild_reuses_matching_stem_and_contour(saved, monkeypatch):
+    from server import phoneme
+    root, source, project = saved
+    contour = add_cached_contour(source)
+    calls = []
+
+    def infer(stem, output, *, contour_path, cancel_check, **kwargs):
+        cancel_check()
+        calls.append((stem, contour_path))
+        return {'events': [event(.17, .38), event(.42, .63, 62)]}
+
+    monkeypatch.setattr(phoneme, 'infer_phoneme', infer)
+    target, request = queued(root, project)
+    output = rebuild_vocals(target, {**request, 'decoder': 'phoneme'}, JobStatus(target))
+    assert calls == [(source / 'stem-lead.wav', contour)]
+    assert output['parts'][1:] == project['parts'][1:] and output['chords'] == project['chords']
+    assert output['parts'][0]['stemUrl'] == project['parts'][0]['stemUrl']
+    assert output['source']['analysis']['quality']['decoderProfile'] == 'phoneme'
+    assert output['source']['analysis']['quality']['nativeEventsJobId'] == NEW
+    assert read_json(target / 'analysis-evidence.json')['analyzedDurationSeconds'] == 2
+    voice = read_json(target / 'quality-evidence.json')['parts']['vocals']
+    assert voice['decoderUsed'] == 'phoneme' and voice['alignedVocalEvents'] == voice['learnedVocalNotes']['events']
 
 
 def test_api_snapshot_queue_and_existing_cancel(api):
@@ -163,6 +223,18 @@ def test_rebuild_preserves_manual_edits_and_maps_with_source_tempo(saved, monkey
     assert q["beforeVocalNotes"] == 1 and q["afterVocalNotes"] == 2 and q["verificationRerun"] is False
     assert q["decoderProfile"] == "rosvot" and q["vocalRhythmVersion"].startswith("vocal-score")
     assert output["source"]["analysis"]["rawProjectUrl"] == f"/api/projects/{NEW}/raw"
+
+
+def test_rebuilt_sung_eighths_do_not_restore_the_25ms_notation_constraint(saved, monkeypatch):
+    root, _, project = saved
+    mock_infer(monkeypatch, [event(.17, .38, 60), event(.42, .63, 62),
+                            event(.67, .88, 64), event(.92, 1.13, 65)])
+    target, request = queued(root, project)
+    output = rebuild_vocals(target, request, JobStatus(target))
+    assert [(n['start'], n['duration']) for n in output['parts'][0]['notes']] == [
+        (0., .5), (.5, .5), (1., .5), (1.5, .5)]
+    evidence = read_json(target / 'quality-evidence.json')
+    assert evidence['parts']['vocals']['learnedVocalNotes']['events'][0]['source_start_seconds'] == .17
 
 
 @pytest.mark.parametrize("change", [
@@ -426,7 +498,9 @@ def test_extreme_beat_reinterpretation_keeps_physical_time(saved, monkeypatch, b
     output = rebuild_vocals(target, request, JobStatus(target))
     assert output["originalAudio"]["tempo"] == bpm
     notes = output["parts"][0]["notes"]
-    assert abs(.1 + notes[1]["start"] * 60 / bpm - .7) < .12
+    # Readable notation allows the default editorial shift. Explicit bounded
+    # quantization still checks the separate 25ms limit.
+    assert abs(.1 + notes[1]["start"] * 60 / bpm - .7) <= .16 + 1e-7
 
 
 def test_uuid_collision_never_deletes_existing_source(api, monkeypatch):

@@ -26,7 +26,7 @@ export default function LocalResults({
   onOpen,
 }: {
   currentId: string;
-  onOpen: (project: ScoreProject) => void;
+  onOpen: (project: ScoreProject) => Promise<boolean>;
 }) {
   const [rows, setRows] = useState<ProjectRow[]>([]);
   const [error, setError] = useState('');
@@ -55,7 +55,7 @@ export default function LocalResults({
     try {
       const result = await getJob(row.id);
       if (!result.project) throw new Error('这项分析没有可读乐谱。');
-      onOpen(result.project);
+      await onOpen(result.project);
     } catch (error) {
       setError(error instanceof Error ? error.message : '读取失败');
     } finally {
@@ -91,12 +91,16 @@ export default function LocalResults({
                     ? '整曲'
                     : `前 ${Math.round(row.analyzedSeconds)} 秒`}{' '}
                 · {row.measures} 小节 · {row.parts} 声部 ·{' '}
-                {row.operation === 'vocal-rebuild'
+                {row.operation === 'lyrics-assisted-game-medium-review'
+                  ? '歌词三方对照'
+                  : row.operation === 'vocal-rebuild'
                   ? '主唱重建副本'
                   : row.decoder === 'rosvot'
                   ? '词音节奏'
                   : row.decoder === 'acoustic'
                   ? '声学起止提案'
+                  : row.decoder === 'game'
+                    ? 'GAME Medium 跟唱谱'
                   : row.decoder === 'legato'
                     ? '细节提案'
                     : row.proposal

@@ -2,9 +2,14 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { backendMismatch, runtimeIdentity, supportedNode } from './runtime.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const children = [];
+if (!supportedNode(process.version)) {
+  console.error('Unsupported Node.js version. Use the version in .nvmrc, then run npm run doctor.');
+  process.exit(1);
+}
 let closing = false;
 
 async function probe(url) {
@@ -52,11 +57,12 @@ if (!existsSync(python)) {
 const backend = await probe('http://127.0.0.1:8765/api/health');
 if (backend) {
   const health = await backend.json().catch(() => null);
-  if (!health?.localOnly || !health?.engines?.basicPitch) {
-    console.error('Port 8765 belongs to another application. Nothing was stopped.');
+  const mismatch = backendMismatch(health, runtimeIdentity(root));
+  if (mismatch) {
+    console.error(`${mismatch}。等待当前任务结束后手动重启；没有停止任何现有进程。`);
     process.exit(1);
   }
-  console.log('Using existing Coro audio engine on 8765. Restart it if you just updated backend code.');
+  console.log('Using existing Coro audio engine with matching source on 8765.');
 } else run(python, ['-m', 'uvicorn', 'server.app:app', '--host', '127.0.0.1', '--port', '8765']);
 
 const frontend = await probe('http://127.0.0.1:5173/');

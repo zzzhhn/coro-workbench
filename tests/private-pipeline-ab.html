@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>空耳 · 转谱 A/B 审阅</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f5f3;color:#292d30;font:15px/1.55 system-ui,sans-serif}main{max-width:1220px;margin:auto;padding:18px 24px 48px}header{position:sticky;top:0;background:#f4f5f3f5;z-index:4;padding:12px 0;border-bottom:1px solid #d9ddda}h1{font-size:22px;margin:0 0 12px}h2{font-size:17px;margin:0}button,select,textarea{font:inherit;color:inherit;border:1px solid #bfc6c3;border-radius:6px;background:white;padding:7px 11px}button{cursor:pointer}button[aria-pressed=true]{background:#30383b;color:white;border-color:#30383b}button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #b77b4c;outline-offset:3px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row+.row{margin-top:10px}.muted,small{color:#626d69}#clock{font-variant-numeric:tabular-nums}.source{margin:16px 0}audio{height:34px;max-width:100%;width:300px}.paper{background:white;border:1px solid #dce1dd;border-radius:8px;padding:20px;margin:16px 0;overflow:auto;scroll-margin-top:160px}.paper .row{margin-bottom:18px}#score{min-height:160px}#score svg{display:block;width:100%;height:auto}#status{min-height:24px;color:#86582c;margin:8px 0}#review{background:white;border:1px solid #dce1dd;border-radius:8px;padding:20px}fieldset{border:0;padding:0;margin:14px 0}legend{font-weight:600;margin-bottom:8px}fieldset label{display:inline-flex;align-items:center;gap:5px;margin:0 14px 8px 0}textarea{display:block;width:100%;min-height:72px;resize:vertical}details{margin-top:16px}summary{cursor:pointer}#scans img{width:100%;height:auto}#methods{padding:10px 0;white-space:pre-wrap}#save-state{min-height:23px;color:#526958}a{color:#436354}#version-map{font-weight:600}#audio-state{font-size:13px}#stats{font-size:13px;max-width:1050px}#export{margin-left:auto}@media(max-width:700px){main{padding:10px}.paper{padding:10px}header{position:static}.row{gap:7px}audio{width:270px}h1{font-size:20px}}
+</style></head>
+<body><main>
+<header><h1>空耳 · 转谱 A/B 审阅</h1>
+<div class="row" role="group" aria-label="实验阶段">
+<button data-stage="vocal" aria-pressed="true">1　人声记谱</button><button data-stage="strings" aria-pressed="false">2　弦乐合奏</button><button data-stage="layout" aria-pressed="false">3　谱面排版</button>
+<button id="export">导出审阅</button></div>
+<div class="row"><button id="previous" aria-label="上一段">←</button><select id="window" aria-label="手谱小节"></select><button id="next" aria-label="下一段">→</button>
+<select id="scope" aria-label="阅谱范围"><option value="focus">重点声部</option><option value="full">完整总谱</option></select><span id="clock" class="muted"></span><span id="progress" class="muted"></span></div>
+</header>
+<div class="row source"><label>原声 <audio id="original" controls preload="metadata"></audio></label><label><span id="stem-label">人声分轨</span> <audio id="stem" controls preload="metadata"></audio></label></div>
+<p id="instruction"></p><p id="status" role="status">正在读取本地冻结结果…</p>
+<section class="paper" aria-label="谱面对照"><div class="row"><div role="group" aria-label="显示版本"><button id="side-a" aria-pressed="true">A</button><button id="side-b" aria-pressed="false">B</button></div>
+<button id="listen-a">听 A</button><button id="listen-b">听 B</button><audio id="score-audio" controls preload="metadata" hidden></audio><span id="audio-state" class="muted"></span></div>
+<div id="score"></div></section>
+<section id="review"><h2 id="question">哪一版更容易照着唱，且没有丢掉原声里的内容？</h2>
+<fieldset><legend>这段的判断</legend><label><input type="radio" name="preferred" value="A">A 更好</label><label><input type="radio" name="preferred" value="B">B 更好</label><label><input type="radio" name="preferred" value="same">相当</label><label><input type="radio" name="preferred" value="unsure">暂时无法判断</label></fieldset>
+<fieldset><legend>把握程度</legend><label><input type="radio" name="confidence" value="confident">有把握</label><label><input type="radio" name="confidence" value="tentative">只是倾向</label><label><input type="radio" name="confidence" value="unsure">不确定</label></fieldset>
+<fieldset><legend>仍存在的问题，可多选</legend><label><input type="checkbox" name="problem" value="fragment">碎音／怪节奏</label><label><input type="checkbox" name="problem" value="missing">漏音／长音消失</label><label><input type="checkbox" name="problem" value="octave">八度错误</label><label><input type="checkbox" name="problem" value="reattack">重唱被吞／多出音头</label><label><input type="checkbox" name="problem" value="collision">符号重叠</label><label><input type="checkbox" name="problem" value="unplayable">不能照着唱奏</label></fieldset>
+<label for="comment">具体位置或原因</label><textarea id="comment" placeholder="例如：第 14 小节，B 的第二个字被压短了；或 A/B 都漏了同一个音。"></textarea>
+<div class="row"><button id="save">保存这段判断</button><span id="save-state" role="status"></span></div>
+</section>
+<details id="reference"><summary>对照你的原版手扒谱</summary><div id="scans"></div></details>
+<details id="raw-evidence"><summary>原始 Medium 识别回放</summary><audio id="raw-audio" controls preload="metadata"></audio></details>
+<details id="reveal"><summary>揭晓版本与变动范围</summary><p id="version-map"></p><p id="stats"></p><div id="methods" class="muted"></div></details>
+<p class="muted">判断只保存在这台浏览器，导出可留档。候选不会自动替换正式工程。</p>
+</main><script type="module" src="./private-pipeline-ab.ts"></script></body></html>

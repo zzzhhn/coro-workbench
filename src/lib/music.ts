@@ -4,7 +4,9 @@ import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { parseMidi, writeMidi } from 'midi-file';
 import type { AbcRenderResult, ChordEvent, NoteEvent, ScorePart, ScoreProject } from './types';
 import { createEngravingPlan } from './engraving';
-import { notePlaybackLevel, notesWithActiveDynamics } from './dynamics';
+import { noteGateRatio, notePlaybackLevel } from './dynamics';
+import { performanceNotes } from './performance';
+import type { MeasureRange } from './scoreWindow';
 
 const Midi = ToneMidi.Midi ?? (ToneMidi as unknown as { default: typeof ToneMidi }).default.Midi;
 
@@ -201,6 +203,8 @@ export function validateProject(project: ScoreProject): string[] {
     )
       problems.push(`${part.name}: 音域无效。`);
     if (!optionalText(part.stemUrl, 10_000)) problems.push(`${part.name}: 分轨地址必须是文字。`);
+    if (part.sourceId !== undefined && (typeof part.sourceId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(part.sourceId)))
+      problems.push(`${part.name}: 声源编号无效。`);
     if (!Number.isInteger(part.program) || part.program < 0 || part.program > 127)
       problems.push(`${part.name}: GM 音色编号无效。`);
     if (!Number.isFinite(part.volume) || part.volume < 0 || part.volume > 1)
@@ -272,6 +276,14 @@ export function validateProject(project: ScoreProject): string[] {
       }
       if (note.articulation !== undefined && !['staccato', 'accent', 'tenuto'].includes(note.articulation)) {
         problems.push(`${part.name}: 奏法无效。`);
+        break;
+      }
+      if (note.arpeggio !== undefined && typeof note.arpeggio !== 'boolean') problems.push(`${part.name}: 琶音记号无效。`);
+      if (
+        note.arpeggioOffset !== undefined &&
+        (!Number.isFinite(note.arpeggioOffset) || note.arpeggioOffset < 0)
+      ) {
+        problems.push(`${part.name}: 琶音起音延迟无效。`);
         break;
       }
       if (note.dynamic !== undefined && !['pp', 'p', 'mp', 'mf', 'f', 'ff'].includes(note.dynamic)) {
@@ -581,6 +593,9 @@ export interface AbcLayoutOptions {
   barsPerSystem?: number;
   staffSep?: number;
   systemSep?: number;
+  measureRange?: MeasureRange;
+  /** Printed numbering only, for a score containing a leading alignment bar. */
+  measureNumberOffset?: number;
 }
 
 export function toAbc(
@@ -589,9 +604,23 @@ export function toAbc(
   layout: AbcLayoutOptions = {},
 ): AbcRenderResult {
   assertValid(project);
+  const { start: firstMeasure, end: lastMeasure } = layout.measureRange ?? {
+    start: 1,
+    end: project.measures,
+  };
+  if (
+    !Number.isInteger(firstMeasure) || !Number.isInteger(lastMeasure) ||
+    firstMeasure < 1 || lastMeasure > project.measures || lastMeasure < firstMeasure
+  ) throw new Error('谱面小节范围无效。');
+  const printedFirstMeasure = firstMeasure + (layout.measureNumberOffset ?? 0);
+  if (!Number.isInteger(printedFirstMeasure) || printedFirstMeasure < 1)
+    throw new Error('显示小节编号无效。');
   const parts = project.parts.filter((part) => !partIds || partIds.includes(part.id));
   if (!parts.length) throw new Error('请至少选择一个声部。');
-  const plan = createEngravingPlan(project, partIds);
+  const barLength = beatsPerBar(project);
+  const plan = createEngravingPlan(project, partIds, layout.measureRange
+    ? { start: (firstMeasure - 1) * barLength, end: lastMeasure * barLength }
+    : undefined);
   const noteMap: AbcRenderResult['noteMap'] = {};
   const noteSegments: NonNullable<AbcRenderResult['noteSegments']> = {};
   const displayedHarmony = harmonyChanges(project);
@@ -625,7 +654,9 @@ export function toAbc(
       return staves.length > 1 ? `{ ${staves.map(staffExpression).join(' ')} }` : staffExpression(staves[0]);
     })
     .join(' ');
-  let abc = `X:1\nT:${cleanText(project.title)}\n${project.composer ? `C:${cleanText(project.composer)}\n` : ''}M:${project.timeSignature.join('/')}\nL:1/8\nQ:1/4=${project.tempo}\n%%barnumbers 1\n%%score [ ${scoreExpression} ]\n%%staffsep ${staffSep}\n%%sysstaffsep ${systemSep}\n%%vocalspace 12\n%%stretchlast 1\n`;
+  // abcjs truncates decimal Q values; round the printed mark while playback
+  // and exports continue to use the measured project tempo.
+  let abc = `X:1\nT:${cleanText(project.title)}\n${project.composer ? `C:${cleanText(project.composer)}\n` : ''}M:${project.timeSignature.join('/')}\nL:1/8\nQ:1/4=${Math.round(project.tempo)}\n%%barnumbers 1\n%%score [ ${scoreExpression} ]\n%%staffsep ${staffSep}\n%%sysstaffsep ${systemSep}\n%%vocalspace 12\n%%stretchlast 1\n`;
   const drumNotes = [
     ...new Set(
       parts
@@ -647,29 +678,36 @@ export function toAbc(
   if (harmonyVoiceId)
     abc += `V:${harmonyVoiceId} clef=${voices[0].clef === 'percussion' ? 'perc' : voices[0].clef} stems=up\n`;
   abc += `K:${normalizeKey(project.key)}\n`;
-  const barLength = beatsPerBar(project);
+  if (firstMeasure > 1 || layout.measureNumberOffset) abc += `%%setbarnb ${printedFirstMeasure}\n`;
   const [meterBeats, meterUnit] = project.timeSignature;
   const beamUnit = meterUnit === 8 && meterBeats >= 6 && meterBeats % 3 === 0 ? 1.5 : 4 / meterUnit;
   const hasPercussion = parts.some((part) => part.role === 'percussion' || part.clef === 'percussion');
   const systemMeasures: number[] = [];
-  for (let firstBar = 0; firstBar < project.measures; firstBar += barsPerSystem) {
+  for (let firstBar = firstMeasure - 1; firstBar < lastMeasure;) {
+    const firstSystem = firstBar === firstMeasure - 1;
+    const peakAttacks = Math.max(0, ...voices.flatMap(staff => staff.lanes.flatMap(({ lane }) =>
+      Array.from({ length: barsPerSystem }, (_, offset) => lane.filter(group =>
+        group.start >= (firstBar + offset) * barLength
+        && group.start < (firstBar + offset + 1) * barLength).length))));
+    const systemBars = peakAttacks > 24 ? 1 : barsPerSystem;
+    const systemEnd = Math.min(firstBar + systemBars, lastMeasure);
     systemMeasures.push(firstBar + 1);
     voices.forEach(({ part, clef, lanes }, staffIndex) => {
       lanes.forEach(({ lane, id }, laneIndex) => {
-        if (firstBar === 0 || hasPercussion) abc += `V:${id}\n`;
-        if (firstBar === 0) abc += `%%MIDI program ${part.role === 'percussion' ? 128 : part.program}\n`;
+        if (firstSystem || hasPercussion) abc += `V:${id}\n`;
+        if (firstSystem) abc += `%%MIDI program ${part.role === 'percussion' ? 128 : part.program}\n`;
         // ABC's active key leaks into following voices unless each staff is restored.
         if (hasPercussion)
           abc += `K:${part.role === 'percussion' || clef === 'percussion' ? 'none' : normalizeKey(project.key)}\n`;
         abc += `[V:${id}] `;
         const lyrics: string[] = [];
         let hasLyrics = false;
-        for (let bar = firstBar; bar < Math.min(firstBar + barsPerSystem, project.measures); bar++) {
+        for (let bar = firstBar; bar < systemEnd; bar++) {
           const start = bar * barLength;
           const accidentals = new Map<string, number>();
           let previousBeamGroup = -1;
-          for (const segment of measureSegments(lane, start, barLength)
-            .flatMap(splitAbcSegment)) {
+          for (const segment of groupAbcTuplets(measureSegments(lane, start, barLength)
+            .flatMap(splitAbcSegment))) {
             const beamGroup = Math.floor((segment.start - start + EPSILON) / beamUnit);
             // Syncopated runs may never end exactly on a beat. Still separate
             // their beams when the next attack belongs to a new metrical beat.
@@ -683,9 +721,18 @@ export function toAbc(
               if (first.articulation === 'staccato') prefix += '.';
               if (first.articulation === 'accent') prefix += '!accent!';
               if (first.articulation === 'tenuto') prefix += '!tenuto!';
+              if (first.arpeggio) prefix += '!arpeggio!';
             }
-            prefix += segment.tupletPrefix ?? '';
-            const duration = abcDuration(segment.notatedDuration ?? segment.duration);
+            // abcjs has no notehead for invisible spacer rests. A tuplet on
+            // that spacer crashes TripletElem; its exact fraction needs no
+            // visible tuplet bracket and already preserves the voice's clock.
+            const otherVoiceSounds = lanes.some((other, index) => index !== laneIndex && other.lane.some(group =>
+              group.start < start + barLength - EPSILON && group.start + group.duration > start + EPSILON));
+            const emptyVoiceBar = Math.abs(segment.start - start) < EPSILON
+              && Math.abs(segment.duration - barLength) < EPSILON;
+            const invisibleSpacer = !first && (laneIndex > 0 || (emptyVoiceBar && otherVoiceSounds));
+            if (!invisibleSpacer) prefix += segment.tupletPrefix ?? '';
+            const duration = abcDuration(invisibleSpacer ? segment.duration : segment.notatedDuration ?? segment.duration);
             const pitches = segment.notes.filter((note) => note.midi !== null);
             const pitchedTokens = pitches.map((note) =>
               part.role === 'percussion'
@@ -701,11 +748,14 @@ export function toAbc(
               (pitch, index) => pitch + (partial && continuing[index] ? '-' : ''),
             );
             const core = !pitches.length
-              ? `${!first && laneIndex > 0 ? 'x' : 'z'}${duration}`
+              ? `${invisibleSpacer ? 'x' : 'z'}${duration}`
               : pitches.length === 1
                 ? `${pitchedTokens[0]}${duration}`
                 : `[${glyphTokens.join('')}]${duration}`;
             const token = prefix + core + (allContinue ? '-' : '');
+            // A headless spacer cannot anchor a beam either. Rest boundaries
+            // separate beam groups without changing any note's measured time.
+            if (!pitches.length && !abc.endsWith(' ')) abc += ' ';
             const begin = abc.length;
             let mappedBegin = begin;
             while (mappedBegin > 0 && /[ \t]/.test(abc[mappedBegin - 1])) mappedBegin--;
@@ -732,7 +782,7 @@ export function toAbc(
               });
             }
             const end = segment.start + segment.duration;
-            if (Math.abs((end - start) / beamUnit - Math.round((end - start) / beamUnit)) < EPSILON) abc += ' ';
+            if (!pitches.length || Math.abs((end - start) / beamUnit - Math.round((end - start) / beamUnit)) < EPSILON) abc += ' ';
             if (pitches.length) {
               const lyric = firstAttack ? first?.lyric : undefined;
               hasLyrics ||= Boolean(lyric);
@@ -753,10 +803,10 @@ export function toAbc(
         if (hasLyrics) abc += `w:${lyrics.join(' ')}\n`;
       });
       if (staffIndex === 0 && harmonyVoiceId) {
-        if (firstBar === 0 || hasPercussion) abc += `V:${harmonyVoiceId}\n`;
+        if (firstSystem || hasPercussion) abc += `V:${harmonyVoiceId}\n`;
         if (hasPercussion) abc += `K:${part.role === 'percussion' || clef === 'percussion' ? 'none' : normalizeKey(project.key)}\n`;
         abc += `[V:${harmonyVoiceId}] `;
-        for (let bar = firstBar; bar < Math.min(firstBar + barsPerSystem, project.measures); bar++) {
+        for (let bar = firstBar; bar < systemEnd; bar++) {
           const start = bar * barLength, end = start + barLength;
           const changes = displayedHarmony.filter((chord) => chord.start >= start - EPSILON && chord.start < end - EPSILON);
           const times = [...new Set([start, ...changes.map((chord) => chord.start), end])].sort((a, b) => a - b);
@@ -764,13 +814,14 @@ export function toAbc(
             const labels = changes.filter((chord) => Math.abs(chord.start - times[i]) < EPSILON);
             abc += labels.map((chord) => `"${abcText(chord.symbol)}"`).join('');
             for (const spacer of splitAbcSegment({ start: times[i], duration: times[i + 1] - times[i], notes: [], tiedFrom: false, tiedTo: false }))
-              abc += `${spacer.tupletPrefix ?? ''}x${abcDuration(spacer.notatedDuration ?? spacer.duration)} `;
+              abc += `x${abcDuration(spacer.duration)} `;
           }
           abc += bar === project.measures - 1 ? '|] ' : '| ';
         }
         abc += '\n';
       }
     });
+    firstBar += systemBars;
   }
   return {
     abc,
@@ -778,6 +829,7 @@ export function toAbc(
     harmonyVoiceId,
     noteSegments,
     systemMeasures,
+    staffLayout: plan.staves.map(staff => ({ partId: staff.part.id, auxiliary: staff.auxiliary })),
     staffMap: voices.map((staff) => ({
       partId: staff.part.id,
       staffNumber: staff.number,
@@ -864,6 +916,22 @@ function splitAbcSegment(segment: Segment): Segment[] {
   });
 }
 
+function groupAbcTuplets(segments: Segment[]): Segment[] {
+  for (let index = 0; index + 2 < segments.length; index++) {
+    const group = segments.slice(index, index + 3);
+    if (group.every((segment) => segment.tupletPrefix === '(3:2:1'
+        && segment.notes.some((note) => note.midi !== null)
+        && Math.abs(segment.duration - group[0].duration) < EPSILON)
+      && group.slice(1).every((segment, i) =>
+        Math.abs(segment.start - group[i].start - group[i].duration) < EPSILON)) {
+      group[0].tupletPrefix = '(3:2:3';
+      group[1].tupletPrefix = group[2].tupletPrefix = undefined;
+      index += 2;
+    }
+  }
+  return segments;
+}
+
 function xmlHarmony(chord: ChordEvent, offset: number): string {
   if (chord.symbol === 'N.C.')
     return `<harmony><root><root-step text="">C</root-step></root><kind text="N.C.">none</kind><offset>${Math.round(offset * DIVISIONS)}</offset></harmony>`;
@@ -933,13 +1001,14 @@ function xmlNote(
     note?.articulation && firstPiece && !tiedFrom
       ? `<articulations><${note.articulation}/></articulations>`
       : '';
+  const arpeggio = note?.arpeggio && firstPiece && !tiedFrom ? '<arpeggiate/>' : '';
   const lyric =
     note?.lyric && firstPiece && !tiedFrom
       ? `<lyric number="1"><syllabic>single</syllabic><text>${xmlText(note.lyric)}</text></lyric>`
       : '';
   const instrument =
     part.role === 'percussion' && pitched ? `<instrument id="${xmlText(part.id)}-D${note!.midi}"/>` : '';
-  return `<note${hiddenRest ? ' print-object="no"' : ''}${note ? ` dynamics="${Math.round((note.velocity * 10000) / 90)}"` : ''}>${chord ? '<chord/>' : ''}${pitch}<duration>${duration}</duration>${tie}${instrument}<voice>${xmlText(voice)}</voice><type>${value.type}</type>${'<dot/>'.repeat(value.dots)}${value.actual ? `<time-modification><actual-notes>${value.actual}</actual-notes><normal-notes>${value.normal}</normal-notes></time-modification>` : ''}${part.role === 'percussion' && pitched && [42, 44, 46, 49, 51].includes(note!.midi!) ? '<notehead>x</notehead>' : ''}${staff !== undefined ? `<staff>${staff}</staff>` : ''}${tiedNotation || articulation ? `<notations>${tiedNotation}${articulation}</notations>` : ''}${lyric}</note>`;
+  return `<note${hiddenRest ? ' print-object="no"' : ''}${note ? ` dynamics="${Math.round((note.velocity * 10000) / 90)}"` : ''}>${chord ? '<chord/>' : ''}${pitch}<duration>${duration}</duration>${tie}${instrument}<voice>${xmlText(voice)}</voice><type>${value.type}</type>${'<dot/>'.repeat(value.dots)}${value.actual ? `<time-modification><actual-notes>${value.actual}</actual-notes><normal-notes>${value.normal}</normal-notes></time-modification>` : ''}${part.role === 'percussion' && pitched && [42, 44, 46, 49, 51].includes(note!.midi!) ? '<notehead>x</notehead>' : ''}${staff !== undefined ? `<staff>${staff}</staff>` : ''}${tiedNotation || articulation || arpeggio ? `<notations>${tiedNotation}${articulation}${arpeggio}</notations>` : ''}${lyric}</note>`;
 }
 
 export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
@@ -979,14 +1048,23 @@ export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
   const body = parts
     .map((part, partIndex) => {
       const staves = plan.staves.filter((staff) => staff.part.id === selected[partIndex].id);
-      const lanes = staves.flatMap((staff) =>
-        staff.voices.map((voice, index) => ({
-          groups: voice.groups,
-          sourceVoice: voice.sourceVoice,
-          staff: staff.number,
-          secondary: index > 0,
-        })),
-      );
+      let laneNumber = 0;
+      const lanes = staves.flatMap((staff) => {
+        // Parallel lanes split from one source voice need distinct XML voices;
+        // otherwise same-pitch ties on the same staff can attach to the wrong lane.
+        const sourceVoices = new Set(staff.voices.map(voice => voice.sourceVoice));
+        const usedVoices = new Set<string>();
+        return staff.voices.map((voice, index) => {
+          let fallback = ++laneNumber;
+          let xmlVoice = voice.sourceVoice;
+          if (!xmlVoice || usedVoices.has(xmlVoice)) {
+            while (sourceVoices.has(String(fallback)) || usedVoices.has(String(fallback))) fallback++;
+            xmlVoice = String(fallback);
+          }
+          usedVoices.add(xmlVoice);
+          return { groups: voice.groups, voice: xmlVoice, staff: staff.number, secondary: index > 0 };
+        });
+      });
       const measures = Array.from({ length: project.measures }, (_, bar) => {
         const start = bar * barLength;
         const clefs = staves
@@ -1014,7 +1092,7 @@ export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
         lanes.forEach((lane, voiceIndex) => {
           if (voiceIndex)
             content += `<backup><duration>${Math.round(barLength * DIVISIONS)}</duration></backup>`;
-          const voice = lane.sourceVoice ?? String(voiceIndex + 1);
+          const voice = lane.voice;
           for (const segment of measureSegments(lane.groups, start, barLength)) {
             const first = segment.notes[0];
             if (first?.dynamic && Math.abs(first.start - segment.start) < EPSILON)
@@ -1404,6 +1482,7 @@ export function fromMusicXml(xml: string): ScoreProject {
               voice,
               ...(lyric ? { lyric } : {}),
               ...(pendingDynamic ? { dynamic: pendingDynamic, dynamicScope: dynamicKey.endsWith(':*') ? 'staff' as const : 'voice' as const } : {}),
+              ...(named(kids(named(kids(node), 'notations')), 'arpeggiate') ? { arpeggio: true } : {}),
               ...(articulations.includes('staccato')
                 ? { articulation: 'staccato' as const }
                 : articulations.includes('accent')
@@ -1515,13 +1594,13 @@ export function toMidi(project: ScoreProject, partIds?: string[]): Uint8Array {
     track.addCC({ number: 7, ticks: 0, value: part.volume });
     track.addCC({ number: 10, ticks: 0, value: ((part.pan ?? 0) + 1) / 2 });
     track.endOfTrackTicks = Math.round(project.measures * beatsPerBar(project) * midi.header.ppq);
-    notesWithActiveDynamics(part)
+    performanceNotes(part, project.tempo)
       .filter((note) => note.midi !== null && note.velocity > 0)
       .forEach((note) =>
         track.addNote({
           midi: note.midi!,
           ticks: Math.round(note.start * midi.header.ppq),
-          durationTicks: Math.max(1, Math.round(note.duration * midi.header.ppq)),
+          durationTicks: Math.max(1, Math.round(note.duration * noteGateRatio(note) * midi.header.ppq)),
           velocity: note.dynamic ? notePlaybackLevel(note) : note.velocity,
         }),
       );

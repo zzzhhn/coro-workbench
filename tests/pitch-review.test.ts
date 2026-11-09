@@ -9,6 +9,7 @@ import {
   insertNoteFromSourceTime,
   pitchEvidenceJobId,
   pitchBranchUrl,
+  pitchReviewAudioUrl,
   sourceBeat,
   sourceSecond,
   sourceWindowNotes,
@@ -33,6 +34,16 @@ function fixture() {
 }
 
 describe('source-time correction contracts', () => {
+  it('listens to the selected vocal stem even when an unused lead hypothesis exists', () => {
+    const project = fixture();
+    const root = `/api/audio/${'a'.repeat(32)}`;
+    project.source.analysis = { transforms: [], quality: { leadAudioUrl: `${root}/stem-lead.wav` } };
+    expect(pitchReviewAudioUrl(project)).toBe(`${root}/stem-lead.wav`);
+    project.parts[0].stemUrl = `${root}/stem-vocals.wav`;
+    expect(pitchReviewAudioUrl(project)).toBe(project.parts[0].stemUrl);
+    project.parts[0].stemUrl = 'https://example.invalid/wrong.wav';
+    expect(pitchReviewAudioUrl(project)).toBeUndefined();
+  });
   it('navigates listening priorities in original seconds with bounded one-second context', () => {
     const interval = {
       kind: 'fcpe_missing' as const,
@@ -126,5 +137,12 @@ describe('source-time correction contracts', () => {
     expect(pitchBranchUrl(`/api/audio/${'a'.repeat(32)}/stem-lead.wav`)).toBeDefined();
     expect(pitchBranchUrl('local:bundle-1234-abcd')).toBeDefined();
     expect(pitchBranchUrl(`/api/audio/${'a'.repeat(32)}/../../config.json`)).toBeUndefined();
+  });
+  it('retains pitch review for a rescued vocal without an openable baseline score', () => {
+    const project = fixture();
+    project.source.analysis = { transforms: [], quality: { modelEvidenceUrl: `/api/projects/${'b'.repeat(32)}/evidence` } };
+    expect(pitchEvidenceJobId(project)).toBe('b'.repeat(32));
+    project.source.analysis.quality!.modelEvidenceUrl = 'https://example.com/evidence';
+    expect(pitchEvidenceJobId(project)).toBeUndefined();
   });
 });

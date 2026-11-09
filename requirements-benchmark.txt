@@ -1,0 +1,11 @@
+# Small local singing benchmark; no separation, piano, or language-model weights.
+-r requirements-test.txt
+torch==2.5.1
+torchaudio==2.5.1
+torchfcpe==0.0.4
+onnxruntime==1.20.1
+resampy==0.4.2
+setuptools==70.3.0
+nnAudio==0.3.2
+wquantiles==0.6
+# Install basic-pitch==0.4.0 separately with --no-deps, as in setup-audio.sh.

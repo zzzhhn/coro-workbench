@@ -24,6 +24,7 @@ from . import config
 from .storage import JOB_ID, JobStatus, atomic_json, read_json, utc_now
 from .omr import create_omr_router, omr_health
 from .video import create_video_router
+from .runtime import runtime_identity
 
 
 class JobManager:
@@ -154,6 +155,8 @@ class UploadLimitMiddleware:
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
+    # Capture once: a file edited after startup must not masquerade as loaded code.
+    runtime = runtime_identity(config.ROOT)
     directory = data_dir or config.DATA_DIR
     manager = JobManager(directory)
 
@@ -207,38 +210,71 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         except (ImportError, OSError, ValueError):
             engines["vocalNotes"] = {"ready": False, "backend": "ROSVOT", "note": "Learned vocal note runtime unavailable; acoustic decoder retained"}
         try:
+            from .phoneme import runtime_health as phoneme_health
+            engines["phonemeNotes"] = phoneme_health()
+        except (ImportError, OSError, ValueError):
+            engines["phonemeNotes"] = {"ready": False, "engine": "Phoneme-informed AST + FCPE"}
+        try:
             from .melband import runtime_health as enhanced_vocal_health
             engines["enhancedVocals"] = enhanced_vocal_health()
         except (ImportError, OSError, ValueError):
             engines["enhancedVocals"] = {"ready": False, "engine": "Mel-Band-RoFormer"}
         ready = engines["basicPitch"]["ready"] and engines["ffmpeg"]["ready"]
-        return {"status": "ok" if ready else "setup_required", "engines": engines, "localOnly": True, "activeJobs": manager.active_count(), "limits": {"maxUploadMB": 100, "maxDurationSeconds": config.MAX_DURATION_SECONDS, "maxAnalysisSeconds": config.MAX_ANALYSIS_SECONDS, "maxPendingJobs": config.MAX_PENDING_JOBS}, "privacy": "文件只保存在本机，分析不调用云端 API。"}
+        return {"status": "ok" if ready else "setup_required", "runtime": runtime, "engines": engines, "localOnly": True, "activeJobs": manager.active_count(), "limits": {"maxUploadMB": 100, "maxDurationSeconds": config.MAX_DURATION_SECONDS, "maxAnalysisSeconds": config.MAX_ANALYSIS_SECONDS, "maxMultiAnalysisSeconds": config.MAX_MULTI_ANALYSIS_SECONDS, "maxPendingJobs": config.MAX_PENDING_JOBS}, "privacy": "文件只保存在本机，分析不调用云端 API。"}
 
     @app.post("/api/analyze", status_code=202)
-    async def analyze(file: UploadFile = File(...), mode: str = Form("quick"), tempo: float | None = Form(None), max_seconds: float = Form(90), quality: str = Form("auto"), decoder: str = Form("rosvot"), verification: str = Form("full")):
+    async def analyze(file: UploadFile = File(...), mode: str = Form("quick"), tempo: float | None = Form(None), max_seconds: float = Form(90), quality: str = Form("auto"), decoder: str = Form("standard"), verification: str = Form("full"), lyrics_lrc: str = Form("")):
         if mode not in {"quick", "separate", "multi"}:
             raise HTTPException(422, "mode 必须是 quick、separate 或 multi。")
         if quality not in {"auto", "raw"}:
             raise HTTPException(422, "quality 必须是 auto 或 raw。")
-        if decoder not in {"standard", "legato", "acoustic", "rosvot"}:
-            raise HTTPException(422, "decoder 必须是 standard、legato、acoustic 或 rosvot。")
+        if decoder not in {"standard", "legato", "acoustic", "rosvot", "phoneme", "game"}:
+            raise HTTPException(422, "decoder 必须是 standard、legato、acoustic、rosvot、phoneme 或 game。")
+        if decoder == 'game' and (mode == 'quick' or quality != 'auto'):
+            raise HTTPException(422, 'GAME 需要选择多声部或分轨转谱，以及整理版本。')
+        if lyrics_lrc.strip():
+            if decoder != 'game':
+                raise HTTPException(422, '歌词对齐需要选择 GAME Medium。')
+            from .game import parse_lrc
+            try:
+                parse_lrc(lyrics_lrc, max_seconds)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+        if decoder == "phoneme" and (mode != "separate" or quality != "auto"):
+            raise HTTPException(422, "发音边界引擎需要选择分轨转写和整理提案。")
         if verification not in {"full", "sampled"}:
             raise HTTPException(422, "verification 必须是 full 或 sampled。")
         if tempo is not None and not (30 <= tempo <= 240):
             raise HTTPException(422, "速度必须在 30–240 BPM 之间。")
-        if not (1 <= max_seconds <= config.MAX_ANALYSIS_SECONDS):
-            raise HTTPException(422, "分析时长必须在 1–300 秒之间。")
+        analysis_limit = config.MAX_MULTI_ANALYSIS_SECONDS if mode == 'multi' else config.MAX_ANALYSIS_SECONDS
+        if not (1 <= max_seconds <= analysis_limit):
+            raise HTTPException(422, f"分析时长必须在 1 至 {analysis_limit} 秒之间。")
         filename = Path((file.filename or "audio").replace("\\", "/")).name[:240]
         suffix = Path(filename).suffix.lower()
         if suffix not in config.ALLOWED_EXTENSIONS:
             raise HTTPException(415, "请选择 WAV、MP3、FLAC、OGG、M4A、AAC、OPUS 或 AIFF 音频。MIDI / MusicXML 请从乐谱导入。")
         engines = config.engine_health()
+        if decoder == 'game':
+            if not all(engines.get(k, {}).get('ready') for k in ('game','demucs','quality')):
+                raise HTTPException(503, 'GAME Medium、分轨或节拍模型未就绪。请安装本地模型；没有开始旧版转写。')
+            if lyrics_lrc.strip() and not engines['game'].get('lyricsReady'):
+                raise HTTPException(503, '中文歌词对齐模型未就绪，可先清空歌词运行 GAME 音频转谱。')
         if (mode != "multi" and not engines["basicPitch"]["ready"]) or not engines["ffmpeg"]["ready"]:
             raise HTTPException(503, "本地转写引擎未就绪，请运行 scripts/setup-audio.sh。")
         if mode == "separate" and not engines["demucs"]["ready"]:
             raise HTTPException(503, "分轨模型未就绪，请运行 scripts/setup-audio.sh --models。")
         if mode == "multi" and not engines.get("yourMT3", {}).get("ready"):
             raise HTTPException(503, "多乐器族群实验引擎未安装，请运行 scripts/setup-yourmt3.sh。")
+        if decoder == "phoneme":
+            from .phoneme import runtime_health as phoneme_health
+            from .audio_quality import quality_engine_ready
+            if not phoneme_health().get("ready") or not quality_engine_ready():
+                raise HTTPException(503, "发音边界或音高环境尚未就绪，请运行 bash scripts/setup-phoneme.sh 和 bash scripts/setup-audio-quality.sh。")
+        if mode == "separate" and quality == "auto" and decoder == "rosvot":
+            from .rosvot import runtime_health as rosvot_health
+            from .audio_quality import quality_engine_ready
+            if not rosvot_health().get("ready") or not quality_engine_ready():
+                raise HTTPException(503, "所选 ROSVOT 演唱边界引擎未就绪。请选择已安装的主唱分段策略，或先运行 scripts/setup-rosvot.sh；本次未开始分析。")
         if not manager.reserve_upload():
             raise HTTPException(429, "本机分析队列已满（最多 4 个），请等待或取消已有任务。")
         job_id = uuid.uuid4().hex
@@ -268,7 +304,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             await file.close()
         result = {"id": job_id, "status": "queued", "progress": 0, "stage": "queued", "message": "等待本地分析。首次运行需要加载模型。", "createdAt": utc_now(), "updatedAt": utc_now()}
         try:
-            atomic_json(target / "request.json", {"id": job_id, "filename": filename, "input": upload_path.name, "mode": mode, "tempo": tempo, "max_seconds": max_seconds, "quality": quality, "decoder": decoder, "verification": verification})
+            atomic_json(target / "request.json", {"id": job_id, "filename": filename, "input": upload_path.name, "mode": mode, "tempo": tempo, "max_seconds": max_seconds, "quality": quality, "decoder": decoder, "verification": verification, "lyrics_lrc": lyrics_lrc})
             atomic_json(target / "status.json", result)
             manager.submit(job_id)
         finally:
@@ -281,8 +317,10 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/projects/{job_id}/vocal-rebuild", status_code=202)
     async def vocal_rebuild(job_id: str, request: Request):
-        from .vocal_rebuild import MAX_REQUEST_BYTES, prepare_rebuild
+        from .vocal_rebuild import MAX_REQUEST_BYTES, VOCAL_DECODERS, phoneme_contour, prepare_rebuild
         from .vocal_input import resolve_input
+        from . import phoneme, rosvot
+        import soundfile as sf
         get_directory(job_id)
         size, chunks = 0, []
         async for chunk in request.stream():
@@ -294,24 +332,45 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             def reject_constant(value):
                 raise ValueError("工程包含非有限 JSON 数值。")
             body = json.loads(b"".join(chunks), parse_constant=reject_constant)
-            if not isinstance(body, dict) or 'project' not in body or not set(body) <= {"project", "vocalSource"}:
-                raise ValueError("请求必须包含 project 源乐谱快照，可选 vocalSource 人声输入。")
+            if not isinstance(body, dict) or 'project' not in body or not set(body) <= {"project", "vocalSource", "decoder"}:
+                raise ValueError("请求必须包含 project 源乐谱快照，可选 vocalSource 和 decoder。")
+            decoder = body.get('decoder')
+            if 'decoder' in body and (not isinstance(decoder, str) or decoder not in VOCAL_DECODERS):
+                raise ValueError('主唱重建引擎必须是 phoneme 或 rosvot。')
             project, stored, stem, _ = prepare_rebuild(directory, job_id, body["project"])
             vocal_source = body.get('vocalSource', 'current')
             if not isinstance(vocal_source, str):
                 raise ValueError('人声输入选项必须是字符串。')
-            resolve_input(directory, stored, stem, vocal_source)
+            selected = resolve_input(directory, stored, stem, vocal_source)
+            duration = float(sf.info(selected).duration)
         except (ValueError, TypeError, KeyError, RecursionError, OSError) as error:
             raise HTTPException(422, str(error) if isinstance(error, ValueError) else "无法安全读取源工程。") from error
-        from .rosvot import runtime_health as vocal_note_health
-        if not vocal_note_health()["ready"]:
-            raise HTTPException(503, "主唱词音引擎尚未安装或校验失败，请运行 bash scripts/setup-rosvot.sh 后再重建。原谱未改动。")
+        if decoder is None and phoneme.runtime_health()['ready']:
+            decoder = 'phoneme'
+        elif decoder is None:
+            decoder = 'rosvot'
+            if not rosvot.runtime_health()['ready']:
+                raise HTTPException(503, '本机没有可用的主唱重建引擎。请运行 bash scripts/setup-phoneme.sh 或 bash scripts/setup-rosvot.sh。')
+        elif decoder == 'phoneme' and not phoneme.runtime_health()['ready']:
+            raise HTTPException(503, '发音边界引擎未就绪，请运行 bash scripts/setup-phoneme.sh。')
+        elif decoder == 'rosvot' and not rosvot.runtime_health()['ready']:
+            raise HTTPException(503, 'ROSVOT 引擎未就绪，请运行 bash scripts/setup-rosvot.sh。')
+        if decoder == 'phoneme':
+            if not 0 < duration <= phoneme.MAX_SECONDS:
+                raise HTTPException(422, f'发音边界引擎支持最长 {phoneme.MAX_SECONDS:g} 秒的人声分析段。')
+            if not vocal_source.startswith('enhanced'):
+                try:
+                    phoneme_contour(directory, selected, verify_hashes=False)
+                except (ValueError, KeyError, TypeError, OSError) as error:
+                    raise HTTPException(422, str(error) if isinstance(error, ValueError) else '无法核对 FCPE 连续音高缓存。') from error
         if vocal_source.startswith('enhanced'):
             from .melband import runtime_health as enhanced_vocal_health
             if not enhanced_vocal_health()['ready']:
                 raise HTTPException(503, '增强人声模型未安装，请运行 bash scripts/setup-melband.sh。原谱未改变。')
             if vocal_source == 'enhanced-lead' and not (config.MODELS_DIR / 'lead-separation/kara2.onnx').is_file():
                 raise HTTPException(503, '主唱/伴唱模型未安装，请运行 bash scripts/setup-lead-separation.sh。')
+            if decoder == 'phoneme' and not config.engine_health()['quality']['ready']:
+                raise HTTPException(503, '增强输入需要重新提取对应的 FCPE 音高，请运行 bash scripts/setup-audio-quality.sh。')
         if not manager.reserve_upload():
             raise HTTPException(429, "本机分析队列已满（最多 4 个），请等待或取消已有任务。")
         new_id = uuid.uuid4().hex
@@ -321,11 +380,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         try:
             target.mkdir(parents=True, mode=0o700)
             created = True
-            # Stem duration is authoritative even when this is already a derived result.
-            import soundfile as sf
-            duration = float(sf.info(stem).duration)
             atomic_json(target / "previous-project.json", project)
-            atomic_json(target / "request.json", {"id": new_id, "action": "vocal-rebuild", "source_job_id": job_id, "project": project, "max_seconds": duration, "mode": "vocal-rebuild", "decoder": "rosvot", "vocal_source": vocal_source})
+            atomic_json(target / "request.json", {"id": new_id, "action": "vocal-rebuild", "source_job_id": job_id, "project": project, "max_seconds": duration, "mode": "vocal-rebuild", "decoder": decoder, "vocal_source": vocal_source})
             atomic_json(target / "status.json", result)
             manager.submit(new_id)
         except BaseException:
@@ -335,6 +391,50 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         finally:
             manager.release_upload()
         return result
+
+    @app.post("/api/projects/{job_id}/score-rhythm")
+    def rebuild_score_rhythm(job_id: str):
+        from .score_rebuild import rebuild
+        source = get_directory(job_id)
+        if (source / 'request.json').is_file() and read_json(source / 'request.json').get('decoder') == 'game':
+            raise HTTPException(409, '这份谱使用 GAME Medium，不能用旧模型缓存重建。请从导入入口重新运行 GAME。')
+        try:
+            project, audit = rebuild(source)
+        except FileNotFoundError as error:
+            raise HTTPException(404, str(error)) from error
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(422, '缓存识别数据不完整，无法重新整理总谱节奏。') from error
+        target = directory / project['id']
+        project['title'] += ' · 节奏整理'
+        analysis = project['source']['analysis']
+        analysis['quality']['modelEvidenceUrl'] = f"/api/projects/{project['id']}/evidence"
+        analysis['quality']['nativeEventsJobId'] = job_id
+        analysis['quality']['scoreRebuildFromJob'] = job_id
+        target.mkdir(mode=0o700)
+        try:
+            atomic_json(target / 'project.json', project)
+            atomic_json(target / 'quality-evidence.json', audit)
+            analyzed_seconds = audit.get('analyzedDurationSeconds')
+            if analyzed_seconds is None:
+                analyzed_seconds = read_json(source / 'analysis-evidence.json')['analyzedDurationSeconds']
+            atomic_json(target / 'request.json', {'action': 'score-rhythm', 'mode': 'separate' if audit.get('cachedVocalSource') else 'multi', 'source_job_id': job_id,
+                        'max_seconds': analyzed_seconds})
+            atomic_json(target / 'status.json', {'id': project['id'], 'status': 'complete', 'progress': 100,
+                        'stage': 'complete', 'message': '已另存节奏整理谱本', 'project': project,
+                        'createdAt': utc_now(), 'updatedAt': utc_now()})
+        except BaseException:
+            shutil.rmtree(target, ignore_errors=True)
+            raise
+        return project
+
+    @app.get('/api/projects/{job_id}/game-raw')
+    def game_raw_project(job_id: str):
+        path = get_directory(job_id) / 'game-raw-project.json'
+        if not path.is_file() or path.is_symlink():
+            raise HTTPException(404, '这次任务尚未生成 GAME 原始转写。')
+        project = read_json(path)
+        project.get('source', {}).get('analysis', {}).pop('rawProjectUrl', None)
+        return project
 
     @app.get("/api/projects/{job_id}/raw")
     def raw_project(job_id: str):

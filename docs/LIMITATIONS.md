@@ -5,6 +5,65 @@ transcription or feature parity with a professional notation publisher.
 
 ## Transcription
 
+- The import dialog now defaults to whole-song YourMT3+ transcription, with an
+  explicit experimental label. The former recommended separation choice used
+  Demucs six-family stems plus Basic Pitch and initially selected only 90 seconds.
+  Multi/separate imports now default to GAME Medium for vocals while retaining
+  the accompanying instrument pipeline. GAME failure is explicit, with no silent
+  legacy vocal fallback. Optional LRC activates SOFA alignment; audio alone does
+  not reproduce the lyric-assisted review candidate. Existing saved projects do
+  not change automatically. Unavailable learned engines are rejected before queueing.
+  Different engines or analysis ranges are not interchangeable result versions.
+- Readable vocal notation separates acoustic boundaries from written rhythm.
+  It can move slow sung boundaries by up to 160 ms in ordinary cases; short
+  attacks retain length-scaled bounds. Every source boundary is retained in the
+  audit. This is an editorial proposal, not timing or pitch ground truth.
+  Phoneme notes that bridge at least 180 ms of both absent F0 and quiet audio
+  are split around that span; short dropouts and loud uncertain spans remain.
+  Raw learned intervals and changes are preserved. This does not fix singer
+  identity, all wrong pitches, or missing notes.
+
+- The optional YourMT3+ whole-song mode accepts up to 600 seconds; other audio
+  analysis modes retain their 300-second limit. Its pinned `MT3_FULL_PLUS`
+  vocabulary distinguishes violin, viola and cello, but groups some timbres
+  (for example soprano/alto sax). Decoder channels are not performer identities.
+  Multiple players of the same class can share one polyphonic part. Existing
+  independent source IDs remain separate, but the system does not infer player
+  identities. Full verification can attach piano/vocal preview stems when local
+  separation and quality models are installed. These stems can leak other parts;
+  model activation and stem energy are not calibrated note confidence.
+- Default multi-part notation infers common rhythmic patterns from native model
+  seconds on the audio-derived grid. The older exact mode retains its 25 ms
+  boundary bound; the default editorial score can move boundaries farther and
+  records original and written times separately. It retains staccato, chords, overlapping
+  same-pitch notes and repeated drum attacks. This prevents downstream deletion;
+  it does not fix incorrect model pitches, missing notes or instrument labels.
+  Decoder tie errors at chunk boundaries remain in local evidence.
+  Unpitched drum durations follow the notated hit rhythm; the model's synthetic
+  short offsets are not acoustic release estimates. Independent rhythm layers
+  may need extra staves. A few fine-grid events can still produce awkward
+  notation; successful rendering and a faithful export are not legibility approval.
+- Piano pedal resonance and finger durations are separate proposals. Compact
+  held rolls may become arpeggiated chords; freely timed playing can be misread.
+  Live playback, WAV and MIDI now share arpeggio attack offsets across staves.
+  Measured offsets take priority; manually marked chords use a bounded ascending
+  roll. MusicXML retains the arpeggio mark but not these measured offsets, so an
+  XML round trip uses the default roll. Pedal resonance proposals are not a
+  complete pedal-notation/playback implementation or Crescendo parity.
+  Empty auxiliary staves collapse per system, while active auxiliary voices
+  remain. Independent-model additions stay pending by default: whole-song
+  inspection rejected blindly adding every source-supported onset. The private
+  Konger case still has missed notes, class drift and unreadable passages.
+- Full verification now cross-checks sustained strings with instrumental
+  YourMT3, Basic Pitch on the residual family, and whole-note harmonic evidence.
+  Only long corroborated spans are promoted; competing octaves and short
+  residual pitches remain pending. This optional second instrumental pass adds
+  inference time. It does not identify individual string players or recover
+  every quiet inner voice. Native events and each applied change are retained.
+- Disputed lead octaves are checked against the original mixture and isolated
+  vocal harmonic series. Source-owned low fundamentals can still be ambiguous;
+  unresolved events remain unchanged. This is an acoustic check, not listening
+  or full-song performance acceptance.
 - Demucs separates six source families, not every individual instrument. Strings,
   winds and brass can remain combined. Instrument classifier labels are candidates.
 - Main-vocal separation can contain backing vocals, leakage, missing fundamentals
@@ -28,9 +87,16 @@ transcription or feature parity with a professional notation publisher.
   new blinded mixed-song benchmark. One recording in that group and one in the
   original eight-recording group lose full-note F1. No notes or pitches are
   added/deleted by the alignment step.
-- Vocal notation uses a joint timing path with a preference for simpler rhythm.
-  It can shift note boundaries by roughly a tenth of a second after acoustic
-  alignment, whose separate bound is 160 ms. Original model
+- The optional phoneme-informed engine uses learned boundaries plus same-waveform
+  FCPE pitch. Small SSVD clean-singing regressions are promising but do not prove
+  the intended singer was isolated from a mix. Training overlap is unknown.
+  Unvoiced pitch is left missing, not filled with invented notes. One-second
+  chunk context can still miss continuity across long held notes. It does not
+  produce lyrics, and is currently an import choice rather than a rebuild mode.
+- Vocal notation now limits each boundary shift to 25 ms and retains distinct
+  repeated attacks. A fine score-time grid may be necessary, so notation can be
+  less simple. ROSVOT's preceding acoustic alignment has its own separate bound
+  of 160 ms; the phoneme path does not apply that alignment again. Original model
   intervals remain in local evidence. Free time and intentional microtiming need editing.
 - Chordino has dictionary and separation limitations, particularly suspended and
   diminished-seventh chords. N means no chord was recognized, not proven silence.
