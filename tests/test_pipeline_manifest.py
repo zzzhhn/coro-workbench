@@ -39,3 +39,13 @@ def test_manifest_records_versions_outputs_and_no_quality_claim(tmp_path):
 def test_tracing_failure_never_breaks_analysis(tmp_path):
     missing = tmp_path / 'gone'
     pm.record(missing, 'decoding', 1, 'x')  # directory absent: silently ignored
+
+
+def test_provenance_is_compact_and_versioned(tmp_path):
+    manifest = {'jobId': 'j', 'runtime': {'revision': 'abc', 'codeHash': 'f' * 64},
+                'components': {'score_rhythm': 'multiscore-rhythm-5', 'singing_score': 'syllable-phrasing-4',
+                               'multi_source_runtime': 'multiscore-sources-7'}}
+    stamp = pm.provenance(manifest)
+    assert stamp == {'generation': pm.PIPELINE_GENERATION, 'revision': 'abc', 'codeHash': 'f' * 16,
+                     'scoreRhythm': 'multiscore-rhythm-5', 'singingScore': 'syllable-phrasing-4',
+                     'sourceRuntime': 'multiscore-sources-7', 'jobId': 'j'}

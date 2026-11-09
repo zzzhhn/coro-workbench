@@ -7,6 +7,7 @@ import { Headphones } from '@phosphor-icons/react';
 import { pitchVerificationSummary } from '../lib/verificationSummary';
 import { VOCAL_INPUT_LABELS, type VocalInputChoice } from '../lib/vocalRebuild';
 import { pitchEvidenceJobId } from '../lib/pitchReview';
+import { pipelineStatus } from '../lib/provenance';
 
 type PipelineManifest = {
   timeline: Array<{ stage: string; label: string; layer: string; seconds: number | null }>;
@@ -32,6 +33,7 @@ export default function SourceEvidence({
   onAudio,
   onPitchReview,
   onVocalRebuild,
+  onReanalyze,
 }: {
   project: ScoreProject;
   onImportCopy: (project: ScoreProject) => Promise<boolean>;
@@ -40,6 +42,8 @@ export default function SourceEvidence({
   onAudio?: (url: string, name: string) => void;
   onPitchReview?: (seconds: number) => void;
   onVocalRebuild?: () => void;
+  /** Re-transcribe this song with the current pipeline (opens the import dialog). */
+  onReanalyze?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(0);
@@ -163,8 +167,22 @@ export default function SourceEvidence({
       onMessage(error instanceof Error ? error.message : '读取模型证据失败', true);
     }
   };
+  const provenance = pipelineStatus(project);
   return (
     <section className={`source-evidence ${expanded ? 'expanded' : ''}`}>
+      {provenance.kind === 'legacy' && (
+        <div className="legacy-pipeline" role="status">
+          <Info size={15} />
+          <span>
+            这份转写来自<b>{provenance.reason}</b>，不是当前 v5 流水线（YourMT3+ 多声部 + GAME 主唱 + 新版钢琴记谱）。谱面、琶音和声部分配都会不同。
+          </span>
+          {onReanalyze && (
+            <button className="text-button" onClick={onReanalyze}>
+              用当前流水线重新转写
+            </button>
+          )}
+        </div>
+      )}
       <div className="source-evidence-bar">
         <button
           className="evidence-toggle"

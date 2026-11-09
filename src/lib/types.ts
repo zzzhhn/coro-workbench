@@ -83,6 +83,16 @@ export interface SourceInfo {
   };
   pages?: string[];
   analysisStartSeconds?: number;
+  /** Which local pipeline produced this transcription (absent before v5). */
+  pipeline?: {
+    generation: string;
+    revision?: string | null;
+    codeHash?: string | null;
+    scoreRhythm?: string;
+    singingScore?: string;
+    sourceRuntime?: string;
+    jobId?: string;
+  };
 }
 
 export interface ArrangementOptions {

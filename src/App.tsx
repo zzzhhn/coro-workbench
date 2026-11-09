@@ -1510,6 +1510,10 @@ export default function App() {
           project={project}
           onImportCopy={importProject}
           onMessage={notify}
+          onReanalyze={() => {
+            engine.current?.pause();
+            setDialog('import');
+          }}
           onVocalRebuild={vocalRebuildSourceId(source) ? () => {
             engine.current?.pause();
             setDialog('vocal-rebuild');

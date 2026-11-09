@@ -149,6 +149,20 @@ def build_manifest(directory: Path, request: dict, project: dict | None, runtime
     }
 
 
+PIPELINE_GENERATION = 'v5'
+
+
+def provenance(manifest: dict) -> dict:
+    """Compact identity stored inside the project itself, so an opened score can
+    always tell which pipeline produced it (old projects simply lack it)."""
+    runtime = manifest.get('runtime') or {}
+    components = manifest.get('components') or {}
+    return {'generation': PIPELINE_GENERATION, 'revision': runtime.get('revision'),
+            'codeHash': (runtime.get('codeHash') or '')[:16] or None,
+            'scoreRhythm': components.get('score_rhythm'), 'singingScore': components.get('singing_score'),
+            'sourceRuntime': components.get('multi_source_runtime'), 'jobId': manifest.get('jobId')}
+
+
 def write_manifest(directory: Path, request: dict, project: dict | None) -> dict | None:
     try:
         from . import config

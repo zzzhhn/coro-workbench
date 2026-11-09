@@ -28,9 +28,13 @@ def main() -> int:
             else:
                 from .pipeline import analyze_audio
                 project = analyze_audio(directory, request, status)
+            from .pipeline_manifest import provenance, write_manifest
+            manifest = write_manifest(directory, request, project)
+            if manifest and isinstance(project, dict):
+                project.setdefault('source', {})['pipeline'] = provenance(manifest)
+                from .storage import atomic_json
+                atomic_json(directory / "project.json", project)
             status.finish(project)
-            from .pipeline_manifest import write_manifest
-            write_manifest(directory, request, project)
         return 0
     except Cancelled:
         return 0
