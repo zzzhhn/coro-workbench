@@ -23,3 +23,5 @@ if [ -d "$main/data/notation-phase2-baseline" ] && [ ! -e "$here/data/notation-p
 fi
 echo "Main checkout jobs stay readable at $main/data/<job-id>; do not write there."
 echo "Do not pip install into the shared .venv; create a separate venv for new tools."
+echo "Scripts stored under linked evidence/ or work/ resolve to the main checkout via"
+echo "Path(__file__).resolve(). Use Path.cwd() as ROOT so they import this worktree's server/."
