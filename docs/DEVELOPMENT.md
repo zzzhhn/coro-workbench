@@ -110,6 +110,26 @@ Do not solve this by deleting all short notes, merging all repeated pitches,
 stretching rests away, or changing tempo solely to make glyphs larger. Genuine
 fast singing, repeated syllables and breath gaps must remain representable.
 
+## Reference-score evaluation
+
+`server/score_eval.py` compares any Coro projects with a private human reference
+MIDI in score beats. It is evaluation-only; the analysis pipeline never imports
+it, and a reference must never become an inference input or a tuning target.
+
+```sh
+.venv/bin/python -m server.score_eval --reference "<private.mid>" \
+  --tracks "lead=0;piano=1,2;strings=3" --first-bar-beat 4 \
+  --candidate raw=data/<job>/game-raw-project.json \
+  --candidate previous=data/<old-job>/project.json --candidate current=data/<job>/project.json \
+  --output evidence/<private-dir>/score-eval.json
+```
+
+It reports, per section: exact pitch and sixteenth matches, F1, octave-only
+matches, duration agreement, and written dotted notes. For the lead it also
+reports recovered same-pitch re-attacks. For keyboards it reports sustained-bass
+coverage, sub-beat low notes and arpeggio marks. These numbers support a review;
+they are not musical acceptance.
+
 ## Parallel worktrees
 
 Several checkouts can each run a formal Coro without sharing a stale backend.
