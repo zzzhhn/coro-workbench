@@ -20,6 +20,17 @@ from .storage import atomic_json, read_json, utc_now
 
 TRACE = 'trace.jsonl'
 MANIFEST = 'pipeline-manifest.json'
+# Set by the worker right after import, before any analysis work runs.
+WORKER_IDENTITY: dict | None = None
+
+
+def capture_worker_identity() -> dict:
+    """Freeze this process's code identity at start; later disk edits do not count."""
+    global WORKER_IDENTITY
+    from . import config
+    from .runtime import runtime_identity
+    WORKER_IDENTITY = runtime_identity(config.ROOT)
+    return WORKER_IDENTITY
 
 # Stage name -> (label, layer). Unknown stages are kept under their own name, so
 # new stages from branches appear without a code change here.
@@ -159,6 +170,7 @@ def provenance(manifest: dict) -> dict:
     components = manifest.get('components') or {}
     return {'generation': PIPELINE_GENERATION, 'revision': runtime.get('revision'),
             'codeHash': (runtime.get('codeHash') or '')[:16] or None,
+            'matchesBackend': runtime.get('matchesBackend'),
             'scoreRhythm': components.get('score_rhythm'), 'singingScore': components.get('singing_score'),
             'sourceRuntime': components.get('multi_source_runtime'), 'jobId': manifest.get('jobId')}
 
@@ -167,7 +179,14 @@ def write_manifest(directory: Path, request: dict, project: dict | None) -> dict
     try:
         from . import config
         from .runtime import runtime_identity
-        manifest = build_manifest(directory, request, project, runtime_identity(config.ROOT), config.engine_health())
+        import os
+        # The worker's own code identity is captured when its modules were imported
+        # (WORKER_IDENTITY), not at the end of a possibly long analysis.
+        identity = dict(WORKER_IDENTITY or runtime_identity(config.ROOT))
+        backend = os.environ.get('CORO_BACKEND_CODE_HASH') or None
+        identity['backendCodeHash'] = backend
+        identity['matchesBackend'] = None if backend is None else backend == identity.get('codeHash')
+        manifest = build_manifest(directory, request, project, identity, config.engine_health())
         atomic_json(directory / MANIFEST, manifest)
         return manifest
     except Exception:  # Provenance is best effort; never fail a finished analysis.

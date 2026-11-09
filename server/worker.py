@@ -12,6 +12,8 @@ def main() -> int:
     if len(sys.argv) != 2 or not JOB_ID.fullmatch(sys.argv[1]):
         return 2
     directory = DATA_DIR / sys.argv[1]
+    from .pipeline_manifest import capture_worker_identity
+    capture_worker_identity()
     status = JobStatus(directory)
     def waiting(first: bool) -> None:
         status.check_cancelled()

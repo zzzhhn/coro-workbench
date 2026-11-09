@@ -46,6 +46,18 @@ def test_provenance_is_compact_and_versioned(tmp_path):
                 'components': {'score_rhythm': 'multiscore-rhythm-5', 'singing_score': 'syllable-phrasing-4',
                                'multi_source_runtime': 'multiscore-sources-7'}}
     stamp = pm.provenance(manifest)
-    assert stamp == {'generation': pm.PIPELINE_GENERATION, 'revision': 'abc', 'codeHash': 'f' * 16,
+    assert stamp == {'generation': pm.PIPELINE_GENERATION, 'revision': 'abc', 'codeHash': 'f' * 16, 'matchesBackend': None,
                      'scoreRhythm': 'multiscore-rhythm-5', 'singingScore': 'syllable-phrasing-4',
                      'sourceRuntime': 'multiscore-sources-7', 'jobId': 'j'}
+
+
+
+def test_manifest_records_worker_code_and_backend_mismatch(tmp_path, monkeypatch):
+    from server.storage import JobStatus, atomic_json
+    atomic_json(tmp_path / 'status.json', {'id': 'x', 'status': 'queued', 'stage': 'queued'})
+    JobStatus(tmp_path).update(3, 'decoding', 'a')
+    monkeypatch.setattr(pm, 'WORKER_IDENTITY', {'codeHash': 'new', 'revision': 'r2', 'workspaceId': 'w'})
+    monkeypatch.setenv('CORO_BACKEND_CODE_HASH', 'old')
+    manifest = pm.write_manifest(tmp_path, {'id': 'x'}, {'parts': [], 'source': {}})
+    assert manifest['runtime']['codeHash'] == 'new' and manifest['runtime']['matchesBackend'] is False
+    assert pm.provenance(manifest)['matchesBackend'] is False
