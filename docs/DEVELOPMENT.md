@@ -7,6 +7,9 @@
   quarter-note beats, not seconds or measure-relative time. Null pitch is a rest.
 - `src/lib/music.ts`, `src/lib/engraving.ts`: MusicXML/ABC/MIDI conversion and
   note-to-glyph mappings. The canonical project, not ABC, is the source of truth.
+  Independent rhythm voices must not be synchronized to the union of every
+  note boundary: this fragments held notes into unreadable chains. Additional
+  notation staves represent rhythm layers, not identified performers.
 - `src/lib/arrange.ts`, `src/lib/harmonyRhythm.ts`, `src/lib/vocalBreathing.ts`: vocal ranges, voice leading,
   melody adaptation, syllables and physical-time breath planning.
 - `src/lib/dynamics.ts`: persistent staff/voice dynamics for playback and audio/MIDI
@@ -19,15 +22,45 @@
 
 ## Backend
 
+- `server/game.py`, `server/game_runner.py`: default multi/separate upload vocal
+  inference using GAME 1.0.3 Medium, 8 steps. Explicit failure, original events
+  and model/input provenance are retained. Optional LRC uses `lyrics_alignment.py`.
+- `server/singing_pipeline.py`, `server/singing_evidence.py`, `server/singing_score.py`:
+  shared acoustic evidence and notation inference for real uploads and lyric
+  review candidates. This path is separate from the older 25 ms vocal quantizer.
+  Runtime inference must never read manual reference notes or private candidates.
 - `server/app.py`: loopback API, bounded analysis queue and cancellation.
 - `server/pipeline.py`: decoding, separation and base transcription.
+- `server/multi.py`, `server/yourmt3_runner.py`: optional whole-recording
+  multi-instrument inference. Preserve `MT3_FULL_PLUS` classes; the 13 decoder
+  channels are not 13 output instrument identities. Do not collapse violin,
+  viola and cello or invent separate players of the same instrument class.
+- `server/polyphonic_score.py`: polyphonic notation with a 25 ms pitched-boundary
+  bound and a local 960-tick collision fallback. One collision must not refine
+  an entire song's pitch group. Drum onsets retain the bound; drum durations
+  represent hit rhythm, not the decoder's arbitrary 10 ms offset convention.
+  There is no short-note filtering or attack deduplication. Multi-mode
+  quality refinement starts from native events, never an already-rounded score.
+- `scripts/renotate-multi.py`: rebuilds a separate JSON score and audit from
+  cached native events without running models or overwriting the old analysis.
 - `server/audio_quality.py`: beat alignment, lead/backing proposals, learned vocal
   notes, piano onset evidence and audio-derived harmony.
 - `server/rosvot.py`, `server/rosvot_runner.py`: isolated learned word/note boundary
   inference. Context-overlapped chunks preserve long notes across seams.
+- `server/phoneme.py`, `server/phoneme_runner.py`: optional isolated CPU inference
+  for phoneme-informed boundaries using real FCPE pitch from exactly the selected
+  waveform. Keeps native logits, chunk intervals and input hashes; no calibrated
+  note confidence is claimed. Adjacent equal pitches merge only when both chunks
+  predict continuation across the same cut, never simply because pitch matches.
+- Full independent pitch verification and review playback follow the selected
+  vocal waveform, not merely an existing lead-hypothesis file. Completing a
+  full check on the ordinary vocal stem never marks singer identity accepted.
 - `server/vocal_score.py`: joint score-time path. Rhythmic complexity, adjacent
   boundaries and meaningful rests are considered together; it does not discard
   attacks because two events collide on a rounded onset.
+  Production monophonic vocal paths use a 25 ms boundary-shift limit. A fine
+  score-time grid is permitted when a conventional subdivision exceeds that
+  limit; older unbounded quantization remains only for regression comparison.
 - `server/vocal_alignment.py`: local pitch-entry, reattack and release evidence
   refines the learned syllable boundaries while retaining the note count and
   pitch sequence. No human-reference delay is applied to the audio.
@@ -46,8 +79,17 @@
 
 ## Current quality priority
 
-P0 is lead-melody rhythm: a dense collection of pitch fragments is not a useful
-vocal score. The learned `rosvot` path now precedes joint rhythmic notation;
+P0 is **complete-song multi-part transcription**, clarified on 2026-11-07.
+Evaluate the whole mixture, pitched notes, offsets, drums and instrument classes;
+clean-singing scores cannot stand in for this outcome. The reproducible
+`scripts/benchmark-multiscore.py` freezes complete predictions before acquiring
+per-stem labels. BabySlakh is synthetic, with probable training overlap, so this
+is development regression and not evidence of real-song generalization.
+
+Lead-melody rhythm remains one component: a dense collection of pitch fragments
+is not a useful vocal score. GAME Medium with shared singing notation is now the
+default for multi/separate imports; see [current handoff](WORK_COMPUTER_HANDOFF.md).
+In the legacy comparison route the learned `rosvot` path precedes joint rhythmic notation;
 `acoustic`, `standard` and `legato` remain comparison choices. This is an
 engineering choice for rehearsal legibility, not a claim of universally higher
 transcription accuracy. The source and old results remain separate.
@@ -84,8 +126,13 @@ test failed archival and recovery without modifying the user's browser projects.
 
 ## Project persistence
 
-The current workspace and recent list live in browser local storage. Media lives
-in IndexedDB or the backend `data/` tree. Do not change a saved project in place
+The active workspace lives in browser local storage. `src/lib/library.ts` stores
+all projects and immutable named versions in the `coro-projects` IndexedDB;
+`projectDatabase.ts` owns its transactions. The recent list is only a view, not
+a retention policy. Legacy migration is atomic and never replaces an existing
+new-format record. All callers must await archival before switching workspaces
+or starting a rebuild. Media lives in its separate IndexedDB or the backend
+`data/` tree. Do not change a saved project in place
 when re-running models: create a separate result and preserve user edits.
 
 If archival fails, imports and workspace switches must abort before replacing
@@ -94,11 +141,56 @@ success toast. Note dynamics persist until changed within their staff or explici
 voice scope; a tied continuation does not set an accidental for a later attack
 in the next measure.
 
-`src/lib/localCodec.ts` compresses the workspace and recent-library JSON to avoid
-exhausting browser quotas with repeated note fields. Existing uncompressed
+`src/lib/localCodec.ts` compresses the workspace and reads legacy recent-library JSON.
+Existing uncompressed
 records remain readable; public export formats are unchanged. Preserve both
 documents before asynchronous rebuilds, not only when their result is opened.
 
 Model installers live in `scripts/`; runtimes and weights remain ignored. If a
 new engine needs different dependency versions, give it an isolated environment
 and subprocess boundary rather than upgrading the base runtime blindly.
+
+`reviewDraft.ts` persists pending vocal edits, undo/redo, explicit reviewer states
+and source position separately from the score. Compare the original vocal
+timeline before recovery; never overwrite a newer vocal edit. On Apply, merge
+only vocal notes and review metadata into the current project so independent part
+edits survive. Evidence and model agreement never mark a checkpoint confirmed.
+
+`server/runtime.py` captures backend code identity when `create_app` runs;
+`scripts/runtime.mjs` uses the same hash for doctor and startup. Do not calculate
+the live health hash on each request: that would misidentify stale running code
+as newly loaded code. The CI suite uses `requirements-test.txt`, not the model
+installation environment.
+
+## Recording-to-score regression
+
+`scripts/benchmark-vocal-p0.py` pins SSVD-v2.0 source files by Git blob and SHA256.
+The diagnostic and validation groups contain eight disjoint recordings each,
+selected in fixed lexicographic order. It freezes predictions, code, models and
+audio-derived tempo before reading human note labels. Scoring uses continuous
+reference pitch, 50-cent pitch / 50-ms onset tolerances, and for full-note F1 an
+offset tolerance of max(50 ms, 20% duration). There is no reference-derived tempo,
+timing shift or octave repair. Training-set overlap is unknown; these are small
+clean-singing regressions, not a blinded ranking on commercial mixes.
+
+```bash
+uv venv --python 3.11 .venv-benchmark
+uv pip install --python .venv-benchmark/bin/python -r requirements-benchmark.txt
+uv pip install --python .venv-benchmark/bin/python --no-deps basic-pitch==0.4.0
+.venv-benchmark/bin/python scripts/benchmark-vocal-p0.py prepare --split validation
+.venv-benchmark/bin/python scripts/benchmark-vocal-p0.py infer --split validation --run baseline-v1 --basic-pitch
+.venv-benchmark/bin/python scripts/benchmark-vocal-p0.py score --split validation --run baseline-v1
+bash scripts/setup-phoneme.sh
+.venv-benchmark/bin/python scripts/benchmark-phoneme-p0.py infer --split validation --baseline baseline-v1 --run runtime-v1 --runtime
+.venv-benchmark/bin/python scripts/benchmark-phoneme-p0.py score --split validation --run runtime-v1
+```
+
+Use a new run name after code changes; evidence is never overwritten and scoring
+rejects changed dependencies. `--runtime` evaluates the real subprocess, chunking
+and stitching path; omitting it selects the whole-recording research prototype.
+Both reuse the same frozen FCPE contour and audio-only beat grid. Results include
+raw, legacy 32nd-grid, unbounded joint, and bounded vocal rhythm variants to
+separate recognition errors from notation errors. A local inference run, browser
+tests and model-free CI are different evidence and should be reported separately.
+All downloaded recordings, labels and per-note outputs remain in ignored `data/`:
+no explicit upstream dataset license was found, so do not redistribute them.

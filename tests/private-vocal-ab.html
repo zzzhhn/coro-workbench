@@ -1,0 +1,15 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>空耳 · 人声模型实测</title>
+<style>
+body{max-width:1180px;margin:24px auto;padding:0 24px;background:#f6f6f3;color:#282b2c;font:15px system-ui}header{position:sticky;top:0;padding:12px 0;background:#f6f6f3f5;z-index:3}h1{font-size:25px;margin:0 0 16px}h2{font-size:16px;margin:0 0 12px}button,select{font:inherit;background:white;border:1px solid #ccd0cd;border-radius:6px;padding:8px 12px;margin-right:8px}button{cursor:pointer}section{padding:20px 24px;background:white;border:1px solid #e1e4de;border-radius:8px;margin:16px 0;overflow:auto}.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}audio{height:36px;width:300px}p,small{color:#687066;line-height:1.6}.score svg{max-width:100%;height:auto;display:block}#reference-scan{width:100%}details{margin:20px 0}a{color:#52785e}#status{color:#9c4f36}
+</style>
+<header><h1>空耳 · 人声模型实测</h1><select id="section" aria-label="手谱小节"></select><button id="prev">上一段</button><button id="next">下一段</button><select id="model" aria-label="识别模型"></select><span id="range"></span></header>
+<div class="row"><label>原声 <audio id="original" controls preload="metadata" src="http://127.0.0.1:8786/baseline/analysis.wav"></audio></label><label>人声分轨 <audio id="stem" controls preload="metadata" src="http://127.0.0.1:8786/separated/stem-vocals.wav"></audio></label></div>
+<p>按手谱编号，每段四小节。模型未读取手谱；中性音色回放仅表达音高与时值。GAME 谱面使用同一 Coro 记谱器，音符不删、不合并；原始识别回放保留声学时间。</p>
+<p id="status" role="status"></p>
+<section><h2 id="model-title"></h2><div class="row"><label>原始识别 <audio id="raw" controls preload="metadata"></audio></label><label>当前谱面 <audio id="score" controls preload="metadata"></audio></label><a id="midi">下载原始 MIDI</a></div><div id="candidate" class="score"></div></section>
+<section id="medium-control"><h2>GAME Medium · 同段对照</h2><div class="row"><label>原始识别 <audio id="medium-raw" controls preload="metadata"></audio></label><label>当前谱面 <audio id="medium-score" controls preload="metadata"></audio></label></div><div id="medium-candidate" class="score"></div></section>
+<section><h2>你的原版手扒谱</h2><audio id="reference-audio" controls preload="metadata"></audio><small>回放取自手扒 MIDI，谱面直接显示原版 PDF。</small><div id="reference-pages"></div><details><summary>MIDI 经现有 Coro 记谱器（诊断用）</summary><p>这里可能出现原版 PDF 没有的碎休止和连线，不能作为手扒谱的视觉标准。</p><div id="reference" class="score"></div></details></section>
+<section><h2>冻结的正式 Coro</h2><audio id="coro-audio" controls preload="metadata"></audio><div id="coro" class="score"></div></section>
+<details id="native"><summary>查看 SheetSage2 原生谱（整曲）</summary><p>此处直接渲染模型原生 ABC，不经过 Coro 记谱器。</p><div id="native-score" class="score"></div></details>
+<script type="module" src="./private-vocal-ab.ts"></script></html>

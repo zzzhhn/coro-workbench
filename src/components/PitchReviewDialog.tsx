@@ -15,6 +15,7 @@ import {
   pitchCoverageLabels,
   pitchEvidenceJobId,
   pitchBranchUrl,
+  pitchReviewAudioUrl,
   sourceBeat,
   sourceSecond,
   sourceWindowNotes,
@@ -23,6 +24,21 @@ import {
   type PitchCoverage,
 } from '../lib/pitchReview';
 import type { ScoreProject } from '../lib/types';
+import { downloadFile, serializeProject } from '../lib/storage';
+import {
+  changeReview,
+  checkpointKey,
+  deleteReviewDraft,
+  newReviewDraft,
+  readReviewDraft,
+  reviewMatchesProject,
+  reviewProject,
+  reviewStatusLabels,
+  saveReviewDraft,
+  stepReview,
+  type ReviewDraft,
+  type ReviewStatus,
+} from '../lib/reviewDraft';
 
 const WIDTH = 960,
   HEIGHT = 330,
@@ -42,10 +58,20 @@ export default function PitchReviewDialog({
   project: ScoreProject;
   initialSeconds: number;
   hasArrangement: boolean;
-  onApply: (draft: ScoreProject) => void;
+  onApply: (draft: ScoreProject) => Promise<void>;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(() => structuredClone(project));
+  const record = useRef<ReviewDraft | undefined>(undefined);
+  const writes = useRef<Promise<void>>(Promise.resolve());
+  const sequence = useRef(0);
+  const [ready, setReady] = useState(false);
+  const [draftBusy, setDraftBusy] = useState(false);
+  const [draftError, setDraftError] = useState('');
+  const [draftStatus, setDraftStatus] = useState('正在读取校对草稿…');
+  const [conflict, setConflict] = useState<ReviewDraft>();
+  const [discarding, setDiscarding] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [duration, setDuration] = useState(project.originalAudio?.duration ?? 0);
   const [start, setStart] = useState(Math.max(0, Math.min(Math.max(0, duration - 8), initialSeconds - 2)));
   const [length, setLength] = useState(8);
@@ -64,7 +90,7 @@ export default function PitchReviewDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<ListeningMode>(() =>
-    pitchBranchUrl(project.source.analysis?.quality?.leadAudioUrl) ? 'lead' : 'original',
+    pitchReviewAudioUrl(project) ? 'lead' : 'original',
   );
   const [audioBusy, setAudioBusy] = useState(false);
   const [playback, setPlayback] = useState<PlaybackState>({
@@ -82,8 +108,125 @@ export default function PitchReviewDialog({
   const note = part?.notes.find((note) => note.id === selected);
   const changed = useMemo(() => changedReviewNotes(project, draft, partId), [project, draft]);
   const quality = project.source.analysis?.quality;
-  const leadUrl = pitchBranchUrl(quality?.leadAudioUrl);
+  const leadUrl = pitchReviewAudioUrl(project);
   const backingUrl = pitchBranchUrl(quality?.backingAudioUrl);
+
+  const persist = (next: ReviewDraft) => {
+    record.current = next;
+    const current = ++sequence.current;
+    setDraftBusy(true);
+    setDraftError('');
+    setDraftStatus('正在保存草稿…');
+    const saving = writes.current.catch(() => {}).then(() => saveReviewDraft(next));
+    writes.current = saving;
+    void saving.then(
+      () => {
+        if (sequence.current === current) {
+          setDraftBusy(false);
+          setDraftStatus('草稿已保存到本机');
+        }
+      },
+      (cause) => {
+        if (sequence.current === current) {
+          setDraftBusy(false);
+          setDraftError(`草稿未保存：${cause instanceof Error ? cause.message : cause}`);
+        }
+      },
+    );
+    return saving;
+  };
+  const restore = (next: ReviewDraft) => {
+    record.current = next;
+    setDraft(reviewProject(next, project));
+    setStart(next.position.start);
+    setLength(next.position.length);
+    setCursor(next.position.cursor);
+    setCursorInput(next.position.cursor.toFixed(3));
+    setPositionInput(next.position.start.toFixed(1));
+    setSelected(next.position.selected);
+  };
+  useEffect(() => {
+    let active = true;
+    void readReviewDraft(project.id)
+      .then((saved) => {
+        if (!active) return;
+        if (saved && !reviewMatchesProject(saved, project)) {
+          setConflict(saved);
+          setDraftStatus('原谱已改变，旧草稿未自动套用');
+        } else {
+          restore(saved ?? newReviewDraft(project, initialSeconds));
+          setDraftStatus(saved ? '已恢复上次校对草稿' : '修改后自动保存草稿');
+        }
+        setReady(true);
+      })
+      .catch((cause) => {
+        if (active) setDraftError(`无法读取草稿：${cause instanceof Error ? cause.message : cause}`);
+      });
+    return () => {
+      active = false;
+    };
+  }, [project.id]);
+  useEffect(() => {
+    if (!ready || conflict || !record.current) return;
+    const position = { start, length, cursor, selected, coverageKey: record.current.position.coverageKey };
+    if (JSON.stringify(position) === JSON.stringify(record.current.position)) return;
+    void persist({ ...record.current, position, savedAt: new Date().toISOString() }).catch(() => {});
+  }, [ready, start, length, cursor, selected, conflict]);
+  useEffect(() => {
+    const key = record.current?.position.coverageKey;
+    if (coverage && key)
+      setCoverageIndex(coverage.intervals.findIndex((interval) => checkpointKey(interval) === key));
+  }, [coverage, ready]);
+  useEffect(() => {
+    if (!draftBusy && !draftError) return;
+    const guard = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, [draftBusy, draftError]);
+  const keepAndClose = async () => {
+    if (applying) return;
+    try {
+      await writes.current;
+      onClose();
+    } catch {
+      setDraftError('草稿尚未保存，请重试保存或导出草稿后再关闭。');
+    }
+  };
+  const commitReview = async (next: ReviewDraft) => {
+    engine.current?.pause();
+    setDraft(reviewProject(next, project));
+    try {
+      await persist(next);
+    } catch {
+      /* The visible unsaved edit can be retried or exported. */
+    }
+  };
+  const travel = (direction: 'undo' | 'redo') => {
+    if (!record.current || draftBusy || conflict || applying) return;
+    void commitReview(stepReview(record.current, direction));
+  };
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (
+        !ready ||
+        conflict ||
+        target.isContentEditable ||
+        ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)
+      )
+        return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        event.stopPropagation();
+        travel(event.shiftKey ? 'redo' : 'undo');
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  });
 
   useEffect(() => {
     if (!jobId) return;
@@ -158,11 +301,21 @@ export default function PitchReviewDialog({
     setSelected('');
     setAdding(false);
     setCoverageIndex(-1);
+    if (record.current)
+      record.current = {
+        ...record.current,
+        position: { ...record.current.position, coverageKey: undefined },
+      };
   };
   const visitCoverage = (index: number) => {
     const interval = coverage?.intervals[index];
     if (!interval) return;
     moveWindow(coverageWindowStart(interval, length, duration));
+    if (record.current)
+      void persist({
+        ...record.current,
+        position: { ...record.current.position, coverageKey: checkpointKey(interval) },
+      }).catch(() => {});
     setCoverageIndex(index);
   };
   const selectNote = (id: string, seconds: number) => {
@@ -172,9 +325,16 @@ export default function PitchReviewDialog({
     placeCursor(seconds);
   };
   const updateDraft = (action: () => ScoreProject) => {
+    if (!record.current || draftBusy || conflict || applying) return;
     engine.current?.pause();
     try {
-      setDraft(action());
+      const next = action();
+      void commitReview(
+        changeReview(record.current, {
+          ...record.current.snapshot,
+          notes: next.parts.find((part) => part.id === partId)!.notes,
+        }),
+      );
       setError('');
     } catch (error) {
       setError(error instanceof Error ? error.message : '无法修改音符。');
@@ -255,13 +415,87 @@ export default function PitchReviewDialog({
   };
 
   return (
-    <Modal title="主唱音高校对" eyebrow="PITCH REVIEW" wide onClose={onClose}>
-      <div className="pitch-review">
+    <Modal title="主唱音高校对" eyebrow="PITCH REVIEW" wide onClose={() => void keepAndClose()}>
+      <div className="pitch-review" inert={applying || undefined}>
+        <div className="pitch-draft-toolbar">
+          <span role="status">{draftStatus}</span>
+          <button
+            className="secondary-button"
+            disabled={!ready || draftBusy || applying || Boolean(conflict) || !record.current?.past.length}
+            onClick={() => travel('undo')}
+          >
+            撤销校对
+          </button>
+          <button
+            className="secondary-button"
+            disabled={!ready || draftBusy || applying || Boolean(conflict) || !record.current?.future.length}
+            onClick={() => travel('redo')}
+          >
+            重做校对
+          </button>
+        </div>
+        {draftError && (
+          <div role="alert" className="error-message">
+            {draftError}
+            {record.current && (
+              <>
+                <button className="secondary-button" onClick={() => void commitReview(record.current!)}>
+                  重试保存
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() =>
+                    downloadFile(
+                      serializeProject(reviewProject(record.current!)),
+                      `${project.title}-校对草稿.coro.json`,
+                      'application/json',
+                    )
+                  }
+                >
+                  导出草稿
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {conflict && (
+          <div role="alert" className="error-message">
+            原谱在上次校对后已改变。旧草稿保留在本机，请先导出留存，或明确放弃旧草稿后开始本次校对。
+            <button
+              className="secondary-button"
+              onClick={() =>
+                downloadFile(
+                  serializeProject(reviewProject(conflict)),
+                  `${project.title}-旧校对草稿.coro.json`,
+                  'application/json',
+                )
+              }
+            >
+              导出旧草稿
+            </button>
+            <button
+              className="secondary-button"
+              disabled={draftBusy}
+              onClick={async () => {
+                const next = newReviewDraft(project, initialSeconds);
+                try {
+                  await persist(next);
+                  restore(next);
+                  setConflict(undefined);
+                } catch {
+                  /* Keep conflict visible. */
+                }
+              }}
+            >
+              放弃旧草稿，按当前原谱开始
+            </button>
+          </div>
+        )}
         <p className="modal-description">
-          把原录音、分离主唱、两条模型轨迹与当前音符放在同一时间轴上。
+        把原录音、当前人声轨、两条模型轨迹与当前音符放在同一时间轴上。
           只编辑原曲主唱，模型线不是正确答案；先试听，再把修改应用到乐谱。
         </p>
-        {!jobId || !part || !project.originalAudio ? (
+        {!ready || conflict ? null : !jobId || !part || !project.originalAudio ? (
           <p className="error-message">此工程没有可对照的原曲主唱与本机连续音高。便携包不含模型张量。</p>
         ) : (
           <>
@@ -307,6 +541,50 @@ export default function PitchReviewDialog({
                   >
                     <ArrowRight size={16} />
                   </button>
+                </div>
+              )}
+              {coverage && record.current && (
+                <div className="pitch-draft-toolbar">
+                  <span>
+                    {
+                      coverage.intervals.filter((item) =>
+                        ['confirmed', 'modified'].includes(
+                          record.current!.snapshot.checkpoints[checkpointKey(item)],
+                        ),
+                      ).length
+                    }{' '}
+                    / {coverage.intervals.length} 处已处理
+                  </span>
+                  <select
+                    aria-label="检查点状态"
+                    value={
+                      coverageIndex >= 0
+                        ? (record.current.snapshot.checkpoints[
+                            checkpointKey(coverage.intervals[coverageIndex])
+                          ] ?? 'pending')
+                        : 'pending'
+                    }
+                    disabled={coverageIndex < 0 || draftBusy || applying}
+                    onChange={(event) => {
+                      if (!record.current || coverageIndex < 0) return;
+                      const key = checkpointKey(coverage.intervals[coverageIndex]);
+                      void commitReview(
+                        changeReview(record.current, {
+                          ...record.current.snapshot,
+                          checkpoints: {
+                            ...record.current.snapshot.checkpoints,
+                            [key]: event.target.value as ReviewStatus,
+                          },
+                        }),
+                      );
+                    }}
+                  >
+                    {Object.entries(reviewStatusLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
               <p className="subtle-note">
@@ -504,7 +782,7 @@ export default function PitchReviewDialog({
                   }}
                 >
                   <option value="lead" disabled={!leadUrl}>
-                    分离主唱
+                    当前人声轨
                   </option>
                   <option value="backing" disabled={!backingUrl}>
                     分离伴唱
@@ -708,21 +986,70 @@ export default function PitchReviewDialog({
         )}
         <div className="modal-actions">
           <span className="pitch-change-count">本次草稿 {changed} 个音符变化 · 应用前不写入工程</span>
-          <button className="secondary-button" onClick={onClose}>
-            放弃本次草稿
+          <button
+            className="secondary-button"
+            disabled={!ready || applying || draftBusy || Boolean(conflict)}
+            onClick={() => setDiscarding(true)}
+          >
+            放弃草稿
+          </button>
+          <button className="secondary-button" disabled={applying} onClick={() => void keepAndClose()}>
+            保留草稿并返回
           </button>
           <button
             className="primary-button"
-            disabled={!changed}
-            onClick={() => {
+            disabled={
+              !ready ||
+              Boolean(conflict) ||
+              draftBusy ||
+              applying ||
+              Boolean(draftError) ||
+              (!changed &&
+                JSON.stringify(record.current?.snapshot.checkpoints ?? {}) ===
+                  JSON.stringify(project.pitchReview?.checkpoints ?? {}))
+            }
+            onClick={async () => {
               engine.current?.pause();
-              onApply(draft);
+              setApplying(true);
+              try {
+                await writes.current;
+                await onApply(reviewProject(record.current!, project));
+                await deleteReviewDraft(project.id);
+                onClose();
+              } catch (cause) {
+                setDraftError(`应用未完成，草稿保留：${cause instanceof Error ? cause.message : cause}`);
+              } finally {
+                setApplying(false);
+              }
             }}
           >
             <Check size={17} />
             应用到原曲
           </button>
         </div>
+        {discarding && (
+          <div className="library-delete-confirm" role="alert">
+            <span>放弃未应用的修改和本次检查进度？正式乐谱保持不变。</span>
+            <button className="secondary-button" onClick={() => setDiscarding(false)}>
+              继续校对
+            </button>
+            <button
+              className="secondary-button"
+              disabled={draftBusy || applying}
+              onClick={async () => {
+                try {
+                  await writes.current;
+                  await deleteReviewDraft(project.id);
+                  onClose();
+                } catch (cause) {
+                  setDraftError(`未能删除草稿：${cause instanceof Error ? cause.message : cause}`);
+                }
+              }}
+            >
+              确认放弃
+            </button>
+          </div>
+        )}
       </div>
     </Modal>
   );

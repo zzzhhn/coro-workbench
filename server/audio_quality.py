@@ -16,6 +16,7 @@ from . import config
 from .rhythm import fit_beat_grid, quantize_on_grid
 from .storage import Cancelled, JobStatus, atomic_json, read_json
 from .vocal_decode import DECODER_VERSIONS, decode_selected_contour
+from .vocal_score import quantize_vocal_rhythm
 
 
 def quality_engine_ready() -> bool:
@@ -70,7 +71,8 @@ def run_quality_models(directory: Path, paths: dict[str, Path], status: JobStatu
     if cached and not need_verify:
         return destination
     if status:
-        status.update(93, "quality", "正在生成节拍对齐、主唱旋律和钢琴踏板分离提案，原始模型结果会单独保留。")
+        message = "正在根据原音频对齐多声部节拍，原始模型事件会单独保留。" if not paths else "正在生成节拍对齐、主唱旋律和钢琴踏板分离提案，原始模型结果会单独保留。"
+        status.update(93, "quality", message)
     command = [str(config.MODELS_DIR / "audio-quality/.venv/bin/python"), str(config.ROOT / "server/quality_runner.py"), "--input", str((destination / "inputs.json").resolve()), "--models", str((config.MODELS_DIR / "audio-quality").resolve()), "--output", str(destination.resolve())]
     if cached:
         command.append("--verify-only")
@@ -209,25 +211,151 @@ def infer_accompaniment_chords(parts: list[dict], total_beats: float) -> list[di
     return infer_chords(accompaniment, total_beats)
 
 
+def _improve_multi_project(directory: Path, project: dict, model: dict, grid: dict,
+                           duration: float, evidence: dict, request: dict) -> dict:
+    from .multi import parts_from_multi_events
+    from .score_rhythm import infer_notation_grid, VERSION
+    from .multi_sources import notation_key
+    # Use model/source proposal seconds, never an already-quantized score.
+    grid = infer_notation_grid(model['events'], grid, tempo_locked=request.get('tempo') is not None)
+    project['key'], key_evidence = notation_key(model['events'], project.get('key', 'C'))
+    project['tempo'] = project['originalAudio']['tempo'] = grid['bpm']
+    project['originalAudio']['offsetSeconds'] = grid['offsetSeconds']
+    project['parts'], conversion = parts_from_multi_events(model['events'], grid, duration, readable=True)
+    refinement = model.get('sourceRefinement')
+    if refinement:
+        for part in project['parts']:
+            source = part.get('sourceId')
+            filename = refinement.get('separatedSources', {}).get(source)
+            if filename:
+                part['stemUrl'] = f"/api/audio/{project['id']}/{filename}"
+                part['instrument'] += ' + source-aware independent note checks'
+    if not project['parts']:
+        raise ValueError('No multi-instrument events within the analysis range')
+    end = max(n['start'] + n['duration'] for p in project['parts'] for n in p['notes'])
+    project['measures'] = max(1, math.ceil(max(end, (duration - grid['offsetSeconds']) * grid['bpm'] / 60) / 4))
+    project['chords'] = infer_accompaniment_chords(project['parts'], project['measures'] * 4)
+    transforms = [
+        '节拍网格由原始音频估计，多声部音符从原始秒数直接映射到新网格，不对已经量化的谱面再次取整。',
+        '按乐句推断常规节奏、断奏和持续声部；记谱时值与声学收音分开，原始起止时间和逐音调整记录另存。',
+        '鼓保留起音并按节奏记谱；模型约定的极短鼓音结束时间不当作声学延音长度。',
+        '乐器名称是模型候选；已知独立来源分别保留，未分离的同类演奏者仍可能共用一个复音谱表。',
+    ]
+    project['source']['analysis'] = {
+        'rhythm': {k: grid[k] for k in ('bpm', 'offsetSeconds', 'beatTimesSeconds', 'downbeatTimesSeconds', 'method', 'confidence', 'notationUnitFactor', 'detectedBpm', 'beatTrackerOffsetSeconds', 'onsetPhaseCorrectionSeconds', 'onsetPhaseSupportPrograms') if k in grid},
+        'rawProjectUrl': f"/api/projects/{project['id']}/raw", 'transforms': transforms,
+        'quality': {'stage': 'multitrack_musical_score', 'decoderProfile': 'yourmt3',
+                    'instrumentVocabulary': 'MT3_FULL_PLUS', 'editorialTiming': True,
+                    'scoreQuantizerVersion': VERSION,
+                    'modelEvidenceUrl': f"/api/projects/{project['id']}/evidence",
+                    'verificationMode': request.get('verification', 'full'),
+                    'groundTruthAvailable': False, 'verificationStatus': 'not_applicable'},
+    }
+    if project['key'] != key_evidence.get('audioEstimate', project['key']):
+        transforms.append(f"根据已识别基频音符复核调号为 {project['key']}，未改变任何音高；整曲色度估计另存。")
+    if refinement:
+        project['source']['analysis']['quality']['sourceRefinementVersion'] = refinement['version']
+        project['source']['analysis']['quality']['pendingAdditionalNotes'] = refinement.get('pendingAdditionalNotes', 0)
+        project['source']['analysis']['uncertaintyIntervals'] = [
+            {'partId': part['id'], 'startSeconds': edit['after']['start'], 'endSeconds': edit['after']['end'],
+             'reason': '独立模型补充或改归属，尚待对照原声确认。'}
+            for edit in refinement['decisions'] for part in project['parts']
+            if edit.get('applied', True) and part.get('sourceId') == edit['source'] and part['program'] == (53 if edit['source'] == 'vocals' else edit['after']['program'])]
+        consensus = refinement.get('localPitchConsensus', {})
+        octave_audit = refinement.get('vocalOctaveConsensus', {})
+        resolved_octaves = {(edit['sourceEvent']['source_start_seconds'],
+                             edit['sourceEvent']['source_end_seconds'], edit['sourceEvent']['midi_pitch'])
+                            for edit in octave_audit.get('edits', [])}
+        for dispute in consensus.get('octaveDisagreements', []):
+            event = dispute['sourceEvent']
+            if (event['source_start_seconds'], event['source_end_seconds'], event['midi_pitch']) in resolved_octaves:
+                continue
+            for part in project['parts']:
+                if part.get('sourceId') == 'vocals' and part['role'] == 'lead':
+                    project['source']['analysis']['uncertaintyIntervals'].append({
+                        'partId':part['id'], 'startSeconds':event['source_start_seconds'],
+                        'endSeconds':event['source_end_seconds'], 'reason':'主唱模型存在八度分歧，尚未判定实际演唱音高。'})
+        project['source']['analysis']['quality'].update(
+            vocalLeadStatus=refinement.get('vocalLead',{}).get('status','unavailable'),
+            vocalConsensusStatus=consensus.get('status','unavailable'),
+            vocalOctaveCorrections=len(octave_audit.get('edits', [])),
+            vocalArticulationCorrections=len(refinement.get('vocalArticulation',{}).get('edits', [])),
+            stringUnisonsAdded=refinement.get('stringUnisons',{}).get('addedUnisons',0),
+            stringDuplicateLabelsRemoved=refinement.get('stringLabels',{}).get('removedLabelDuplicates',0),
+            pianoHarmonicEchoesRemoved=refinement.get('pianoHarmonicLeaks',{}).get('removedHarmonicAliases',0),
+            pianoDuplicateClassesRemoved=refinement.get('pianoConsensus',{}).get('removedDuplicateClasses',0))
+        if refinement.get('pianoHarmonicLeaks',{}).get('removedHarmonicAliases'):
+            transforms.append('交叉核对钢琴起音、泛音相位与原声残差，归并误标为弦乐的钢琴泛音；独立弦乐支持优先保留，原始候选另存。')
+        if refinement.get('vocalArticulation',{}).get('edits'):
+            transforms.append('人声短发声体与连续发音过渡分开记谱；仅在波形没有持续静音且前后音高有支持时连接时值，原检测时长另存。')
+        if refinement.get('stringUnisons',{}).get('addedUnisons'):
+            transforms.append('依据人声结束后仍连续存在的伴奏谐波补回弦乐同音，未以手扒谱作为自动补音输入。')
+        if refinement.get('stringLabels',{}).get('removedLabelDuplicates'):
+            transforms.append('起止与音高完全相同的匿名弦乐重复类别合为弦乐候选；原类别另存，独立来源和不同起音保留。')
+        strings = refinement.get('stringSustain', {})
+        project['source']['analysis']['quality'].update(
+            stringSustainsAdded=strings.get('addedSustains',0),
+            stringPianoDuplicatesRemoved=strings.get('removedPianoDuplicates',0))
+        if strings:
+            transforms.append('弦乐持续音由去人声类别候选、独立复音音高与整段谐波交叉核对；钢琴同音保留，新增及移除事件另存。')
+            for edit in strings.get('decisions', []):
+                if edit['action'] != 'sustain':continue
+                note=edit['after']
+                for part in project['parts']:
+                    if part['program']==note['program'] and not part.get('sourceId'):
+                        project['source']['analysis']['uncertaintyIntervals'].append(dict(
+                            partId=part['id'],startSeconds=note['start'],endSeconds=note['end'],
+                            reason='持续声源交叉核对补回，演奏时值与具体弦乐器身份仍需校对。'))
+        transforms.extend(['用原混音与钢琴分离轨交叉检查起音、重复分类和收音；补音与未采纳候选均保留逐项记录。',
+                           '有踏板证据的连续分解和弦区分手指时值与共鸣尾音，声学收音另存。'])
+    project['source']['warnings'].append('多声部总谱保留模型解码出的乐器类别；未核实演奏者身份、拍号、变速或全部音符，需逐声部对照原录音。')
+    atomic_json(directory / 'quality-evidence.json', {
+        'schemaVersion': 1, 'grid': grid, 'engines': evidence, 'transforms': transforms, 'notationKey': key_evidence,
+        'multiInstrument': {'nativeModel': model, 'scoreConversion': conversion},
+        'parts': conversion['parts'], 'claimsMusicalCorrectness': False,
+    })
+    return project
+
+
 def improve_project(directory: Path, raw_project: dict, request: dict, paths: dict[str, Path], raw_events: dict, status: JobStatus | None = None) -> dict:
     model_dir = run_quality_models(directory, paths, status)
     evidence = read_json(model_dir / "models.json")
     rhythm = np.load(model_dir / "rhythm.npz")
     grid = fit_beat_grid(rhythm["beats"], rhythm["downbeats"], raw_project["tempo"], request.get("tempo"))
+    if request.get('mode') == 'multi' and grid['offsetSeconds'] > 0:
+        first_onset = min((event['start'] for event in raw_events['multi']['events']), default=float('inf'))
+        if first_onset < grid['offsetSeconds'] - .025:
+            # The learned downbeat may be just after audio zero. Retain its
+            # phase with a preceding virtual bar rather than moving early notes.
+            grid = {**grid, 'offsetSeconds': round(grid['offsetSeconds'] - 240 / grid['bpm'], 6)}
     project = copy.deepcopy(raw_project)
     project["tempo"] = grid["bpm"]
     duration = sf.info(directory / "analysis.wav").duration
     project["originalAudio"]["tempo"] = grid["bpm"]
     project["originalAudio"]["offsetSeconds"] = grid["offsetSeconds"]
+    if request.get('mode') == 'multi':
+        return _improve_multi_project(directory, project, raw_events['multi'], grid, duration, evidence, request)
     transforms = ["Beat This! 独立检测拍点/强拍，并稳健拟合恒定网格；首个强拍前的音频保留为弱起/前置小节。", "量化基于检测到的节拍相位，不再把音频0秒当作第一拍。原始推断音符另存。"]
     detailed = {"schemaVersion": 1, "disclaimer": "Model measurements and reversible editorial proposals, not ground-truth transcription or user acceptance.", "grid": grid, "engines": evidence, "parts": {}, "beforeMetrics": note_quality(raw_project["parts"])}
     identity = None
     if "vocals" in paths and request.get("lead_identity", "auto") != "off":
         identity = refine_vocal_identity(directory, model_dir, paths["vocals"], status)
         detailed["leadIdentity"] = identity
-    for part in project["parts"]:
+    candidates = list(project["parts"])
+    if (request.get("decoder") in {"rosvot", "phoneme"} and "vocals" in paths
+            and not any(part["id"] == "vocals" for part in candidates)):
+        # Basic Pitch is not a gatekeeper for an independent singing model.
+        # This candidate joins the score only after a nonempty learned result.
+        candidates.append({"id": "vocals", "name": "人声候选", "shortName": "Vox",
+                           "instrument": "vocal source candidate", "role": "lead", "clef": "treble",
+                           "program": 53, "color": "#bf7054", "notes": [], "muted": False,
+                           "solo": False, "volume": .8, "pan": 0,
+                           "stemUrl": f"/api/audio/{project['id']}/{paths['vocals'].name}"})
+    for part in candidates:
         part_id = part["id"]
-        old = next(p for p in raw_project["parts"] if p["id"] == part_id)
+        old = next((p for p in raw_project["parts"] if p["id"] == part_id), None)
+        rescue = old is None
+        old = old or {"notes": []}
         # Start from the existing visible event set so a later pass does not resurrect
         # notes the baseline already rejected as inaudible or octave harmonics.
         old_bpm = raw_project["tempo"]
@@ -246,6 +374,7 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
                 events.append(visible)
         details = {"inputEvents": len(events), "method": "same-pitch acoustic continuation consolidation"}
         monophonic = False
+        event_source = "baseline"
         if part_id in {"vocals", "bass"} and (model_dir / f"{part_id}-fcpe.npz").is_file():
             accepted_identity = part_id == "vocals" and identity and (identity.get("accepted") or identity.get("usablePartial"))
             contour_path = Path(identity["leadContour"]) if accepted_identity else model_dir / f"{part_id}-fcpe.npz"
@@ -253,7 +382,7 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
             track = np.load(contour_path)
             audio, sr = sf.read(audio_path, dtype="float32", always_2d=True)
             contour_profile = request.get("decoder", "standard")
-            if contour_profile == "rosvot":
+            if contour_profile in {"rosvot", "phoneme"}:
                 contour_profile = "acoustic"
             events, contour_info = decode_selected_contour(track["time"], track["f0"], track["activation"], audio.mean(axis=1), sr, part_id, contour_profile)
             if part_id == "vocals" and request.get("decoder", "standard") == "legato":
@@ -285,6 +414,7 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
             if events:
                 monophonic = not details.get("abstained", False)
                 if monophonic:
+                    event_source = contour_profile
                     part["name"] = ("主唱提案 · 局部待定" if identity and not identity.get("accepted") and accepted_identity else "主唱旋律提案") if part_id == "vocals" else "低音旋律提案"
                 part["roleSource"] = "model"
                 if monophonic:
@@ -316,21 +446,30 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
                 transforms.append(f"{part['name']}：合并{len(edits)}个没有声学再起音、能量衰减的同音碎片，不设任意复音上限。")
         quantum = .125 if monophonic else .25
         learned_notes = None
-        if part_id == "vocals" and request.get("decoder") == "rosvot":
+        if part_id == "vocals" and request.get("decoder") in {"rosvot", "phoneme"}:
+            learned_decoder = request["decoder"]
             details["acousticAlternativeEvents"] = copy.deepcopy(events)
             try:
-                from .rosvot import infer_rosvot
-                from .vocal_score import quantize_vocal_rhythm
-                target_audio = directory / "stem-lead.wav"
-                if not target_audio.is_file():
-                    target_audio = paths[part_id]
-                if status:
-                    status.update(95, "vocal-notes", "正在以词边界与音符边界模型重建主唱节奏，不把音高掉帧直接记成碎音。")
-                learned = infer_rosvot(target_audio, directory / "vocal-note-model", timeout_seconds=max(180., duration * 3),
-                                       cancel_check=(lambda: status.check_cancelled()) if status else None)
+                target_audio = paths[part_id]
+                if details.get("leadIdentityUsed") and (directory / "stem-lead.wav").is_file():
+                    target_audio = directory / "stem-lead.wav"
                 alignment_contour = directory / "lead-identity/lead-models/vocals-fcpe.npz" if target_audio.name == "stem-lead.wav" else model_dir / "vocals-fcpe.npz"
+                if status:
+                    status.update(95, "vocal-notes", "正在用演唱边界模型识别主唱音符，并保留原声起止时间。")
+                if learned_decoder == "phoneme":
+                    from .phoneme import infer_phoneme
+                    learned = infer_phoneme(target_audio, directory / "vocal-note-model", contour_path=alignment_contour,
+                                             timeout_seconds=max(180., duration * 3),
+                                             cancel_check=status.check_cancelled if status else None)
+                else:
+                    from .rosvot import infer_rosvot
+                    learned = infer_rosvot(target_audio, directory / "vocal-note-model", timeout_seconds=max(180., duration * 3),
+                                           cancel_check=status.check_cancelled if status else None)
+                if status:
+                    status.check_cancelled()
+                details["learnedVocalNotes"] = learned
                 aligned_events = learned["events"]
-                if alignment_contour.is_file():
+                if learned_decoder == "rosvot" and alignment_contour.is_file():
                     from .vocal_alignment import align_vocal_notes
                     from .lead_note_proposal import frame_acoustic_evidence
                     with np.load(alignment_contour, allow_pickle=False) as comparison:
@@ -343,26 +482,55 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
                              for event in aligned_events if event["midi_pitch"] is not None]
                 # The model does not expose calibrated note confidence. 0.75 is
                 # a playback velocity only, never a displayed correctness score.
-                learned_notes, rhythm = quantize_vocal_rhythm(predicted, grid, duration, part_id, preserve_confidence=False)
-                details["learnedVocalNotes"] = learned
+                # Acoustic boundaries remain in learned/alignedVocalEvents.
+                # A printable score needs metrical tolerance, not a 25ms
+                # performance constraint that forces 64ths and tiny rests.
+                candidate_notes, rhythm = quantize_vocal_rhythm(predicted, grid, duration, part_id,
+                                                               preserve_confidence=False)
+                if not candidate_notes:
+                    raise ValueError("演唱边界模型未检出分析范围内的有效音符，保留现有候选。")
+                learned_notes = candidate_notes
                 details["scoreRhythm"] = rhythm
-                details["decoderUsed"] = "rosvot"
+                details["decoderUsed"] = learned_decoder
                 details["abstained"] = False
-                part["name"] = "主唱 · 词音节奏"
+                part["name"] = "主唱 · 发音边界" if learned_decoder == "phoneme" else "主唱 · 词音节奏"
                 part["roleSource"] = "model"
                 if target_audio.name == "stem-lead.wav":
                     part["stemUrl"] = f"/api/audio/{project['id']}/stem-lead.wav"
                 monophonic = True
-                transforms.append("主唱由ROSVOT/RWBD学习词与音符边界，再联合整理相邻起止；保留真实重复起音与换气，原FCPE分段另存。未生成歌词，不把模型置信或曲线一致当正确率。")
+                if learned_decoder == "phoneme":
+                    transforms.append("主唱由发音信息模型识别起止、FCPE提供音高；原始发音边界另存，谱面联合整理为常规节奏，保留同音再起和真实换气。复杂混音仍需核对，不生成歌词。")
+                else:
+                    transforms.append("主唱由ROSVOT/RWBD学习词与音符边界；原始声学起止另存，谱面联合整理为常规节奏，保留重复起音与真实换气。未生成歌词，不把模型置信或曲线一致当正确率。")
                 if "vocalBoundaryAlignment" in details:
                     transforms.append("对词边界偏早的情况，用实际音高进入、同音再起和收音证据逐处对齐；不统一延后整曲，不改变模型音符数量或音高。")
             except Cancelled:
                 raise
             except Exception as error:
+                learned_notes = None
                 details["learnedVocalError"] = f"{type(error).__name__}: {error}"
-                details["decoderUsed"] = "acoustic_fallback"
-                transforms.append("词音节奏模型未成功完成，本次保留声学分段备选；没有宣称ROSVOT转写成功。详见learnedVocalError。")
-        notes = learned_notes if learned_notes is not None else quantize_on_grid(events, grid, duration, part_id, monophonic=monophonic, preserve_confidence=part_id not in {"piano"}, quantum=quantum)
+                details["decoderUsed"] = f"{event_source}_fallback"
+                transforms.append("演唱边界模型未成功完成，保留可用的先前候选；实际回退来源记录在decoderUsed，没有宣称所选模型转写成功。")
+        details["eventSourceBeforeLearnedModel"] = event_source
+        if rescue and learned_notes is None:
+            details["rescueAccepted"] = False
+            details["outputNotes"] = 0
+            detailed["parts"][part_id] = details
+            continue
+        if learned_notes is not None:
+            notes = learned_notes
+        elif part_id == "vocals" and monophonic:
+            from .lead_note_proposal import frame_acoustic_evidence
+            from .vocal_score import clean_vocal_fragments
+            # The decoder's raw islands remain in fcpeAlternativeEvents. Only
+            # remove dropouts/glide fragments supported by the selected audio,
+            # never use duration alone to delete a real repeated syllable.
+            features = frame_acoustic_evidence(track['time'], audio.mean(axis=1), sr)
+            events, details['fragmentCleanup'] = clean_vocal_fragments(events, track['time'], track['f0'], features)
+            # Preserve repeated attacks even when they collide on a fixed grid.
+            notes, details["scoreRhythm"] = quantize_vocal_rhythm(events, grid, duration, part_id)
+        else:
+            notes = quantize_on_grid(events, grid, duration, part_id, monophonic=monophonic, preserve_confidence=part_id not in {"piano"}, quantum=quantum)
         if part_id == "piano":
             for note in notes:
                 note["staff"] = 1 if note["midi"] >= 60 else 2
@@ -371,6 +539,10 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
                 note["duration"] = .25
                 note["lyric"] = "dum" if note["midi"] in (35, 36) else "ka" if note["midi"] in (37, 38, 39, 40) else "ts"
         part["notes"] = notes
+        if rescue:
+            project["parts"].insert(0, part)
+            details["rescueAccepted"] = True
+            transforms.append("基础模型没有检出主唱音符，独立词音模型从已分离人声补建主唱候选；原始基础结果保持不变。")
         details["outputNotes"] = len(notes)
         detailed["parts"][part_id] = details
     end = max((n["start"] + n["duration"] for p in project["parts"] for n in p["notes"]), default=0)
@@ -397,7 +569,7 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
         transforms.append("和弦使用伴奏与低音转写的符号法候选，不把主唱/other重复计票；音频和弦引擎未采用，仍需人工和声校对。")
         if harmony_error:
             detailed["audioHarmonyError"] = harmony_error
-    transforms.append("采用单旋律解码的主唱/低音最短时值为三十二分音符，减少慢速下把短音和静音强行拉到十六分音符的过长尾音；这不代表所有装饰音/吐字已识别。")
+    transforms.append("主唱单旋律记谱保留每次起音，起止偏移限制在25毫秒内；低音仍采用三十二分音符网格。这不代表所有装饰音或吐字已识别。")
     warnings = [w for w in project["source"]["warnings"] if not w.startswith("自动估计速度")]
     if harmony_result:
         warnings = [w for w in warnings if not w.startswith("和弦按每小节")]
@@ -413,19 +585,24 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
     after = note_quality(project["parts"])
     quality = {"stage": "proposal_requires_review", "groundTruthAvailable": False, "beatResidualMedianSeconds": grid["beatResidualMedianSeconds"], "downbeatCoherence": grid["downbeatCoherence"], **after}
     decoder_requested = request.get("decoder", "standard")
-    decoder_used = detailed["parts"].get("vocals", {}).get("decoderUsed", "not_applicable" if decoder_requested == "rosvot" else decoder_requested)
+    decoder_used = detailed["parts"].get("vocals", {}).get("decoderUsed", "not_applicable" if decoder_requested in {"rosvot", "phoneme"} else decoder_requested)
     quality["decoderRequested"] = decoder_requested
     quality["decoderProfile"] = "acoustic" if decoder_used == "acoustic_fallback" else decoder_used
-    quality["decoderVersion"] = "rosvot-rwbd-acoustic-alignment-score-3" if decoder_used == "rosvot" else DECODER_VERSIONS.get(quality["decoderProfile"], "not_applicable")
-    if decoder_used == "rosvot":
+    learned_versions = {"rosvot": "rosvot-rwbd-acoustic-alignment-readable-5",
+                        "phoneme": "phoneme-boundaries-fcpe-readable-2"}
+    quality["decoderVersion"] = learned_versions.get(decoder_used, DECODER_VERSIONS.get(quality["decoderProfile"], "not_applicable"))
+    if "scoreRhythm" in detailed["parts"].get("vocals", {}):
         quality["vocalRhythmVersion"] = detailed["parts"]["vocals"]["scoreRhythm"]["version"]
         quality["vocalRhythmMaxOnsetShiftSeconds"] = detailed["parts"]["vocals"]["scoreRhythm"].get("maximumOnsetShiftSeconds", 0)
+    if decoder_used == "rosvot":
         alignment = detailed["parts"]["vocals"].get("vocalBoundaryAlignment", {})
         quality["vocalAlignmentVersion"] = alignment.get("version", "not_available")
         quality["vocalAlignedBoundaries"] = len(alignment.get("boundaryEdits", []))
         project["source"]["warnings"].append("主唱为词音边界模型与节奏整理结果。FCPE/CREPE曲线及独立检查仍是原声的另外两条模型证据，不是在验证ROSVOT音符正确。")
     if decoder_used == "acoustic_fallback":
         project["source"]["warnings"].append("词音节奏模型本次未成功，已回退声学分段；主唱节奏仍需校正。")
+    elif decoder_used == "baseline_fallback":
+        project["source"]["warnings"].append("词音节奏模型本次未成功，保留基础模型候选；未采用声学单旋律作为替代。")
     quality["harmony.engine"] = "Chordino audio accompaniment" if harmony_result else "symbolic accompaniment fallback"
     if harmony_result:
         quality["harmony.preserveGaps"] = True
@@ -455,7 +632,12 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
             project["source"]["warnings"].append(f"独立音高检查仅抽样{quality['vocals.independentCheckSeconds']:g}秒（共{duration:g}秒），未抽样部分未核实；通过抽样不代表全曲主唱身份或音符正确。")
         else:
             project["source"]["warnings"].append("未安装主唱/伴唱身份分离模型；两个音高模型一致也可能共同跟到伴唱，当前只有主导音高提案。")
-    project["source"]["analysis"] = {"rhythm": {key: grid[key] for key in ("bpm", "offsetSeconds", "beatTimesSeconds", "downbeatTimesSeconds", "method", "confidence")}, "transforms": transforms, "rawProjectUrl": f"/api/projects/{project['id']}/raw", "quality": quality}
+    project["source"]["analysis"] = {"rhythm": {key: grid[key] for key in ("bpm", "offsetSeconds", "beatTimesSeconds", "downbeatTimesSeconds", "method", "confidence")}, "transforms": transforms, "quality": quality}
+    if raw_project["parts"]:
+        project["source"]["analysis"]["rawProjectUrl"] = f"/api/projects/{project['id']}/raw"
+    else:
+        detailed["baselineEmpty"] = True
+        project["source"]["warnings"].append("基础模型未检出可用音符，主唱由独立词音模型补建；空的基础结果只作诊断证据，不作为可打开的总谱。")
     if identity and identity.get("uncertaintyIntervals"):
         project["source"]["analysis"]["uncertaintyIntervals"] = identity["uncertaintyIntervals"]
         project["source"]["warnings"].append("主唱提案保留整条KARA2主唱线，但标记的时间段存在独立音高模型分歧；这些段落仍待定，没有静默切高八度或删音。")
@@ -463,12 +645,16 @@ def improve_project(directory: Path, raw_project: dict, request: dict, paths: di
     quality["verificationMode"] = verification_mode
     quality["verificationStatus"] = "sampled" if verification_mode == "sampled" else "not_applicable"
     if verification_mode == "full":
-        lead_path = directory / "stem-lead.wav"
-        contour_path = directory / "lead-identity/lead-models/vocals-fcpe.npz"
-        if lead_path.is_file() and contour_path.is_file():
+        # Verification must follow the selected waveform, including a rejected
+        # lead hypothesis. A cached stem-lead.wav alone is not selection evidence.
+        used_lead = bool(voice_details.get("leadIdentityUsed"))
+        lead_path = directory / "stem-lead.wav" if used_lead else paths.get("vocals")
+        contour_path = directory / "lead-identity/lead-models/vocals-fcpe.npz" if used_lead else model_dir / "vocals-fcpe.npz"
+        if lead_path is not None and lead_path.is_file() and contour_path.is_file() and voice_details:
             from .voice_verification import apply_dense_voice_evidence, run_dense_voice_verification
             try:
                 audit = run_dense_voice_verification(directory, lead_path, contour_path, status)
+                audit = {**audit, "inputSource": "separated_lead" if used_lead else "separated_vocals"}
                 apply_dense_voice_evidence(project, detailed, audit)
             except Cancelled:
                 raise

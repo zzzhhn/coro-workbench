@@ -117,6 +117,9 @@ def test_identity_fully_failed_samples_remain_unusable(tmp_path):
 
 
 def test_kara_host_zero_backing_preserves_input(tmp_path, monkeypatch):
+    import pytest
+    pytest.importorskip('torch', reason='Optional separation runtime is outside the model-free test environment')
+    pytest.importorskip('onnxruntime', reason='Optional separation runtime is outside the model-free test environment')
     import soundfile as sf
     import server.lead_separation as module
     model = tmp_path / "model.onnx"

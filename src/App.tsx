@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowDown,
   ArrowRight,
   CaretDown,
+  CaretLeft,
+  CaretRight,
   Check,
   CheckCircle,
   CircleNotch,
@@ -32,6 +35,7 @@ import {
 import type { ArrangementOptions, NoteEvent, ScorePart, ScoreProject } from './lib/types';
 import type { Selection } from './lib/editor';
 import { beatsPerBar, pitchName, toMusicXml, fromMusicXml } from './lib/music';
+import { scoreWindow } from './lib/scoreWindow';
 import { arrangeForVoices } from './lib/arrange';
 import { createBlankProject, createDemoProject } from './lib/demo';
 import {
@@ -53,10 +57,8 @@ import {
   type PlaybackState,
 } from './lib/audio';
 import {
-  archiveWorkspace,
   downloadFile,
   getLocalAudio,
-  readLibrary,
   readWorkspace,
   saveLocalAudio,
   saveWorkspace,
@@ -73,7 +75,8 @@ import SourceReference from './components/SourceReference';
 import TransportBar from './components/TransportBar';
 import SourceEvidence from './components/SourceEvidence';
 import RepairDialog from './components/RepairDialog';
-import LocalResults from './components/LocalResults';
+import LibraryDialog from './components/LibraryDialog';
+import { archiveWorkspace } from './lib/library';
 import { notationReadabilitySummary } from './lib/readability';
 import { recommendLeadPart } from './lib/arrange';
 import ImportDialog, { PENDING_ANALYSIS_KEY } from './components/ImportDialog';
@@ -123,6 +126,7 @@ export default function App() {
     readPendingVocalRebuild(localStorage) ? 'vocal-rebuild' : localStorage.getItem(PENDING_ANALYSIS_KEY) ? 'import' : undefined,
   );
   const [mobilePanel, setMobilePanel] = useState<'parts' | 'inspector' | undefined>();
+  const [panelPreference, setPanelPreference] = useState<{ parts?: boolean; inspector?: boolean }>({});
   const [tab, setTab] = useState<'workbench' | 'practice'>('workbench');
   const [practicePartId, setPracticePartId] = useState('all');
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -148,6 +152,9 @@ export default function App() {
   const [loopStart, setLoopStart] = useState(1);
   const [loopEnd, setLoopEnd] = useState(Math.min(4, project.measures));
   const [zoom, setZoom] = useState(100);
+  const [pageSize, setPageSize] = useState<4 | 8 | 'all'>(4);
+  const [barDraft, setBarDraft] = useState<string>();
+  const [printing, setPrinting] = useState(false);
   const [showConfidence, setShowConfidence] = useState(true);
   const [entryDuration, setEntryDuration] = useState(1);
   const [stepEntry, setStepEntry] = useState(false);
@@ -163,6 +170,7 @@ export default function App() {
   workspaceRef.current = { source, arrangement, active };
   const generatedDemo = useRef<string | undefined>(undefined);
   const localAudioUrls = useRef<Map<string, string>>(new Map());
+  const switchingWorkspace = useRef(false);
   const pendingAssetSignature = [source, arrangement]
     .filter((item): item is ScoreProject => Boolean(item))
     .flatMap((item) => [...item.parts.map((part) => part.stemUrl), ...(item.source.pages ?? [])])
@@ -173,7 +181,15 @@ export default function App() {
   const selectedNote = part.notes.find((note) => note.id === selection?.noteId);
   const barLength = beatsPerBar(project);
   const totalBeats = project.measures * barLength;
-  const currentBar = Math.min(project.measures, Math.floor(playingState.beat / barLength) + 1);
+  const currentBar = Math.max(1, Math.min(project.measures, Math.floor(playingState.beat / barLength) + 1));
+  const measureRange = pageSize === 'all' ? undefined : scoreWindow(project.measures, currentBar, pageSize);
+  const visibleChords = project.chords.flatMap((chord, index) => {
+    const bar = Math.floor(chord.start / barLength) + 1;
+    return !measureRange || (bar >= measureRange.start && bar <= measureRange.end) ? [{ chord, index, bar }] : [];
+  });
+  const denseScore = project.parts.length >= 8 || project.measures > 24;
+  const partsOpen = panelPreference.parts ?? !denseScore;
+  const inspectorOpen = panelPreference.inspector ?? (!denseScore || Boolean(selection));
   const sourceTempo = project.originalAudio?.tempo ?? project.tempo;
   const sourceLength = project.originalAudio?.duration ?? scoreDuration(project);
   const readabilityKey = useMemo(() => project.source.kind === 'audio' && project.tempo < 90 ? JSON.stringify({ tempo: project.tempo, meter: project.timeSignature, key: project.key, measures: project.measures, audioTempo: project.originalAudio?.tempo, audioOffset: project.originalAudio?.offsetSeconds, parts: project.parts.map(item => ({ id: item.id, role: item.role, roleSource: item.roleSource, notes: item.notes, staves: item.staves, clef: item.clef })) }) : '', [project]);
@@ -208,6 +224,16 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
+    const beforePrint = () => flushSync(() => setPrinting(true));
+    const afterPrint = () => setPrinting(false);
+    window.addEventListener('beforeprint', beforePrint);
+    window.addEventListener('afterprint', afterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', beforePrint);
+      window.removeEventListener('afterprint', afterPrint);
+    };
+  }, []);
+  useEffect(() => {
     let live = true;
     const check = () =>
       void getHealth()
@@ -226,16 +252,27 @@ export default function App() {
   }, []);
   useEffect(() => {
     setSaved('saving');
-    const timer = setTimeout(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
       try {
-        saveWorkspace({ source, arrangement, active, savedAt: new Date().toISOString() });
-        setSaved('saved');
+        const state = { source, arrangement, active, savedAt: new Date().toISOString() };
+        saveWorkspace(state);
+        await archiveWorkspace(state);
+        if (!cancelled) setSaved('saved');
       } catch {
-        setSaved('error');
+        if (!cancelled) setSaved('error');
       }
     }, 500);
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [source, arrangement, active]);
+  useEffect(() => {
+    const flush = () => {
+      try { saveWorkspace({ ...workspaceRef.current, savedAt: new Date().toISOString() }); }
+      catch { setSaved('error'); }
+    };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, []);
   useEffect(() => {
     engine.current?.updateMixer(project.parts);
   }, [project.parts]);
@@ -380,6 +417,7 @@ export default function App() {
   }, []);
   const resetEditor = (next: ScoreProject) => {
     engine.current?.seek(0);
+    setBarDraft(undefined);
     setSelectedPartId(next.parts[0].id);
     setSelection(undefined);
     setVisiblePart('all');
@@ -391,17 +429,25 @@ export default function App() {
     setPlaybackMode('score');
     setMobilePanel(undefined);
   };
-  const stash = () => {
+  const stash = async () => {
     try {
-      archiveWorkspace({ ...workspaceRef.current, savedAt: new Date().toISOString() });
+      const snapshot = workspaceRef.current;
+      await archiveWorkspace({ ...snapshot, savedAt: new Date().toISOString() });
+      if (workspaceRef.current.source !== snapshot.source || workspaceRef.current.arrangement !== snapshot.arrangement) {
+        notify('保存期间工程有新修改，请再试一次切换。', true);
+        return false;
+      }
       return true;
     } catch {
       notify('未能保存当前工程，已取消切换。请先导出备份并检查浏览器存储空间或权限。', true);
       return false;
     }
   };
-  const importProject = (next: ScoreProject) => {
-    if (!stash()) return false;
+  const importProject = async (next: ScoreProject) => {
+    if (switchingWorkspace.current) return false;
+    switchingWorkspace.current = true;
+    try {
+    if (!await stash()) return false;
     setSource(next);
     setArrangement(undefined);
     setActive('source');
@@ -411,9 +457,13 @@ export default function App() {
     setDialog(undefined);
     notify(`已导入「${next.title}」`);
     return true;
+    } finally { switchingWorkspace.current = false; }
   };
-  const openWorkspace = (next: WorkspaceState) => {
-    if (!stash()) return false;
+  const openWorkspace = async (next: WorkspaceState) => {
+    if (switchingWorkspace.current) return false;
+    switchingWorkspace.current = true;
+    try {
+    if (!await stash()) return false;
     setSource(next.source);
     setArrangement(next.arrangement);
     setActive(next.active);
@@ -422,6 +472,7 @@ export default function App() {
     resetEditor(next.active === 'arrangement' && next.arrangement ? next.arrangement : next.source);
     setDialog(undefined);
     return true;
+    } finally { switchingWorkspace.current = false; }
   };
   const switchDocument = (next: ActiveDocument) => {
     if (next === 'arrangement' && !arrangement) {
@@ -467,25 +518,30 @@ export default function App() {
     setSelection(undefined);
     setHistoryVersion((value) => value + 1);
   };
-  const selectNote = (next: Selection) => {
+  const selectNote = (next: Selection, beat?: number) => {
     const note = project.parts
       .find((part) => part.id === next.partId)
       ?.notes.find((note) => note.id === next.noteId);
     if (tab === 'practice') {
-      if (note) seekBeat(note.start);
+      if (note) seekBeat(beat ?? note.start);
       return;
     }
     setSelection(next);
     setSelectedPartId(next.partId);
     setInspectorTab('note');
     if (window.innerWidth <= 1120) setMobilePanel('inspector');
-    if (note && !playingState.playing) engine.current?.seek(note.start);
+    if (note && !playingState.playing) engine.current?.seek(beat ?? note.start);
   };
   const changeNote = (patch: Partial<NoteEvent>) => {
     if (!selection) return;
     try {
       const next = modifyNote(project, selection, patch);
       updateProject(next);
+      if (patch.start !== undefined) {
+        const moved = next.parts.find((item) => item.id === selection.partId)?.notes
+          .find((note) => note.id === selection.noteId);
+        if (moved) engine.current?.seek(moved.start);
+      }
       if (patch.midi !== undefined && patch.midi !== null)
         void engine.current?.audition(part, patch.midi).catch((error) => notify(cleanError(error), true));
     } catch (error) {
@@ -540,6 +596,7 @@ export default function App() {
     });
     updateProject(result.project);
     setSelection(result.selection);
+    engine.current?.seek(newNote.start);
   };
   const beginPlayback = async (
     startBeat = playingState.beat,
@@ -577,6 +634,17 @@ export default function App() {
     if (playingState.playing) void beginPlayback(next);
     else engine.current?.seek(next);
   };
+  const goToMeasure = (bar: number) => {
+    setBarDraft(undefined);
+    const target = Math.max(1, Math.min(project.measures, Math.round(bar)));
+    const beat = (target - 1) * barLength;
+    if (
+      playingState.playing &&
+      (!loop || (target >= loopStart && target <= loopEnd)) &&
+      (playbackMode === 'score' || beat < sourceBeatLength(project))
+    ) void beginPlayback(beat);
+    else engine.current?.seek(beat);
+  };
   const seekSource = (fraction: number) => {
     const next =
       (Math.max(0, fraction * sourceLength - (project.originalAudio?.offsetSeconds ?? 0)) * sourceTempo) / 60;
@@ -601,6 +669,7 @@ export default function App() {
   const openInspector = (mode: 'note' | 'check' = 'note') => {
     setTab('workbench');
     setInspectorTab(mode);
+    setPanelPreference((value) => ({ ...value, inspector: true }));
     setMobilePanel('inspector');
   };
   const setRehearsalRange = (start: number, end: number, enable = false) => {
@@ -725,6 +794,7 @@ export default function App() {
         return;
       }
       if (event.code === 'Space') {
+        if (target.closest('button, a[href], summary')) return;
         event.preventDefault();
         togglePlay();
         return;
@@ -801,7 +871,7 @@ export default function App() {
 
   return (
     <div
-      className={`app-shell ${tab === 'practice' ? 'practice-mode' : ''} ${mobilePanel ? `show-${mobilePanel}` : ''}`}
+      className={`app-shell ${tab === 'practice' ? 'practice-mode' : ''} ${mobilePanel ? `show-${mobilePanel}` : ''} ${partsOpen ? '' : 'parts-collapsed'} ${inspectorOpen ? '' : 'inspector-collapsed'}`}
     >
       <a className="skip-link" href="#score-workspace">
         跳到乐谱
@@ -871,7 +941,7 @@ export default function App() {
         </div>
       </header>
 
-      <aside className="parts-sidebar" aria-label={tab === 'practice' ? '排练面板' : '编配面板'}>
+      <aside id="parts-panel" className="parts-sidebar" aria-label={tab === 'practice' ? '排练面板' : '编配面板'}>
         <div className="workspace-heading">
           <button onClick={() => setDialog('library')}>
             <FolderOpen size={17} />
@@ -941,7 +1011,7 @@ export default function App() {
               setStem({ url: item.stemUrl!, name: item.name });
               setPlaybackMode('source');
               setSourceOpen(true);
-              notify(`已选择「${item.name}」分离音轨，点击播放试听。`);
+              notify(`已选择「${item.name}」原声分离轨，可能漏音或串音。试听识别结果请选择底部「谱曲」。`);
             }}
             onAdd={addPart}
           />
@@ -982,10 +1052,22 @@ export default function App() {
           <button
             className="mobile-toggle icon-button"
             aria-label="显示声部面板"
+            aria-controls="parts-panel"
+            aria-expanded={mobilePanel === 'parts'}
             title={tab === 'practice' ? '练习声部与片段' : '声部与混音'}
             onClick={() => setMobilePanel('parts')}
           >
             <List size={20} />
+          </button>
+          <button
+            className="desk-parts-toggle panel-toggle"
+            aria-label={partsOpen ? '收起声部面板' : '显示声部面板'}
+            aria-controls="parts-panel"
+            aria-expanded={partsOpen}
+            onClick={() => setPanelPreference((value) => ({ ...value, parts: !partsOpen }))}
+          >
+            <List size={17} />
+            <span>声部</span>
           </button>
           <div className="document-tabs" role="tablist" aria-label="乐谱版本">
             <button role="tab" aria-selected={active === 'source'} onClick={() => switchDocument('source')}>
@@ -1033,6 +1115,28 @@ export default function App() {
               <Sparkle size={15} />
               <span>{arrangement ? '重新编配' : '生成阿卡贝拉'}</span>
             </button>
+            {tab === 'workbench' && (
+              <>
+                <button
+                  className="panel-toggle desk-inspector-toggle"
+                  aria-label={inspectorOpen ? '收起编辑面板' : '显示编辑面板'}
+                  aria-expanded={inspectorOpen}
+                  onClick={() => setPanelPreference((value) => ({ ...value, inspector: !inspectorOpen }))}
+                >
+                  <SlidersHorizontal size={17} />
+                  <span>属性</span>
+                </button>
+                <button
+                  className="icon-button inspector-toggle"
+                  aria-label="显示编辑面板"
+                  aria-expanded={mobilePanel === 'inspector'}
+                  title="音符属性与校对"
+                  onClick={() => openInspector('note')}
+                >
+                  <SlidersHorizontal size={18} />
+                </button>
+              </>
+            )}
           </div>
         </div>
         {tab === 'practice' && (
@@ -1159,30 +1263,19 @@ export default function App() {
               <SlidersHorizontal size={15} />
               整理
             </button>
-            <select
-              className="score-scope-select"
-              aria-label="谱面声部"
-              value={visiblePart}
-              onChange={(event) => {
-                setVisiblePart(event.target.value);
-                if (event.target.value !== 'all') setSelectedPartId(event.target.value);
-              }}
-            >
-              <option value="all">完整总谱</option>
-              {project.parts.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-            <button
-              className="icon-button inspector-toggle"
-              aria-label="显示编辑面板"
-              title="音符属性与校对"
-              onClick={() => openInspector('note')}
-            >
-              <SlidersHorizontal size={18} />
-            </button>
+            {readableHint && (
+              <button
+                className="text-tool"
+                aria-label="预览记谱调整"
+                title={`减少细碎符号。记谱单位可改为 ${readableHint.targetTempo.toFixed(1)} BPM，播放秒数、音高和音符数量不变。`}
+                onClick={() => {
+                  setRepairEntry('beat');
+                  setDialog('repair');
+                }}
+              >
+                记谱建议
+              </button>
+            )}
             <button
               className={`confidence-toggle ${showConfidence ? 'on' : ''}`}
               title="高亮模型低置信音符（不代表校准准确率）"
@@ -1236,37 +1329,80 @@ export default function App() {
             <button onClick={() => setStepEntry(false)}>退出</button>
           </div>
         )}
-        {readableHint && (
-          <div className="readability-hint">
-            <span>
-              <strong>减少细碎符号</strong> 记谱单位可改为 {readableHint.targetTempo.toFixed(1)}{' '}
-              BPM；播放秒数、音高和音符数量不变。
+        <div className="measure-rail" aria-label="小节导航">
+          <div className="measure-pages">
+            <button
+              className="icon-button"
+              aria-label="上一段小节"
+              title="上一段小节"
+              disabled={!measureRange || measureRange.start <= 1}
+              onClick={() => measureRange && pageSize !== 'all' && goToMeasure(measureRange.start - pageSize)}
+            >
+              <CaretLeft size={15} />
+            </button>
+            <span className="measure-range" aria-live="polite">
+              {measureRange
+                ? `${measureRange.start}–${measureRange.end} / ${project.measures}`
+                : `全曲 · ${project.measures} 小节`}
             </span>
             <button
-              onClick={() => {
-                setRepairEntry('beat');
-                setDialog('repair');
-              }}
+              className="icon-button"
+              aria-label="下一段小节"
+              title="下一段小节"
+              disabled={!measureRange || measureRange.end >= project.measures}
+              onClick={() => measureRange && goToMeasure(measureRange.end + 1)}
             >
-              预览记谱调整 <ArrowRight size={14} />
+              <CaretRight size={15} />
             </button>
           </div>
-        )}
-        <div className="measure-rail" aria-label="小节导航">
-          <div className="measure-label">小节</div>
-          <div className="measure-buttons">
-            {Array.from({ length: project.measures }, (_, i) => i + 1).map((bar) => (
-              <button
-                key={bar}
-                className={`${bar === currentBar ? 'current' : ''} ${loop && bar >= loopStart && bar <= loopEnd ? 'in-loop' : ''}`}
-                aria-label={`跳转第 ${bar} 小节`}
-                aria-current={bar === currentBar ? 'step' : undefined}
-                onClick={() => seekBeat((bar - 1) * barLength)}
-              >
-                {String(bar).padStart(2, '0')}
-              </button>
+          <form className="measure-jump" onSubmit={(event) => {
+            event.preventDefault();
+            const target = Number(barDraft ?? currentBar);
+            if (Number.isFinite(target)) goToMeasure(target);
+          }}>
+            <input
+              type="number"
+              min={1}
+              max={project.measures}
+              required
+              aria-label="跳转小节"
+              value={barDraft ?? currentBar}
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => setBarDraft(event.target.value)}
+            />
+            <button type="submit" title="跳转到输入的小节">跳转</button>
+          </form>
+          <select
+            className="measure-page-size"
+            aria-label="每段显示小节"
+            value={pageSize}
+            onChange={(event) => setPageSize(event.target.value === 'all' ? 'all' : event.target.value === '8' ? 8 : 4)}
+          >
+            <option value={4}>每段 4 小节</option>
+            <option value={8}>每段 8 小节</option>
+            <option value="all">全曲</option>
+          </select>
+          <select
+            className="score-scope-select"
+            aria-label="谱面声部"
+            value={tab === 'practice' ? practicePartId : visiblePart}
+            onChange={(event) => {
+              const id = event.target.value;
+              if (tab === 'practice') setPracticePartId(id);
+              else {
+                setVisiblePart(id);
+                setSelection(undefined);
+                if (id !== 'all') setSelectedPartId(id);
+              }
+            }}
+          >
+            <option value="all">完整总谱</option>
+            {project.parts.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
             ))}
-          </div>
+          </select>
           <button
             className="icon-button measure-edit-action"
             aria-label="添加空白小节"
@@ -1301,6 +1437,7 @@ export default function App() {
             playing={playingState.playing}
             zoom={zoom}
             showConfidence={showConfidence}
+            measureRange={printing ? undefined : measureRange}
             onSelect={selectNote}
             readingMode={tab === 'practice'}
           />
@@ -1330,11 +1467,11 @@ export default function App() {
             排练前校对
           </button>
         </div>
-        {project.chords.length > 0 && (
+        {visibleChords.length > 0 && (
           <div className="chord-strip">
             <span>和声</span>
             <div>
-              {project.chords.map((chord, index) => (
+              {visibleChords.map(({ chord, index, bar }) => (
                 <button
                   key={`${chord.start}-${index}`}
                   className={
@@ -1342,10 +1479,10 @@ export default function App() {
                       ? 'current'
                       : ''
                   }
-                  title={`第 ${Math.floor(chord.start / barLength) + 1} 小节，${tab === 'practice' ? '点击定位' : '点击编辑和弦'}`}
+                  title={`第 ${bar} 小节，${tab === 'practice' ? '点击定位' : '点击编辑和弦'}`}
                   onClick={() => (tab === 'practice' ? seekBeat(chord.start) : editChord(index))}
                 >
-                  <small>{Math.floor(chord.start / barLength) + 1}</small>
+                  <small>{bar}</small>
                   {chord.symbol}
                 </button>
               ))}
@@ -1487,29 +1624,32 @@ export default function App() {
       )}
       {dialog === 'pitch-review' && (
         <PitchReviewDialog key={source.id} project={source} initialSeconds={pitchReviewSeconds} hasArrangement={Boolean(arrangement)}
-          onClose={()=>setDialog(undefined)} onApply={(draft)=>{
+          onClose={()=>setDialog(undefined)} onApply={async (draft)=>{
+            const state = { ...workspaceRef.current, source: draft, savedAt: new Date().toISOString() };
+            await archiveWorkspace(state);
+            saveWorkspace(state);
             updateProject(draft);
-            setDialog(undefined);
             notify('原曲主唱修正已应用，可撤销；已有编配和模型证据保持不变。');
           }}/>
       )}
       {dialog === 'vocal-rebuild' && (
         <VocalRebuildDialog project={source} hasArrangement={Boolean(arrangement)}
-          onBeforeStart={() => {
+          onBeforeStart={async () => {
             const state = { ...workspaceRef.current, savedAt: new Date().toISOString() };
             try {
-              archiveWorkspace(state);
+              await archiveWorkspace(state);
               saveWorkspace(state);
             } catch {
               throw new Error('暂时无法安全保存旧工程，请先导出便携工程备份或释放浏览器空间，再重建主唱。');
             }
             setSaved('saved');
           }}
-          onClose={() => setDialog(undefined)} onOpen={(next) => {
-            if (!importProject(next)) return;
+          onClose={() => setDialog(undefined)} onOpen={async (next) => {
+            if (!await importProject(next)) return false;
             setTab('workbench');
             setVisiblePart('vocals');
             notify('已打开主唱重建副本。旧总谱和编配保留在工程库，其他声部与和弦保持不变。');
+            return true;
           }} />
       )}
       {dialog === 'project' && (
@@ -1630,57 +1770,11 @@ export default function App() {
         </Modal>
       )}
       {dialog === 'library' && (
-        <Modal title="我的工程" eyebrow="YOUR LOCAL LIBRARY" onClose={() => setDialog(undefined)}>
-          <p className="modal-description">
-            在这台电脑的此浏览器中保存。切换工程前自动存档，最多保留最近 12 项；重要作品请导出 Coro 工程备份。
-          </p>
-          <div className="library-list">
-            <button className="library-item current-project" onClick={() => setDialog(undefined)}>
-              <MusicNotes size={24} />
-              <div>
-                <strong>{source.title}</strong>
-                <span>
-                  {source.measures} 小节 · {source.parts.length} 声部
-                </span>
-              </div>
-              <small>当前工程</small>
-            </button>
-            {readLibrary()
-              .filter((item) => item.source.id !== source.id)
-              .map((item) => (
-                <button className="library-item" key={item.source.id} onClick={() => openWorkspace(item)}>
-                  <MusicNotes size={24} />
-                  <div>
-                    <strong>{item.source.title}</strong>
-                    <span>
-                      {item.source.measures} 小节 · {new Date(item.savedAt).toLocaleDateString('zh-CN')}
-                    </span>
-                  </div>
-                  <ArrowRight size={17} />
-                </button>
-              ))}
-          </div>
-          <LocalResults currentId={source.id} onOpen={importProject} />
-          <div className="modal-actions">
-            <button className="secondary-button" onClick={() => importProject(createBlankProject())}>
-              <FilePlus size={17} />
-              新建空白谱
-            </button>
-            <button className="primary-button" onClick={() => setDialog('import')}>
-              <UploadSimple size={17} />
-              导入音乐
-            </button>
-          </div>
-          <button
-            className="demo-library-link"
-            onClick={() => {
-              generatedDemo.current = undefined;
-              importProject(createDemoProject());
-            }}
-          >
-            打开原创示例：Blue Hour / 薄暮 <ArrowRight size={14} />
-          </button>
-        </Modal>
+        <LibraryDialog workspace={{ source, arrangement, active, savedAt: new Date().toISOString() }}
+          onClose={() => setDialog(undefined)} onOpen={openWorkspace} onImport={importProject}
+          onNew={() => { void importProject(createBlankProject()); }}
+          onDemo={() => { generatedDemo.current = undefined; void importProject(createDemoProject()); }}
+          onExport={() => setDialog('export')} onChooseImport={() => setDialog('import')} />
       )}
       {dialog === 'delete-part' && (
         <Modal title="删除这个声部？" onClose={() => setDialog(undefined)}>

@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .venv/
+.venv-tests/
+.venv-benchmark/
 __pycache__/
 .pytest_cache/
 *.pyc
@@ -24,7 +26,10 @@ work/
 /docs/*
 !/docs/SETUP.md
 !/docs/DEVELOPMENT.md
+!/docs/game-import.md
+!/docs/WORK_COMPUTER_HANDOFF.md
 !/docs/LIMITATIONS.md
+!/docs/MULTISCORE_BENCHMARK.md
 !/docs/CHORDINO_SETUP.md
 !/docs/VOCAL_REBUILD_API.md
 !/docs/MELBAND_SETUP.md

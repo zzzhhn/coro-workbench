@@ -33,6 +33,17 @@ const note = (
 ): NoteEvent => ({ id, midi, start, duration, velocity: 0.8, origin: 'manual', ...extra });
 
 describe('symbolic score contract', () => {
+  it('keeps fractional invisible voice spacers exact without unrenderable tuplet anchors', () => {
+    const project = createBlankProject();
+    project.parts[0].notes = [note('held', 60, 0, 4, { voice: '1' }), note('enter', 64, 1 / 3, 1 / 3, { voice: '2' })];
+    project.chords = [{ start: 1 / 3, duration: 1, symbol: 'C', pitches: [60, 64, 67] }];
+    const result = toAbc(project);
+    expect(result.abc).not.toMatch(/\(\d+:\d+:1x/);
+    const tune = abcjs.parseOnly(result.abc)[0];
+    expect(((tune as unknown as { warnings?: string[] }).warnings ?? []).filter((w) => !w.includes('Duration not representable'))).toEqual([]);
+    const audio = tune.setUpAudio({ chordsOff: true });
+    expect(audio.tracks.flat().filter((e) => e.cmd === 'note')).toHaveLength(2);
+  });
   it('creates a valid original 16-bar demo, not a transcription result', () => {
     const demo = createDemoProject();
     expect(validateProject(demo)).toEqual([]);
@@ -228,7 +239,7 @@ describe('ABC engraving and selection map', () => {
       note('c', 64, 2 / 3, 1 / 3),
     ];
     const { abc } = toAbc(source);
-    expect(abc).toContain('(3:2:1');
+    expect(abc).toContain('(3:2:3');
     const tune = abcjs.parseOnly(abc)[0];
     expect(tune.warnings ?? []).toEqual([]);
     const pitches = tune
@@ -479,7 +490,10 @@ describe('MIDI interchange', () => {
     expect(restored.parts.map((part) => part.name)).toEqual(source.parts.map((part) => part.name));
     expect(restored.tempo).toBeCloseTo(source.tempo, 3);
     expect(restored.key).toBe('F');
-    expect(actualNotes(restored)).toEqual(actualNotes(source));
+    const performed = structuredClone(source);
+    for (const part of performed.parts) for (const note of part.notes)
+      if (note.articulation === 'staccato') note.duration *= .45;
+    expect(actualNotes(restored)).toEqual(actualNotes(performed));
   });
 
   it.each(['C', 'G', 'Bb', 'Am', 'F#m', 'Cm'])('roundtrips key %s using fifths, not tonic indices', (key) => {

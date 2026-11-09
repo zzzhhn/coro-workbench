@@ -9,7 +9,7 @@ import math
 
 import numpy as np
 
-VERSION = "vocal-score-joint-rhythm-3"
+VERSION = "vocal-score-joint-rhythm-6"
 
 
 def clean_vocal_fragments(events: list, times, f0, features: dict) -> tuple[list, dict]:
@@ -41,7 +41,8 @@ def clean_vocal_fragments(events: list, times, f0, features: dict) -> tuple[list
         if previous and previous[2] == event[2] and -.000001 <= event[0] - previous[1] <= .065 and attack_at(event[0]) < .35:
             # At least one side must be a fragment: stable repeated syllables
             # cannot be joined merely because their pitch happens to agree.
-            if min(previous[1] - previous[0], event[1] - event[0]) <= .085:
+            lengths = (previous[1] - previous[0], event[1] - event[0])
+            if min(lengths) <= .085 and max(lengths) >= .14:
                 edits.append({"kind": "same_pitch_dropout", "source": [previous.copy(), event.copy()], "reason": "Short same-pitch fragment, <=65ms gap and no independent acoustic reattack"})
                 previous[1] = event[1]
                 previous[3] = max(previous[3], event[3])
@@ -94,7 +95,7 @@ def _select_joint_rhythm_path(rows: list, all_options: list, spb: float) -> list
         gaps = (next_options[:, 0, None] - prev_options[None, :, 1]) * spb
         allowed = gaps >= -1e-7
         if real_rest:
-            allowed &= gaps >= max(min(.30, raw_gap), raw_gap - .12) - 1e-7
+            allowed &= gaps >= max(.18, raw_gap - .12) - 1e-7
         breaks = np.where(allowed, broken_boundaries[-1][None, :] + (touching & (gaps > 1e-7)), np.inf)
         fewest_breaks = np.min(breaks, axis=1)
         continuity = np.where((gaps > 1e-7) & connected, 1.8 + np.minimum(2., gaps / spb * 2), 0.)
@@ -117,7 +118,8 @@ def _select_joint_rhythm_path(rows: list, all_options: list, spb: float) -> list
     return selected
 
 
-def quantize_vocal_rhythm(events: list, grid: dict, duration: float, part_id: str = "vocals", *, preserve_confidence: bool = True) -> tuple[list[dict], dict]:
+def quantize_vocal_rhythm(events: list, grid: dict, duration: float, part_id: str = "vocals", *, preserve_confidence: bool = True,
+                          timing_tolerance_seconds: float | None = None) -> tuple[list[dict], dict]:
     """Joint onset/offset path with rhythmic cost and explicit rest preservation.
 
     The path cannot deduplicate colliding attacks. A 32nd grid is available for
@@ -128,6 +130,9 @@ def quantize_vocal_rhythm(events: list, grid: dict, duration: float, part_id: st
     bpm, offset = float(grid["bpm"]), float(grid["offsetSeconds"])
     if not all(math.isfinite(v) for v in (bpm, offset, duration)) or not 20 <= bpm <= 300 or duration <= 0:
         raise ValueError("Invalid vocal rhythm grid")
+    if timing_tolerance_seconds is not None and (not math.isfinite(timing_tolerance_seconds)
+                                                or not .005 <= timing_tolerance_seconds <= .11):
+        raise ValueError("Timing tolerance must be between 5 and 110 milliseconds")
     spb = 60 / bpm
     rows = []
     for event in events:
@@ -154,26 +159,57 @@ def quantize_vocal_rhythm(events: list, grid: dict, duration: float, part_id: st
     def candidates(seconds, tolerance):
         beat = max(0., (seconds - offset) / spb)
         options = {}
-        for step in (.5, .25, .125, .0625, .03125):
+        steps = (.5, .25, .125, .0625, .03125)
+        if timing_tolerance_seconds is not None:
+            # A rare tick-level escape keeps every measured attack when a very
+            # slow tempo or dense phrase has no legal conventional grid point.
+            steps += (1 / 960,)
+        for step in steps:
             center = round(beat / step)
             for point in (max(0., (center - 1) * step), max(0., center * step), max(0., (center + 1) * step)):
                 shift = abs(point - beat) * spb
+                if timing_tolerance_seconds is not None:
+                    shift = abs(offset + point * spb - seconds)
                 if shift <= tolerance + 1e-8:
-                    options[point] = (shift / max(.025, tolerance)) ** 2 * .85 + complexity(point)
+                    cost = (shift / max(.025, tolerance)) ** 2 * .85 + complexity(point)
+                    if step == 1 / 960:
+                        cost += 40
+                    options[point] = min(options.get(point, math.inf), cost)
         if not options:
+            if timing_tolerance_seconds is not None:
+                raise ValueError("Vocal boundary cannot fit the supplied grid within its timing bound")
             point = round(beat / .125) * .125
             options[point] = ((point - beat) * spb / tolerance) ** 2 + complexity(point)
         return options
 
     all_options = []
-    for start, end, pitch, strength in rows:
+    for row_index, (start, end, pitch, strength) in enumerate(rows):
         length = min(end, duration) - start
-        tolerance = min(.11, .22 * spb, max(.035, length * .42))
-        starts, ends = candidates(start, tolerance), candidates(min(end, duration), max(tolerance, min(.11, .22 * spb)))
+        # Slow sung phrases commonly sit behind the beat. The former 110 ms
+        # cap excluded even the nearest sixteenth at 65 BPM and forced 32nds.
+        # A short vowel does not imply a more precise syllable onset. A
+        # length-scaled bound locked brief vowels onto fine subdivisions and
+        # made their duration even shorter. Joint ordering retains every
+        # distinct attack; strict acoustic mode below keeps its explicit cap.
+        intervals = ([start - rows[row_index - 1][0]] if row_index else []) + (
+            [rows[row_index + 1][0] - start] if row_index + 1 < len(rows) else [])
+        attack_spacing = min(intervals, default=math.inf)
+        tolerance = min(.16, .24 * spb)
+        # Below the midpoint between a 32nd and a 16th, the measured
+        # interval supports a rapid attack. Keep its local timing bound.
+        # Ordinary attacks use the shared path to resolve competing points.
+        if timing_tolerance_seconds is not None or attack_spacing <= .1875 * spb + 1e-8:
+            tolerance = min(tolerance, .45 * attack_spacing)
+        end_tolerance = tolerance
+        if timing_tolerance_seconds is not None:
+            tolerance = min(tolerance, timing_tolerance_seconds)
+            end_tolerance = min(end_tolerance, timing_tolerance_seconds)
+        starts, ends = candidates(start, tolerance), candidates(min(end, duration), end_tolerance)
         choices = []
         for left, start_cost in starts.items():
             for right, end_cost in ends.items():
-                if right < left + .03125 - 1e-8:
+                minimum = 1 / 960 if timing_tolerance_seconds is not None else .03125
+                if right < left + minimum - 1e-8:
                     continue
                 duration_beats = right - left
                 duration_cost = complexity(duration_beats) * .45
@@ -181,6 +217,8 @@ def quantize_vocal_rhythm(events: list, grid: dict, duration: float, part_id: st
                     duration_cost += 5.
                 choices.append((left, right, start_cost + end_cost * .75 + duration_cost))
         if not choices:
+            if timing_tolerance_seconds is not None:
+                raise ValueError("Vocal interval cannot fit the supplied grid within its timing bound")
             left = round(max(0., (start - offset) / spb) / .125) * .125
             choices = [(left, left + .125, 6.)]
         all_options.append(choices)
@@ -200,7 +238,9 @@ def quantize_vocal_rhythm(events: list, grid: dict, duration: float, part_id: st
             notes[-1]["confidence"] = round(float(np.clip(strength, 0, 1)), 4)
         changes.append({"sourceStartSeconds": original_start, "sourceEndSeconds": original_end,
                         "scoreStartSeconds": offset + start * spb, "scoreEndSeconds": offset + end * spb})
-    return notes, {"version": VERSION, "inputEvents": len(rows), "outputNotes": len(notes), "noAttackDeduplication": True,
+    return notes, {"version": VERSION if timing_tolerance_seconds is None else "vocal-score-bounded-timing-1",
+                   "timingToleranceSeconds": timing_tolerance_seconds,
+                   "inputEvents": len(rows), "outputNotes": len(notes), "noAttackDeduplication": True,
                    "maximumOnsetShiftSeconds": max(abs(x["scoreStartSeconds"] - x["sourceStartSeconds"]) for x in changes),
                    "maximumOffsetShiftSeconds": max(abs(x["scoreEndSeconds"] - x["sourceEndSeconds"]) for x in changes),
                    "boundaryChanges": changes, "minimumRestPreservedSeconds": .18,

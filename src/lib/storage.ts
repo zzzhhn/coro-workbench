@@ -5,7 +5,6 @@ import { decodeLocalState, encodeLocalState } from './localCodec';
 const KEY = 'coro.session.v1';
 const DATABASE = 'coro-local-audio';
 const STORE = 'audio';
-const LIBRARY_KEY = 'coro.library.v1';
 const localAssetKeys = new Map<string, string>();
 
 export function registerLocalAssetUrl(url: string, key: string): void {
@@ -19,7 +18,7 @@ export interface WorkspaceState {
   savedAt: string;
 }
 
-function safeProject(project: ScoreProject): ScoreProject {
+export function safeProject(project: ScoreProject): ScoreProject {
   const next = structuredClone(project);
   if (next.originalAudio?.url.startsWith('blob:')) next.originalAudio.url = `local:${project.id}`;
   if (project.originalAudio && localAssetKeys.has(project.originalAudio.url))
@@ -45,27 +44,6 @@ export function saveWorkspace(state: WorkspaceState): void {
       arrangement: state.arrangement ? safeProject(state.arrangement) : undefined,
     }),
   );
-}
-
-export function archiveWorkspace(state: WorkspaceState): void {
-  const existing = readLibrary().filter((item) => item.source.id !== state.source.id);
-  existing.unshift({
-    ...state,
-    source: safeProject(state.source),
-    arrangement: state.arrangement ? safeProject(state.arrangement) : undefined,
-  });
-  localStorage.setItem(LIBRARY_KEY, encodeLocalState(existing.slice(0, 12)));
-}
-
-export function readLibrary(): WorkspaceState[] {
-  try {
-    const raw = decodeLocalState(localStorage.getItem(LIBRARY_KEY) ?? '[]');
-    return Array.isArray(raw)
-      ? raw.filter((state) => state?.source?.version === 1 && Array.isArray(state.source.parts))
-      : [];
-  } catch {
-    return [];
-  }
 }
 
 export function readWorkspace(): WorkspaceState | undefined {
@@ -170,7 +148,7 @@ export function parseProject(content: string): ScoreProject {
     );
   if (
     project.source.analysis?.rawProjectUrl &&
-    !/^\/api\/projects\/[a-f0-9]{32}\/raw$/.test(project.source.analysis.rawProjectUrl)
+    !/^\/api\/projects\/[a-f0-9]{32}\/(?:raw|game-raw)$/.test(project.source.analysis.rawProjectUrl)
   )
     delete project.source.analysis.rawProjectUrl;
   return project;

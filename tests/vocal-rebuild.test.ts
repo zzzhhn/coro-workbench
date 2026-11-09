@@ -12,6 +12,8 @@ describe('existing-project vocal rebuild', () => {
     project.parts[0].id = 'vocals';
     project.originalAudio = { name: 'clip.wav', url: `/api/audio/${id}/original.wav`, duration: 12, offsetSeconds: 0 };
     expect(vocalRebuildSourceId(project)).toBe(id);
+    project.source.analysis = { transforms: [], quality: { modelEvidenceUrl: `/api/projects/${id}/evidence` } };
+    expect(vocalRebuildSourceId(project)).toBe(id);
     project.originalAudio.url = 'https://example.com/private.wav';
     expect(vocalRebuildSourceId(project)).toBeUndefined();
   });
@@ -23,9 +25,11 @@ describe('existing-project vocal rebuild', () => {
     expect(requested).toBe(PENDING_VOCAL_REBUILD_KEY);
   });
   it('retains an enhanced-input choice across reload without requiring it on old records', () => {
-    const value = { jobId: 'b'.repeat(32), sourceId: 'old', title: 'Song', beforeNotes: 450, hadArrangement: false, vocalSource: 'enhanced-vocals' };
+    const value = { jobId: 'b'.repeat(32), sourceId: 'old', title: 'Song', beforeNotes: 450, hadArrangement: false, vocalSource: 'enhanced-vocals', decoder: 'phoneme' };
     expect(readPendingVocalRebuild({ getItem: () => JSON.stringify(value) })?.vocalSource).toBe('enhanced-vocals');
+    expect(readPendingVocalRebuild({ getItem: () => JSON.stringify(value) })?.decoder).toBe('phoneme');
     expect(readPendingVocalRebuild({ getItem: () => JSON.stringify({ ...value, vocalSource: 'remote' }) })).toBeUndefined();
+    expect(readPendingVocalRebuild({ getItem: () => JSON.stringify({ ...value, decoder: 'remote' }) })).toBeUndefined();
   });
   it.each(['invalid', 'null', '{"jobId":"../../file"}', JSON.stringify({ jobId: 'b'.repeat(32), sourceId: 'old', title: 'Song', beforeNotes: -1, hadArrangement: true })])('ignores damaged pending state: %s', (raw) => {
     expect(readPendingVocalRebuild({ getItem: () => raw })).toBeUndefined();
@@ -41,10 +45,10 @@ describe('existing-project vocal rebuild', () => {
     const before = structuredClone(project);
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ id: 'b'.repeat(32), status: 'queued' }), { status: 202 }));
     try {
-      await rebuildVocal(project);
+      await rebuildVocal(project, 'current', 'phoneme');
       const [url, options] = fetchMock.mock.calls[0];
       expect(url).toBe(`/api/projects/${id}/vocal-rebuild`);
-      expect(JSON.parse(options!.body as string)).toEqual({ project: before });
+      expect(JSON.parse(options!.body as string)).toEqual({ project: before, decoder: 'phoneme' });
       expect(project).toEqual(before);
       await expect(rebuildVocal(createDemoProject())).rejects.toThrow('本机主唱音轨');
       expect(fetchMock).toHaveBeenCalledTimes(1);

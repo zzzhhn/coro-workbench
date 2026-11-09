@@ -28,10 +28,13 @@ import type { WorkspaceState } from '../lib/storage';
 
 interface Props {
   onClose: () => void;
-  onImport: (project: ScoreProject) => void;
+  onImport: (project: ScoreProject) => Promise<boolean>;
   onDemo: () => void;
-  onWorkspace: (workspace: WorkspaceState) => void;
+  onWorkspace: (workspace: WorkspaceState) => Promise<boolean>;
 }
+type AudioMode = 'quick' | 'separate' | 'multi';
+type VocalDecoder = 'standard' | 'legato' | 'acoustic' | 'rosvot' | 'phoneme' | 'game';
+
 export const PENDING_ANALYSIS_KEY = 'coro.pending-analysis.v1';
 const stageLabels: Record<string, string> = {
   queued: '等待分析',
@@ -43,7 +46,9 @@ const stageLabels: Record<string, string> = {
   'voice-verification': '核对主唱音高',
   harmony: '从伴奏辨识和弦',
   'vocal-notes': '重建主唱词音节奏',
-  multi: '联合识别乐器族群',
+  multi: '联合识别伴奏声部',
+  game: 'GAME Medium 人声转谱',
+  lyrics: '对齐歌词',
   score: '生成总谱',
   complete: '转谱完成',
 };
@@ -52,12 +57,13 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File>();
   const [dragging, setDragging] = useState(false);
-  const [mode, setMode] = useState<'quick' | 'separate' | 'multi'>('separate');
+  const [mode, setMode] = useState<AudioMode>('multi');
   const [quality, setQuality] = useState<'auto' | 'raw'>('auto');
-  const [decoder, setDecoder] = useState<'standard' | 'legato' | 'acoustic' | 'rosvot'>('rosvot');
+  const [chosenDecoder, setChosenDecoder] = useState<VocalDecoder>();
   const [verification, setVerification] = useState<'full' | 'sampled'>('full');
   const [tempo, setTempo] = useState('');
-  const [maxSeconds, setMaxSeconds] = useState(90);
+  const [lyricsLrc, setLyricsLrc] = useState('');
+  const [maxSeconds, setMaxSeconds] = useState(600);
   const [health, setHealth] = useState<EngineHealth>();
   const [healthError, setHealthError] = useState(false);
   const [job, setJob] = useState<AnalysisJob | OmrJob>();
@@ -72,6 +78,29 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
   const mounted = useRef(true);
   const scoreFile = Boolean(file && /\.(musicxml|xml|mxl|mid|midi|json|coro)$/i.test(file.name));
   const imageScore = Boolean(file && /\.(pdf|png|jpe?g|tiff?|webp|bmp)$/i.test(file.name));
+  const ready = (key: string) => {
+    const engine = health?.engines[key];
+    return typeof engine === 'boolean' ? engine : (engine?.ready ?? engine?.available ?? false);
+  };
+  const phonemeReady = ready('phonemeNotes') && ready('quality');
+  const rosvotReady = ready('vocalNotes') && ready('quality');
+  const gameReady = ready('game') && ready('demucs') && ready('quality');
+  const decoder = mode === 'multi' ? 'game' : chosenDecoder ?? 'game';
+  const separateAuto = mode === 'separate' && quality === 'auto';
+  const requestDecoder = quality === 'auto' && mode !== 'quick' ? decoder : 'standard';
+  const sourceReady =
+    ready('ffmpeg') &&
+    (mode === 'multi' ? ready('yourMT3') : ready('basicPitch') && (mode !== 'separate' || ready('demucs'))) &&
+    (requestDecoder !== 'game' || gameReady) &&
+    (requestDecoder !== 'phoneme' || phonemeReady) &&
+    (requestDecoder !== 'rosvot' || rosvotReady);
+
+  const chooseMode = (next: AudioMode) => {
+    if (next === mode) return;
+    setMode(next);
+    setMaxSeconds((value) => next === 'multi' ? 600 : Math.min(value, 300));
+  };
+
   useEffect(() => {
     mounted.current = true;
     void getHealth()
@@ -134,8 +163,8 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
         activeJob.current = undefined;
         setBusy(false);
         if ('musicxml' in current && current.musicxml) {
-          onImport(projectFromOmr(current));
-        } else if ('project' in current && current.project) onImport(current.project);
+          await onImport(projectFromOmr(current));
+        } else if ('project' in current && current.project) await onImport(current.project);
         else throw new Error('任务未返回可读取的乐谱。');
       } else if (current.status === 'error' || current.status === 'cancelled') {
         localStorage.removeItem(PENDING_ANALYSIS_KEY);
@@ -163,10 +192,12 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
     try {
       if (scoreFile) {
         if (/\.coro$/i.test(file.name)) {
-          onWorkspace(await importProjectBundle(file));
+          await onWorkspace(await importProjectBundle(file));
+          setBusy(false);
           return;
         }
-        onImport(await importScoreFile(file));
+        await onImport(await importScoreFile(file));
+        setBusy(false);
         return;
       }
       if (tempo && (Number(tempo) < 30 || Number(tempo) > 240))
@@ -189,8 +220,9 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
             tempo: tempo ? Number(tempo) : undefined,
             maxSeconds,
             quality,
-            decoder,
-            verification,
+            decoder: requestDecoder,
+            lyricsLrc: requestDecoder === 'game' ? lyricsLrc : undefined,
+            verification: separateAuto ? verification : 'full',
           });
       activeJob.current = created.id;
       try {
@@ -221,14 +253,6 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
       setError(cause instanceof Error ? cause.message : '取消失败，请重试。');
     }
   };
-  const ready = (key: string) => {
-    const engine = health?.engines[key];
-    return typeof engine === 'boolean' ? engine : (engine?.ready ?? engine?.available ?? false);
-  };
-  const sourceReady =
-    ready('ffmpeg') &&
-    (mode === 'multi' ? ready('yourMT3') : ready('basicPitch') && (mode !== 'separate' || ready('demucs')));
-
   return (
     <Modal title="导入音频或乐谱" eyebrow="IMPORT" onClose={onClose} wide>
       <p className="modal-description">
@@ -280,18 +304,34 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
         <>
           <div className="mode-options" role="radiogroup" aria-label="转谱方式">
             <button
+              className={`mode-option multi-option ${mode === 'multi' ? 'selected' : ''}`}
+              role="radio"
+              aria-checked={mode === 'multi'}
+              onClick={() => chooseMode('multi')}
+              disabled={busy}
+            >
+              <FileText size={21} />
+              <div>
+                <strong>
+                  多声部总谱 <span>实验</span>
+                </strong>
+                <p>{requestDecoder === 'game'
+                  ? 'GAME Medium 转写分离后的人声，YourMT3+ 识别伴奏、复音与鼓。'
+                  : 'YourMT3+ 联合识别多声部，保留旧引擎原始结果；不使用 GAME。'}</p>
+              </div>
+              <i>{mode === 'multi' && <Check size={13} weight="bold" />}</i>
+            </button>
+            <button
               className={`mode-option ${mode === 'separate' ? 'selected' : ''}`}
               role="radio"
               aria-checked={mode === 'separate'}
-              onClick={() => setMode('separate')}
+              onClick={() => chooseMode('separate')}
               disabled={busy}
             >
               <Headphones size={21} />
               <div>
-                <strong>
-                  分轨转谱 <span>推荐</span>
-                </strong>
-                <p>分离人声、鼓、低音、钢琴、吉他与其余，再逐轨识别音高。适合歌曲。</p>
+                <strong>分轨转谱</strong>
+                <p>按人声、鼓、低音、钢琴、吉他及其他六类逐轨转写。弦乐归在其他类。</p>
               </div>
               <i>{mode === 'separate' && <Check size={13} weight="bold" />}</i>
             </button>
@@ -299,7 +339,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
               className={`mode-option ${mode === 'quick' ? 'selected' : ''}`}
               role="radio"
               aria-checked={mode === 'quick'}
-              onClick={() => setMode('quick')}
+              onClick={() => chooseMode('quick')}
               disabled={busy}
             >
               <Waveform size={21} />
@@ -308,25 +348,6 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
                 <p>直接识别音符，不分乐器。适合清晰的独奏、哼唱和单轨素材。</p>
               </div>
               <i>{mode === 'quick' && <Check size={13} weight="bold" />}</i>
-            </button>
-            <button
-              className={`mode-option multi-option ${mode === 'multi' ? 'selected' : ''}`}
-              role="radio"
-              aria-checked={mode === 'multi'}
-              onClick={() => setMode('multi')}
-              disabled={busy}
-            >
-              <FileText size={21} />
-              <div>
-                <strong>
-                  多乐器族群识谱 <span>实验</span>
-                </strong>
-                <p>
-                  YourMT3+
-                  直接识别弦乐、管乐、键盘等族群及鼓的音符。更适合多乐器段落，但可能漏音、八度误判；不生成分离音轨，不区分同族每件乐器。
-                </p>
-              </div>
-              <i>{mode === 'multi' && <Check size={13} weight="bold" />}</i>
             </button>
           </div>
           <div className="import-settings">
@@ -338,9 +359,10 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
                 disabled={busy}
               >
                 <option value={30}>前 30 秒 · 快速试用</option>
-                <option value={90}>前 90 秒 · 默认</option>
+                <option value={90}>前 90 秒</option>
                 <option value={180}>前 3 分钟</option>
                 <option value={300}>前 5 分钟</option>
+                {mode === 'multi' && <option value={600}>完整歌曲 · 最长 10 分钟</option>}
               </select>
             </label>
             <label>
@@ -368,31 +390,43 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
               onChange={(event) => setQuality(event.target.value as 'auto' | 'raw')}
               disabled={busy}
             >
-              <option value="auto">生成节拍 / 主旋律 / 钢琴整理提案（保留原始结果）</option>
-              <option value="raw">仅保留原始模型转写，不做整理</option>
+              <option value="auto">{mode === 'multi' ? 'GAME Medium 人声跟唱谱 + 多声部节拍对齐' : '生成节拍 / 主旋律 / 钢琴整理提案（保留原始结果）'}</option>
+              <option value="raw">旧引擎原始转写（不使用 GAME）</option>
             </select>
           </label>
-          {quality === 'auto' && mode === 'separate' && (
+          {separateAuto && (
             <>
               <label className="field-label">
                 主唱分段
                 <select
                   aria-label="主唱分段策略"
                   value={decoder}
-                  onChange={(event) => setDecoder(event.target.value as 'standard' | 'legato' | 'acoustic' | 'rosvot')}
+                  onChange={(event) => setChosenDecoder(event.target.value as VocalDecoder)}
                   disabled={busy}
                 >
-                  <option value="rosvot">词音节奏 · 排练优先：学习演唱边界，再联合整理记谱节奏</option>
+                  <option value="game">GAME Medium · 跟唱谱</option>
+                  <option value="phoneme" disabled={!phonemeReady}>
+                    {phonemeReady ? '发音边界 · 实验性：区分同音重唱，保留原声起止' : '发音边界 · 本机引擎未就绪'}
+                  </option>
+                  <option value="rosvot" disabled={!rosvotReady}>
+                    {rosvotReady ? '词音节奏：学习演唱边界，再联合整理记谱节奏' : '词音节奏 · 本机 ROSVOT 未就绪'}
+                  </option>
                   <option value="standard">基础分段：较少音符，保留作对照</option>
                   <option value="legato">细节提案：时长约束分段，保留更多旋律变化</option>
                   <option value="acoustic">声学起止对照：保留更多音高变化，可能产生碎音</option>
                 </select>
                 <small>
-                  {decoder === 'rosvot'
+                  {decoder === 'game'
+                    ? '固定 Medium 8 步，分离人声后识别音高和起止，再推断记谱节奏。'
+                    : decoder === 'phoneme'
+                    ? '需安装可选发音边界引擎。已用人工标注清唱对照，复杂混音仍需校对；不会生成歌词。'
+                    : decoder === 'rosvot'
                     ? '本机 ROSVOT/RWBD 辨识词音，再按原声对齐起止；保留重复吐字和原始候选，不生成歌词。'
                     : decoder === 'acoustic'
                     ? '在人审清唱留出集改善了音符起止；复杂混音仍需校对，不补缺失音高。'
-                    : '细节提案可能增加短音符，需与标准版本对照；不是已确认更准确。'}
+                    : decoder === 'legato'
+                    ? '细节提案可能增加短音符，建议对照基础分段和原声。'
+                    : '用音高和起止信号分段，复杂混音仍需校对。'}
                 </small>
               </label>
               <label className="field-label">
@@ -410,8 +444,20 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
               </label>
             </>
           )}
+          {requestDecoder === 'game' && (
+            <details className="field-label">
+              <summary>歌词辅助（可选）</summary>
+              <label className="field-label">
+                逐句中文歌词 · LRC
+                <textarea aria-label="逐句中文歌词 LRC" rows={4} value={lyricsLrc}
+                  onChange={(event) => setLyricsLrc(event.target.value)} disabled={busy}
+                  placeholder={'[00:18.20]这一句歌词\n[00:23.50]下一句歌词'} />
+                <small>不填时按音频推断。填写后额外对齐字界，辅助区分重唱与转音；不读取参考谱音符。</small>
+              </label>
+            </details>
+          )}
           <p className="subtle-note">
-            整理采用独立节拍模型与声部专用模型。人声模型冲突时会弃权，不保证主唱识别成功；电子键盘或厚重多重人声可再与多乐器模式比较。
+            {mode === 'multi' ? '按原音频对齐节拍，保留复音与短音。乐器名称与音符仍需逐声部校对。' : '整理采用独立节拍模型与声部专用模型。人声模型冲突时会弃权，不保证主唱识别成功；电子键盘或厚重多重人声可再与多乐器模式比较。'}
           </p>
           <div className={`engine-status ${sourceReady ? 'ready' : ''}`}>
             <span className="status-dot" />
@@ -421,10 +467,16 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
                 ? '检查本地音频引擎…'
                 : sourceReady
                   ? mode === 'multi'
-                    ? '本地 YourMT3+ 就绪 · 实验模型 · 仅在本机运行'
-                    : `本地引擎就绪 · Basic Pitch${mode === 'separate' ? ' + Demucs' : ''}${quality === 'auto' && ready('quality') ? ' + 主唱 / 拍点整理' : ''}`
-                  : mode === 'multi'
+                    ? requestDecoder === 'game' ? 'GAME Medium 人声 + YourMT3+ 伴奏 · 本机运行' : 'YourMT3+ 原始转写 · 未使用 GAME'
+                    : `本地引擎就绪 · ${requestDecoder === 'game' ? 'GAME Medium + ' : ''}Basic Pitch${mode === 'separate' ? ' + Demucs' : ''}${quality === 'auto' && ready('quality') ? ' + 主唱 / 拍点整理' : ''}`
+                  : requestDecoder === 'game' && !gameReady
+                    ? 'GAME Medium、分轨或节拍模型未就绪；不会改用旧人声模型。'
+                    : mode === 'multi'
                     ? '实验引擎未安装，请运行 scripts/setup-yourmt3.sh（先阅读许可说明）。'
+                    : requestDecoder === 'phoneme' && !phonemeReady
+                    ? '发音边界环境未就绪，请运行 bash scripts/setup-phoneme.sh 和 bash scripts/setup-audio-quality.sh。'
+                    : requestDecoder === 'rosvot' && !rosvotReady
+                    ? '词音节奏环境未就绪，请运行 bash scripts/setup-rosvot.sh 和 bash scripts/setup-audio-quality.sh。'
                     : '模型尚未就绪，请先运行 scripts/setup-audio.sh。'}
           </div>
         </>

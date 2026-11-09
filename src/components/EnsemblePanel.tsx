@@ -121,9 +121,10 @@ export default function EnsemblePanel({
               </button>
             </div>
             {part.stemUrl && (
-              <button className="stem-button" onClick={() => onStem(part)}>
+              <button className="stem-button" onClick={() => onStem(part)}
+                title="播放从原录音分出的音频，可能漏音或串音。试听识别乐谱请使用底部的谱曲播放。">
                 <Headphones size={13} />
-                听分离音轨
+                原声分离试听
               </button>
             )}
           </div>

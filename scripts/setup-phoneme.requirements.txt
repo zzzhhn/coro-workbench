@@ -1,0 +1,9 @@
+# Python 3.11. CPU torch wheels are selected explicitly by setup-phoneme.sh.
+torch==2.5.1
+torchaudio==2.5.1
+nnAudio==0.3.2
+wquantiles==0.6
+librosa==0.10.2.post1
+numpy==1.26.4
+scipy==1.14.1
+soundfile==0.13.1

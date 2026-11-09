@@ -136,6 +136,8 @@ def apply_dense_voice_evidence(project: dict, detailed: dict, audit: dict) -> No
     """Annotate a project without changing any note, pitch, duration, or source mapping."""
     analysis = project["source"]["analysis"]
     quality = analysis["quality"]
+    input_source = audit.get("inputSource", "separated_lead")
+    selected_lead = input_source == "separated_lead"
     intervals = audit.get("uncertaintyIntervals", [])
     combined = []
     for interval in sorted([*analysis.get("uncertaintyIntervals", []), *intervals], key=lambda item: (item.get("partId", "vocals"), item["startSeconds"])):
@@ -152,6 +154,7 @@ def apply_dense_voice_evidence(project: dict, detailed: dict, audit: dict) -> No
         "verificationMode": "full",
         "verificationStatus": "complete",
         "verificationVersion": AUDIT_VERSION,
+        "vocals.pitchEvidenceSource": input_source,
         "vocals.denseVerifiedSeconds": audit["processedSeconds"],
         "vocals.denseJointVoicedSeconds": audit["jointVoicedSeconds"],
         "vocals.denseWithin50Cents": audit["within50CentsOnJointVoiced"],
@@ -160,15 +163,15 @@ def apply_dense_voice_evidence(project: dict, detailed: dict, audit: dict) -> No
         "vocals.denseLowEvidenceSeconds": audit["unvoicedOrLowEvidenceSeconds"],
         "vocals.independentCheckSeconds": audit["durationSeconds"],
         "vocals.independentCoverageFraction": 1.,
-        "vocals.leadIdentityPartial": bool(combined),
-        "vocals.leadIdentityAccepted": not combined and not quality.get("vocals.abstained") and float(audit["jointVoicedSeconds"]) >= .8,
+        "vocals.leadIdentityPartial": selected_lead and bool(combined),
+        "vocals.leadIdentityAccepted": selected_lead and not combined and not quality.get("vocals.abstained") and float(audit["jointVoicedSeconds"]) >= .8,
         "vocals.denseCacheHit": bool(audit.get("cacheHit")),
     })
     project["source"]["warnings"] = [message for message in project["source"]["warnings"] if not message.startswith("独立音高检查仅抽样")]
-    project["source"]["warnings"].append(f"已对分析范围内完整主唱{audit['durationSeconds']:g}秒逐帧核对；仅{audit['jointVoicedSeconds']:g}秒有共同发声证据，其余低周期性/非发声不计为正确。模型一致仍不是人工真值，音符未自动更改。")
+    project["source"]["warnings"].append(f"已对当前选定人声{audit['durationSeconds']:g}秒逐帧核对；仅{audit['jointVoicedSeconds']:g}秒有共同发声证据，其余低周期性/非发声不计为正确。模型一致仍不是人工真值或歌手身份确认，音符未自动更改。")
     if combined:
         for part in project["parts"]:
             if part["id"] == "vocals" and not quality.get("vocals.abstained"):
                 part["name"] = "主唱提案 · 局部待定"
-    analysis["transforms"].append("按完整核对选项，对所有lead音频运行独立CREPE并标记分歧/低证据区间；不改音符、不用九秒抽样代替全段检查。")
+    analysis["transforms"].append("按完整核对选项，对本次选定的人声音频运行独立CREPE并标记分歧/低证据区间；不改音符、不用九秒抽样代替全段检查，不把普通人声轨标成已确认主唱。")
     detailed["denseVoiceAudit"] = audit

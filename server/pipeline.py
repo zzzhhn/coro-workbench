@@ -301,8 +301,8 @@ def analyze_audio(directory: Path, request: dict, status: JobStatus) -> dict:
         warnings.append("低音轨会抑制较弱的同步高八度谐波；刻意的八度重奏仍需人工核对。")
     elif request["mode"] == "multi":
         paths = {}
-        warnings.append("YourMT3+ 是实验性联合转写，直接预测乐器族群，不生成可单独听的分离音频。")
-        warnings.append("弦乐族群包含小提琴、中提琴、大提琴等，管乐亦为族群；不能将族群名当作每一件乐器的精确身份。")
+        warnings.append("YourMT3+ 联合预测初步音符与乐器类别；完整校对在本机模型可用时增加声源分离及独立音符检查。")
+        warnings.append("保留模型可区分的小提琴、中提琴、大提琴等类别；同类乐器的多位演奏者可能共用一个复音谱表，候选名称不等于已核实身份。")
         warnings.append("多乐器模型未提供校准置信度或力度，回放力度设为统一值；低音乐器可能出现高低八度错误。")
         warnings.append("YourMT3+ 作为单独可选研究组件安装，发布或商用前需核对源码与模型许可。")
     else:
@@ -341,10 +341,13 @@ def analyze_audio(directory: Path, request: dict, status: JobStatus) -> dict:
             continue
         label, short, instrument, role, clef, program, color = PART_INFO[name]
         parts.append({"id": name, "name": label, "shortName": short, "instrument": instrument, "role": role, "clef": clef, "program": program, "color": color, "notes": notes, "muted": False, "solo": False, "volume": 0.8, "pan": 0, "stemUrl": f"/api/audio/{request['id']}/{paths[name].name}"})
-    if not parts:
+    from .audio_quality import improve_project, quality_engine_ready
+    use_quality = request.get("quality", "auto") != "raw" and quality_engine_ready()
+    can_rescue_vocals = use_quality and request.get("decoder") in {"rosvot", "phoneme", "game"} and ("vocals" in paths or request['mode'] == 'multi')
+    if not parts and not can_rescue_vocals:
         raise ValueError("这段音频未检出可用音符。可尝试更清晰的片段、快速转写或先导入 MIDI；没有使用演示音符替代。")
     status.update(95, "score", "正在量化节拍、生成总谱与待校对和弦。")
-    end = max(n["start"] + n["duration"] for p in parts for n in p["notes"])
+    end = max((n["start"] + n["duration"] for p in parts for n in p["notes"]), default=0)
     measures = max(1, math.ceil(max(end, analyzed_duration * tempo / 60) / 4))
     chords = infer_chords(parts, measures * 4)
     if chords:
@@ -360,17 +363,39 @@ def analyze_audio(directory: Path, request: dict, status: JobStatus) -> dict:
     raw_project = copy.deepcopy(project)
     raw_project["source"]["warnings"].append("这是整理前的基础模型工程；若运行了独立钢琴整理模型，其新增/分歧候选应查看单独的模型分歧证据，不在本原始工程内。")
     atomic_json(directory / "raw-project.json", raw_project)
-    if request.get("quality", "auto") != "raw":
-        from .audio_quality import improve_project, quality_engine_ready
-        if quality_engine_ready():
+    quality_events = raw_events
+    if use_quality:
+        if request['mode'] == 'multi' and request.get('verification', 'full') == 'full':
+            quality_events = dict(raw_events)
             try:
-                project = improve_project(directory, project, request, paths, raw_events, status)
+                from .multi_source_runtime import refine_multi_sources
+                quality_events['multi'] = refine_multi_sources(directory, raw_events['multi'], status)
+                if quality_events['multi'].get('sourceRefinementUnavailable'):
+                    project['source']['warnings'].append(quality_events['multi']['sourceRefinementUnavailable'])
             except Cancelled:
                 raise
             except Exception:
-                logging.exception("Role-specific score proposal failed; preserving baseline")
-                project["source"]["warnings"].append("本次谱面整理模型未完成，当前保留原始模型结果；没有替换为示例或静默删音。")
-                project["source"]["analysis"] = {"transforms": [], "rawProjectUrl": f"/api/projects/{project['id']}/raw", "quality": {"stage": "quality_failed_raw_preserved", "groundTruthAvailable": False}}
+                logging.exception('Source-aware multi proposal failed; native events retained')
+                project['source']['warnings'].append('本次独立声源复核未完成，继续使用完整原始识别，未删减声部。')
+        try:
+            # The legacy FCPE converter also handles bass. GAME is a separate
+            # learned vocal stage, not one of that converter's contour profiles.
+            quality_request = ({**request, 'decoder':'standard', 'lead_identity':'off'}
+                               if request.get('decoder') == 'game' else request)
+            project = improve_project(directory, project, quality_request, paths, quality_events, status)
+        except Cancelled:
+            raise
+        except Exception:
+            logging.exception("Role-specific score proposal failed; preserving baseline")
+            project["source"]["warnings"].append("本次谱面整理模型未完成，当前保留原始模型结果；没有替换为示例或静默删音。")
+            project["source"]["analysis"] = {"transforms": [], "rawProjectUrl": f"/api/projects/{project['id']}/raw", "quality": {"stage": "quality_failed_raw_preserved", "groundTruthAvailable": False}}
+    if request.get('decoder') == 'game':
+        # Explicitly requested GAME must succeed; never fall through to a legacy
+        # score while reporting this model as used. Raw instrument output survives.
+        from .game import transcribe_lead
+        project = transcribe_lead(directory, project, request, status)
+    if not any(part["notes"] for part in project["parts"]):
+        raise ValueError("基础模型和主唱模型均未检出可用音符，请换用更清晰的片段；未生成空谱或示例音符。")
     atomic_json(directory / "project.json", project)
-    atomic_json(directory / "analysis-evidence.json", {"engine": engine, "runtimeSeconds": round(time.monotonic() - started, 3), "mode": request["mode"], "originalDurationSeconds": original_duration, "analyzedDurationSeconds": analyzed_duration, "tempoOverride": request["tempo"], "tempo": tempo, "key": key, "noteCounts": {p["id"]: len(p["notes"]) for p in parts}, "rawNoteEventsSeconds": raw_events, "modelVersions": config.engine_health(), "warnings": warnings})
+    atomic_json(directory / "analysis-evidence.json", {"engine": project['source']['engine'], "decoderRequested":request.get('decoder','standard'), "game":project['source'].get('analysis',{}).get('game'), "runtimeSeconds": round(time.monotonic() - started, 3), "mode": request["mode"], "originalDurationSeconds": original_duration, "analyzedDurationSeconds": analyzed_duration, "tempoOverride": request["tempo"], "tempo": project['tempo'], "key": key, "noteCounts": {p["id"]: len(p["notes"]) for p in project['parts']}, "rawNoteEventsSeconds": raw_events, "modelVersions": config.engine_health(), "warnings": project['source']['warnings']})
     return project

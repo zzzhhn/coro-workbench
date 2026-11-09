@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>空耳 · 歌词辅助对照</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f5f3; color: #292d30; font: 15px/1.55 system-ui, sans-serif; }
+    main { max-width: 1080px; margin: auto; padding: 24px 24px 56px; }
+    h1 { margin: 0 0 14px; font-size: 25px; }
+    h2 { margin: 0; font-size: 17px; font-weight: 600; }
+    button, select, textarea { font: inherit; color: inherit; background: white; border: 1px solid #bfc6c3; border-radius: 6px; padding: 7px 11px; }
+    button, summary { cursor: pointer; }
+    button[aria-pressed="true"], #play { background: #30383b; color: white; border-color: #30383b; }
+    button:disabled, input:disabled { opacity: .45; cursor: default; }
+    :focus-visible { outline: 3px solid #b77b4c; outline-offset: 3px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .muted, output { color: #626d69; font-size: 13px; }
+    .toolbar { position: sticky; top: 0; z-index: 1; padding: 12px 0; background: #f4f5f3; border-bottom: 1px solid #d9ddda; }
+    .toolbar > .row + .row { margin-top: 10px; }
+    .windows { margin-right: auto; }
+    .timeline { display: flex; flex: 1 1 190px; align-items: center; gap: 10px; }
+    #play { min-width: 62px; }
+    #position { flex: 1; min-width: 80px; accent-color: #4a6554; }
+    #time { min-width: 10ch; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    #status { margin: 8px 0; color: #86582c; }
+    #status:empty { display: none; }
+    .paper { background: white; border: 1px solid #dce1dd; border-radius: 8px; padding: 18px 22px; margin: 16px 0; }
+    .score-heading { gap: 4px 14px; }
+    #score { min-height: 96px; }
+    #score svg { display: block; width: 100%; height: auto; }
+    details { margin-top: 16px; }
+    summary { font-weight: 600; }
+    figure { margin: 18px 0 0; }
+    figure img { display: block; width: 100%; height: auto; margin-top: 6px; }
+    fieldset { border: 0; padding: 0; margin: 12px 0; }
+    fieldset label { display: inline-flex; gap: 4px; align-items: center; }
+    textarea { display: block; width: 100%; min-height: 70px; resize: vertical; margin: 4px 0 10px; }
+    @media (max-width: 640px) {
+      main { padding: 14px 12px 36px; }
+      h1 { font-size: 22px; }
+      .toolbar { position: static; }
+      .paper { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>空耳 · 歌词辅助对照</h1>
+    <p id="status" role="status">正在读取本地对照素材…</p>
+    <div id="review" hidden>
+      <div class="toolbar">
+        <div class="row">
+          <div id="windows" class="row windows" role="group" aria-label="手谱小节"></div>
+          <div class="row" role="group" aria-label="谱面版本">
+            <button type="button" data-variant="raw" aria-pressed="false">原始 Medium</button>
+            <button type="button" data-variant="current" aria-pressed="true">现有记谱</button>
+            <button type="button" data-variant="lyrics" aria-pressed="false">跟唱谱 V2</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row" role="group" aria-label="试听来源">
+            <button type="button" data-source="original" aria-pressed="false">原声</button>
+            <button type="button" data-source="stem" aria-pressed="false">人声分轨</button>
+            <button type="button" data-source="variant" aria-pressed="true">版本回放</button>
+          </div>
+          <button type="button" id="play">播放</button>
+          <div class="timeline">
+            <input id="position" type="range" step="0.01" aria-label="录音位置">
+            <output id="time" for="position"></output>
+          </div>
+          <audio id="audio" preload="metadata"></audio>
+        </div>
+      </div>
+      <section class="paper" aria-labelledby="score-title">
+        <div class="row score-heading">
+          <h2 id="score-title"></h2>
+          <span id="projection" class="muted" hidden>原始起止时间，未作记谱推断</span>
+        </div>
+        <div id="score"></div>
+      </section>
+      <details id="reference">
+        <summary>原版手扒谱</summary>
+        <div id="scans"></div>
+      </details>
+      <details id="verdict">
+        <summary>记录这段的判断</summary>
+        <fieldset>
+          <legend>哪一版更容易照着唱，且更贴近原声？</legend>
+          <div class="row">
+            <label><input type="radio" name="preferred" value="raw">原始 Medium</label>
+            <label><input type="radio" name="preferred" value="current">跟唱谱 V2</label>
+            <label><input type="radio" name="preferred" value="lyrics">跟唱谱 V3</label>
+            <label><input type="radio" name="preferred" value="unsure">暂时无法判断</label>
+          </div>
+        </fieldset>
+        <label for="comment">具体小节或听到的问题</label>
+        <textarea id="comment" maxlength="2000" rows="2"></textarea>
+        <div class="row">
+          <button type="button" id="export" disabled>导出审阅</button>
+          <span id="save-state" class="muted" role="status">输入会保存在此浏览器。</span>
+        </div>
+      </details>
+      <details id="notes" hidden>
+        <summary>候选范围与素材说明</summary>
+        <ul id="notes-list"></ul>
+      </details>
+    </div>
+  </main>
+  <script type="module" src="./private-lyrics-review.ts"></script>
+</body>
+</html>

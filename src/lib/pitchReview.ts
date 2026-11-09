@@ -1,6 +1,7 @@
 import { insertNote, modifyNote } from './editor';
 import type { NoteEvent, ScoreProject } from './types';
 import { jsonResponse } from './api';
+import { localAudioJobId } from './audioSource';
 
 export interface PitchFrame {
   seconds: number;
@@ -55,15 +56,20 @@ export async function getPitchCoverage(jobId: string, signal: AbortSignal): Prom
 }
 
 export function pitchEvidenceJobId(project: ScoreProject): string | undefined {
-  return project.source.analysis?.rawProjectUrl?.match(/^\/api\/projects\/([a-f0-9]{32})\/raw$/)?.[1];
+  return localAudioJobId(project);
 }
 
 export function pitchBranchUrl(value: unknown): string | undefined {
   return typeof value === 'string' &&
-    (/^\/api\/audio\/[a-f0-9]{32}\/stem-(?:lead|backing)\.wav$/.test(value) ||
+    (/^\/api\/audio\/[a-f0-9]{32}\/stem-(?:lead|backing|vocals)\.wav$/.test(value) ||
       /^local:bundle-[a-f0-9-]+$/.test(value))
     ? value
     : undefined;
+}
+
+export function pitchReviewAudioUrl(project: ScoreProject): string | undefined {
+  const stem = project.parts.find((part) => part.id === 'vocals')?.stemUrl;
+  return stem ? pitchBranchUrl(stem) : pitchBranchUrl(project.source.analysis?.quality?.leadAudioUrl);
 }
 
 export function sourceSecond(project: ScoreProject, beat: number): number {

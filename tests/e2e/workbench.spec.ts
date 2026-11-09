@@ -21,7 +21,8 @@ test('original -> vocal arrangement -> editable score -> MIDI export', async ({ 
   await page.getByRole('button', { name: /一键编成阿卡贝拉/ }).click();
   await page.getByRole('button', { name: '生成阿卡贝拉谱', exact: true }).click();
   await expect(page.getByRole('tab', { name: /阿卡贝拉/ })).toHaveAttribute('aria-selected', 'true');
-  await page.getByTestId('score-note').first().click();
+  // Click painted notation, not the potentially empty center of an SVG group.
+  await page.getByTestId('score-note').first().locator('path').first().click();
   const originalPitch = await page.locator('.selected-pitch h3').textContent();
   await page.getByRole('button', { name: '升高半音', exact: true }).click();
   await expect(page.locator('.selected-pitch h3')).not.toHaveText(originalPitch!);
@@ -78,7 +79,7 @@ test('rehearsal scope and quick loops do not change score content', async ({ pag
     'true',
   );
   await expect(page.getByRole('button', { name: '音符', exact: true })).toHaveCount(0);
-  await page.getByTestId('score-note').first().click();
+  await page.getByTestId('score-note').first().locator('path').first().click();
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Delete');
   const after = await exportedProject(page);
@@ -107,7 +108,7 @@ test('single-part phone rehearsal fits without horizontal score scrolling', asyn
   expect(bounds.page).toBe(bounds.viewport);
   expect(bounds.score).toBeLessThanOrEqual(bounds.width + 1);
   await page.getByRole('button', { name: '编配工作台', exact: true }).click();
-  await page.getByTestId('score-note').first().click();
+  await page.getByTestId('score-note').first().locator('path').first().click();
   await expect(page.getByLabel('音符歌词', { exact: true })).toBeVisible();
 });
 
@@ -128,7 +129,8 @@ test('switching a mobile rehearsal part keeps the current measure in view', asyn
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await page.getByRole('button', { name: '排练室', exact: true }).click();
-  await page.getByRole('button', { name: '跳转第 6 小节', exact: true }).click();
+  await page.getByRole('spinbutton', { name: '跳转小节', exact: true }).fill('6');
+  await page.getByRole('spinbutton', { name: '跳转小节', exact: true }).press('Enter');
   await page.getByRole('button', { name: '显示声部面板', exact: true }).click();
   await page.getByRole('button', { name: '练习 长笛 · 主旋律', exact: true }).click();
   await expect.poll(() => page.evaluate(() => {

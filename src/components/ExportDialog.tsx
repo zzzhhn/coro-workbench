@@ -18,6 +18,7 @@ import { downloadFile, serializeProject } from '../lib/storage';
 import { renderProjectAudio } from '../lib/audio';
 import type { WorkspaceState } from '../lib/storage';
 import { createProjectBundle } from '../lib/projectBundle';
+import { recordBundleExport } from '../lib/library';
 
 const formats = [
   {
@@ -91,6 +92,8 @@ export default function ExportDialog({
         };
         const archive = await createProjectBundle(state, includeStems, setProgress);
         downloadFile(archive, `${name}.coro`, 'application/zip');
+        try { await recordBundleExport(state); }
+        catch { onDone('便携包已生成并发起下载，但工程库未能记录导出时间。请确认文件已保存。'); onClose(); return; }
       } else if (format === 'abc')
         downloadFile(toAbc(project, ids).abc, `${name}${suffix}.abc`, 'text/vnd.abc');
       else if (format === 'wav') {

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>空耳 · 逐段总谱对照</title>
+<style>
+body{margin:24px auto;max-width:1220px;padding:0 24px;color:#282b2c;font:15px system-ui;background:#f6f6f3}
+header{position:sticky;top:0;background:#f6f6f3f2;padding:12px 0;z-index:2}h1{font-size:26px;margin:4px 0 16px}
+button,select,a{font:inherit}button,select{padding:8px 12px;border:1px solid #ccd0cd;border-radius:6px;background:white;margin-right:8px}
+button{cursor:pointer}button:disabled{cursor:wait;opacity:.6}section{background:white;padding:20px 28px;margin:18px 0;border:1px solid #e1e4de;border-radius:8px;overflow:auto}
+h2{font-size:17px;font-weight:500;margin:0}.score{min-width:1000px}.score svg{display:block;max-width:100%;height:auto}
+audio{width:320px;height:36px;vertical-align:middle}label{display:inline-flex;gap:10px;align-items:center;margin:4px 18px 4px 0}
+p{line-height:1.65;color:#5e655e}#reference{max-width:100%}.muted{color:#687066;font-size:13px}
+.score-heading{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px}.score-heading h2{margin-right:auto}
+.audio-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px 24px}.source-audio{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#notice{padding:10px 14px;background:#fff8e8;border-radius:6px}#status:empty{display:none}#file-notice{padding:12px;background:#fff8e8}
+</style>
+<header>
+  <h1>空耳 · 逐段总谱对照</h1>
+  <select id="section" aria-label="乐段"></select>
+  <select id="part" aria-label="声部"><option value="piano">钢琴</option><option value="voice">人声</option><option value="strings">弦乐各类别</option><option value="all">完整总谱</option></select>
+  <select id="focus" aria-label="试听范围"><option value="all">试听整段</option></select>
+  <button id="previous">上一段</button><button id="next">下一段</button><span id="range"></span>
+</header>
+<p id="file-notice" hidden>请通过本地服务打开：<a href="http://127.0.0.1:5173/tests/private-konger-review.html">空耳逐段对照页</a>。直接打开 HTML 无法加载谱面和音频。</p>
+<div class="audio-row">
+  <label>原录音 <audio id="original" aria-label="原录音" controls preload="metadata" src="http://127.0.0.1:8786/baseline/analysis.wav"></audio></label>
+  <div class="source-audio"><label>分离试听 <select id="stem-source" aria-label="分离试听来源"><option value="piano">钢琴分离轨</option><option value="other">其余伴奏</option><option value="vocals">人声分离轨</option></select></label><audio id="stem" aria-label="分离试听" controls preload="metadata"></audio></div>
+</div>
+<p class="muted">分离试听来自原录音，可能漏音或串音。要听识别出的音符，请播放下方对应谱面。</p>
+<p id="notice" hidden>第二小节的 F♯5、G5、F♯5、E5 已在识别谱中，但被分离模型分到了「其余伴奏」。可选择「试听第 2 小节」，分别对照原录音、其余伴奏和谱面回放。</p>
+<p id="status" role="status"></p>
+<section><div class="score-heading"><h2 id="current-score-title">工程库谱本</h2><button id="play-after">听当前谱面</button><audio id="score-after" aria-label="当前谱面回放" controls preload="metadata" hidden></audio><a id="download-after" hidden>下载回放</a></div><div id="after" class="score"></div></section>
+<section><div class="score-heading"><h2>原始 Coro 谱面</h2><button id="play-before">听原始谱面</button><audio id="score-before" aria-label="原始谱面回放" controls preload="metadata" hidden></audio><a id="download-before" hidden>下载回放</a></div><div id="before" class="score"></div></section>
+<section><h2>你的手工参考谱</h2><select id="page" aria-label="参考谱页"></select><img id="reference" alt="空耳手工参考谱"></section>
+<script>if(location.protocol==='file:')document.querySelector('#file-notice').hidden=false;</script>
+<script type="module" src="./private-konger-review.ts"></script>
+</html>

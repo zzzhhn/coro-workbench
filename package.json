@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": { "node": "^22.12.0 || ^24.0.0 || >=26.0.0" },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "tsc -b && vite build",
@@ -10,7 +11,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "start": "node scripts/start.mjs"
+    "start": "node scripts/start.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "test:scripts": "node --test tests/runtime.test.mjs"
   },
   "dependencies": {
     "@fontsource/dm-mono": "^5.2.7",
@@ -34,6 +37,7 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
+    "fake-indexeddb": "^6.2.7",
     "prettier": "^3.9.10",
     "typescript": "~5.9.3",
     "vite": "^7.2.0",
