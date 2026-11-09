@@ -9,7 +9,82 @@ import copy
 
 from .multi_sources import source_share
 
-VERSION = 'piano-two-view-consensus-1'
+VERSION = 'piano-two-view-consensus-2'
+
+
+def recover_piano_reattacks(events, stem_notes, mixture_notes):
+    """Recover a repeated key corroborated by chord or running-voice context.
+
+    Two piano views alone can retrigger on resonance. Require two other native
+    pitches to repeat with the held key, or a regular four-note running voice.
+    Changing harmony under a held voice is insufficient.
+    No attack is removed; the previous same key ends at the measured reattack.
+    """
+    result, audit = copy.deepcopy(events), []
+    native = [n for n in events if not n['isDrum'] and n['program'] in (0, 2)
+              and n.get('sourceId') == 'piano']
+    for a in sorted(stem_notes, key=lambda n: n['start']):
+        if a.get('activation', 0) < .65 or a['end']-a['start'] < .12:
+            continue
+        matching = [b for b in mixture_notes if b['midi']==a['midi']
+                    and abs(b['start']-a['start']) <= .04 and b.get('activation', 0) >= .65
+                    and b['end']-b['start'] >= .12]
+        if not matching:
+            continue
+        b = min(matching, key=lambda n: abs(n['start']-a['start']))
+        at = (a['start']+b['start'])/2
+        if any(n['midi']==a['midi'] and abs(n['start']-at) <= .12 for n in native):
+            continue
+        held = [n for n in result if not n['isDrum'] and n['program'] in (0, 2)
+                and n.get('sourceId')=='piano' and n['midi']==a['midi']
+                and n['start']+.16 < at < n['end']-.06]
+        if len(held) != 1:
+            continue
+        previous = held[0]
+        chord = lambda t: {n['midi'] for n in native if n['program']==previous['program']
+                          and n['midi']!=a['midi'] and abs(n['start']-t) <= .06}
+        repeated = chord(previous['start']) & chord(at)
+        # A strong two-view attack can also complete a four-note, regular,
+        # monotonic run. Use only native neighbors, never recovered notes as
+        # new evidence. A chord, a reversal or irregular timing cannot qualify.
+        neighbors = sorted([n for n in native if n['program']==previous['program']],
+                           key=lambda n:n['start'])
+        left = [n for n in neighbors if n['start'] < at-.08]
+        right = [n for n in neighbors if n['start'] > at+.08]
+        run = False
+        if min(a['activation'], b['activation']) >= .8 and left and right:
+            for line in (left[-2:]+[dict(start=at,midi=a['midi'])]+right[:1],
+                         left[-1:]+[dict(start=at,midi=a['midi'])]+right[:2]):
+                if len(line)!=4:
+                    continue
+                gaps = [y['start']-x['start'] for x,y in zip(line,line[1:])]
+                pitches = [y['midi']-x['midi'] for x,y in zip(line,line[1:])]
+                single = all(sum(abs(n['start']-x['start'])<=.06 for n in neighbors)==1
+                             for x in line if abs(x['start']-at)>.001)
+                if (single and .12 <= min(gaps) <= max(gaps) <= 1.1
+                        and max(gaps)/min(gaps) <= 1.2
+                        and (all(0 < p <= 7 for p in pitches) or all(-7 <= p < 0 for p in pitches))):
+                    run = True
+                    break
+        if len(repeated) < 2 and not run:
+            continue
+        end = min(previous['end'], a['end'], b['end'])
+        if end-at < .12:
+            continue
+        before = previous.copy()
+        previous['acousticEnd'] = max(previous.get('acousticEnd', previous['end']), previous['end'])
+        previous['end'] = at
+        new = dict(start=at, end=end, midi=a['midi'], program=previous['program'],
+                   isDrum=False, sourceId='piano', sourceLabel='钢琴分离轨',
+                   velocity=a.get('velocity', previous.get('velocity', .75)),
+                   evidenceOrigins=['piano_crnn_stem', 'piano_crnn_mix', 'native_voice_context'])
+        result.append(new)
+        audit.append({'action':'recover_piano_reattack', 'before':before, 'after':previous.copy(),
+                      'added':new.copy(), 'repeatedNativePitches':sorted(repeated),
+                      'viewOnsets':[a['start'], b['start']],
+                      'viewConfidence':[a['activation'], b['activation']],
+                      'context':'regular_run' if run else 'repeated_chord'})
+    return result, audit
 
 
 def reconcile_piano(events, stem_notes, mixture_notes, envelopes):
@@ -61,6 +136,8 @@ def reconcile_piano(events, stem_notes, mixture_notes, envelopes):
                               'reason': 'Extended duplicate class fingerprint' if class_alias else
                               'Same attack and source, acoustic and electric decoder aliases, corroborated in both audio views'})
     result = [n for i, n in enumerate(result) if i not in removed]
+    result, reattacks = recover_piano_reattacks(result, stem_notes, mixture_notes)
+    decisions.extend(reattacks)
     shortened = 0
     for event in result:
         if event['isDrum'] or event['program'] not in (0,2) or event.get('sourceId') not in (None,'piano'):
@@ -107,5 +184,6 @@ def reconcile_piano(events, stem_notes, mixture_notes, envelopes):
         'version': VERSION, 'removedDuplicateClasses': len(removed), 'addedConsensusNotes': added,
         'duplicateClassFingerprint': class_alias,
         'corroboratedReleases': shortened,
+        'recoveredPianoReattacks': len(reattacks),
         'decisions': decisions, 'pendingCandidates': pending, 'claimsIndependentModels': False,
     }

@@ -12,7 +12,7 @@ from . import config
 from .storage import Cancelled, atomic_json, read_json
 from .multi_sources import VERSION, fuse_sources, harmonic_source_evidence, piano_finger_durations
 
-RUNTIME_VERSION = 'multiscore-sources-7'
+RUNTIME_VERSION = 'multiscore-sources-8'
 
 
 def _check_vocal_disagreements(models, native, vocal, waveform, status):

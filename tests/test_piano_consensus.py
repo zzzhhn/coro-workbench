@@ -3,6 +3,7 @@ import copy
 import numpy as np
 
 from server.piano_consensus import reconcile_piano
+from server.piano_consensus import recover_piano_reattacks
 
 
 def note(pitch=60, start=1., end=2., program=0, **extra):
@@ -69,3 +70,40 @@ def test_matching_piano_releases_can_shorten_native_tail_but_never_extend_it():
     assert fixed[0]['end']==1.5 and fixed[0]['acousticEnd']==3.
     assert audit['corroboratedReleases']==1
     assert reconcile_piano([note(end=1.2)],measured,measured,energies())[0][0]['end']==1.2
+
+
+def test_repeated_chord_recovers_a_swallowed_inner_reattack():
+    native = [note(48, end=4., sourceId='piano'), note(64, end=3., sourceId='piano')]
+    native += [note(p, start=t, end=t+1, sourceId='piano') for t in (1., 2.) for p in (60, 67)]
+    measured = [note(64, start=2.01, end=3., activation=.75)]
+    before = copy.deepcopy(native)
+    fixed, audit = recover_piano_reattacks(native, measured, measured)
+    assert native == before
+    assert [(n['start'], n['end']) for n in fixed if n['midi']==64] == [(1., 2.01), (2.01, 3.)]
+    assert next(n for n in fixed if n['midi']==48)['end'] == 4.
+    assert len(audit) == 1
+
+
+def test_held_note_over_changing_harmony_is_not_a_repeated_chord():
+    native = [note(64, end=3., sourceId='piano')]
+    native += [note(p, start=1., sourceId='piano') for p in (60, 67)]
+    native += [note(p, start=2., end=3., sourceId='piano') for p in (59, 65)]
+    measured = [note(64, start=2.01, end=3., activation=.75)]
+    assert recover_piano_reattacks(native, measured, measured)[0] == native
+    # One model view or a different instrument cannot establish a reattack.
+    assert recover_piano_reattacks(native, measured, [])[0] == native
+    other = [dict(n, sourceId='other-piano') for n in native]
+    assert recover_piano_reattacks(other, measured, measured)[0] == other
+
+
+def test_strong_two_view_reattack_can_complete_a_regular_run():
+    native = [note(62,start=.5,end=3.,sourceId='piano')]
+    native += [note(p,start=t,end=3.,sourceId='piano') for p,t in [(60,1.),(64,1.5),(67,1.75)]]
+    measured = [note(62,start=1.25,end=3.,activation=.9)]
+    fixed,audit = recover_piano_reattacks(native,measured,measured)
+    assert len(fixed)==5 and audit[0]['context']=='regular_run'
+    assert next(n for n in fixed if n['midi']==62 and n['start']==.5)['end']==1.25
+    # One view's weak retrigger and a nonuniform rhythm remain unmodified.
+    assert recover_piano_reattacks(native,measured,[dict(measured[0],activation=.7)])[0]==native
+    native[-1]['start']=2.2
+    assert recover_piano_reattacks(native,measured,measured)[0]==native

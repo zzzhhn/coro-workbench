@@ -61,6 +61,19 @@ class SingingScoreTests(unittest.TestCase):
         self.assertEqual([e.get('lyric') for e in rows],['甲','乙',None,None])
         self.assertEqual(self.abstract(events,True)[0],events)
 
+    def test_paired_syllable_scoops_need_relative_body_support_not_a_long_note(self):
+        events=[event('a',1,1.20,64,'a','甲'),event('b',1.20,1.48,66,'a'),
+                event('c',1.48,1.65,64,'b','乙'),event('d',1.65,1.94,66,'b'),
+                event('e',1.94,2.2,57,'b')]
+        rows,_=self.abstract(events)
+        self.assertEqual([e['midi'] for e in rows],[66,66,57])
+        self.assertEqual([e.get('lyric') for e in rows],['甲','乙',None])
+        self.assertEqual(self.abstract(events,True)[0],events)
+        equal=[dict(e) for e in events]
+        equal[0]['end']=equal[1]['start']=1.24
+        equal[2]['end']=equal[3]['start']=1.71
+        self.assertEqual(self.abstract(equal)[0],equal)
+
     def test_missing_passing_tone_requires_a_stable_connected_contour(self):
         events=[event('a',1,2,66,'a','甲'),event('b',2,3,62,'a')]
         rows,audit=restore_contour_tails(events,pitch_runs=lambda *_:[dict(start=1.85,end=1.99,midi=64,support=.95)])
@@ -97,6 +110,22 @@ class SingingScoreTests(unittest.TestCase):
         self.assertEqual(len(notes),4)
         self.assertEqual(notes[0]['duration'],.75)
         self.assertTrue(all(a['start']+a['duration']<=b['start']+1e-8 for a,b in zip(notes,notes[1:])))
+
+    def test_repeated_word_nuclei_can_fit_a_regular_sixteenth_phrase(self):
+        rows=[(1.38,1.64),(1.64,1.88),(1.88,2.13),(2.13,2.6)]
+        events=[event(str(i),a,b,64,str(i),'字') for i,(a,b) in enumerate(rows)]
+        words=[dict(id=str(i),start=a-.04,vowelStart=a,end=b) for i,(a,b) in enumerate(rows)]
+        notes,_=infer_score_rhythm(events,dict(bpm=60,offsetSeconds=0),words)
+        self.assertEqual([n['start'] for n in notes],[1.25,1.5,1.75,2.])
+        self.assertEqual([n['duration'] for n in notes],[.25,.25,.25,.5])
+        self.assertEqual([n['id'] for n in notes],[e['id'] for e in events])
+
+    def test_two_unequal_syllables_are_not_regularized_as_a_repeated_run(self):
+        events=[event('a',1.06,1.31,62,'a','甲'),event('b',1.31,2.1,62,'b','乙')]
+        words=[dict(id=e['id'],start=e['start'],vowelStart=e['start'],end=e['end']) for e in events]
+        notes,_=infer_score_rhythm(events,dict(bpm=60,offsetSeconds=0),words)
+        self.assertEqual([n['start'] for n in notes],[1.,1.25])
+        self.assertEqual(notes[0]['duration'],.25)
 
     def test_shared_source_repeated_syllables_use_word_onset_and_keep_both_attacks(self):
         events=[dict(event('a',1.0,1.69,73,'a','甲'),sourceIds=['raw']),

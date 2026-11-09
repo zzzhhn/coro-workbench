@@ -12,7 +12,7 @@ from collections import Counter
 import numpy as np
 from .vocal_notation import value_cost
 
-VERSION = 'syllable-phrasing-4'
+VERSION = 'syllable-phrasing-5'
 
 
 def resolve_chunk_seams(events):
@@ -150,7 +150,14 @@ def abstract_syllables(events, *, seconds_per_beat, attack_at, pitch_support, on
         a,b=ga[:2];c,d=gb[:2]
         if (not a.get('uncertainWord') and not c.get('uncertainWord')
                 and a['midi']==c['midi'] and b['midi']==d['midi'] and 0<b['midi']-a['midi']<=2
-                and abs(b['end']-c['start'])<=.025 and d['end']-d['start']>=.35
+                and abs(b['end']-c['start'])<=.025
+                # A repeated syllable can end on a short structural note.
+                # Require a dominant destination in both syllables when the
+                # second body is not long, rather than mistaking two matching
+                # onset scoops for four independently sung notes.
+                and (d['end']-d['start']>=.35 or all(
+                    y['end']-y['start']>=1.2*(x['end']-x['start'])
+                    and y['end']-x['start']>=.4*seconds_per_beat for x,y in ((a,b),(c,d))))
                 and all(.10<=x['end']-x['start']<=min(.30,seconds_per_beat/3)
                         and y['end']-y['start']>=.18 and abs(x['end']-y['start'])<=.025
                         and not legato_attack_at(y['start']) and pitch_support(y['start']+.03,y['end']-.01,y['midi'])>=.8
@@ -291,6 +298,15 @@ def infer_score_rhythm(events, grid, words):
     if not events:return [],[]
     spb,origin,ticks = 60/grid['bpm'],grid['offsetSeconds'],32
     word_map={w['id']:w for w in words}
+    regular_repeats=set()
+    for i in range(len(events)-2):
+        group=events[i:i+3]
+        gaps=[b['start']-a['start'] for a,b in zip(group,group[1:])]
+        if (all(e.get('lyric') and e.get('wordId') in word_map and not e.get('uncertainWord') for e in group)
+                and len({e['wordId'] for e in group})==3 and len({e['midi'] for e in group})==1
+                and .08 <= min(gaps) <= max(gaps) <= 1.1 and max(gaps)/min(gaps)<=1.25
+                and all(0 <= b['start']-a['end'] <= .32 for a,b in zip(group,group[1:]))):
+            regular_repeats.update(range(i,i+3))
     def metric(t):
         for unit,cost in ((32,0.),(16,.06),(8,.25),(4,1.5),(2,4.),(1,7.)):
             if t%unit==0:return cost
@@ -321,6 +337,13 @@ def infer_score_rhythm(events, grid, words):
         spacing=min(([e['start']-native_before['start']] if native_before else [])+
                     ([native_after['start']-e['start']] if native_after else []),default=math.inf)
         onset_limit=.28 if weak_boundary(e) else min(.18,.45*spacing)
+        # Same-pitch syllables have independent lyric anchors even when GAME
+        # placed their vowel nuclei late. The neighbor-spacing cap can exclude
+        # every regular sixteenth in a fast repeated-word figure. Keep the
+        # existing 180 ms bound; the joint path still preserves every attack,
+        # their order and a positive minimum gate.
+        if i in regular_repeats and not weak_boundary(e):
+            onset_limit=.18
         def points(at,limit):
             position=(at-origin)/spb*ticks
             return range(max(0,math.ceil(position-limit/spb*ticks-1e-7)),math.floor(position+limit/spb*ticks+1e-7)+1)
