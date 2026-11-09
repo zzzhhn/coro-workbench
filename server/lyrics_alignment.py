@@ -17,6 +17,16 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SOFA_COMMIT = '9549c6a86d16019c817eefe4bb8183405da524cc'
+# Files this adapter executes, at SOFA_COMMIT. A release tarball has no .git,
+# so the pinned revision is verified by content instead of by git metadata.
+SOFA_FILES = {
+    'onnx_infer.py': '01d98aa3203e66133744d543a8ac40d20a6ba7eee539d9e51e9dea59346a92fa',
+    'modules/layer/backbone/unet.py': '1cc7f2ee776c240286d33e4479d311f8d3e5c872db3e1706f7ed58d8543e62e6',
+    'modules/layer/block/resnet_block.py': '3a918c198114108dea9df31d3b0d69d1323885bfc01eac920e7b563bd953cda7',
+    'modules/layer/scaling/stride_conv.py': 'e9cd8113a6d60392019227f6f6f071afe2dc24c1b54cc8fc9ef00d3064a4378d',
+    'modules/rmvpe/spec.py': 'ad7cf119ac269e5f3236c217aa16187d42c6858503bae709af9f68be241a74cd',
+    'dictionary/opencpop-extension.txt': 'e912ee4ec1d87fcdfd8b82c0a8f3999f0db7fd731bec08435256b621ebebb5a1',
+}
 
 
 def sha(path):
@@ -25,6 +35,27 @@ def sha(path):
         for block in iter(lambda: stream.read(1048576), b''):
             h.update(block)
     return h.hexdigest()
+
+
+def source_revision(source: Path) -> str:
+    """Return the pinned SOFA revision from git metadata or verified file contents.
+
+    A git checkout must be at SOFA_COMMIT. Without git metadata (official
+    release archive), every executed file must match its pinned SHA-256.
+    """
+    try:
+        revision = subprocess.run(['git', '-C', str(source), 'rev-parse', 'HEAD'], capture_output=True,
+                                  text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        revision = None
+    if revision is not None and revision != SOFA_COMMIT:
+        raise ValueError('SOFA source revision changed; revalidate adapter before use')
+    if revision is None:
+        changed = [name for name, digest in SOFA_FILES.items()
+                   if not (source/name).is_file() or sha(source/name) != digest]
+        if changed:
+            raise ValueError(f'SOFA source differs from pinned {SOFA_COMMIT[:7]}: {", ".join(changed)}')
+    return SOFA_COMMIT
 
 
 def align(audio: Path, segments: list[dict], model: Path, output: Path):
@@ -37,9 +68,7 @@ def align(audio: Path, segments: list[dict], model: Path, output: Path):
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
     source = ROOT / 'models/sofa-source'
-    revision = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-    if revision != SOFA_COMMIT:
-        raise ValueError('SOFA source revision changed; revalidate adapter before use')
+    revision = source_revision(source)
     sys.path.insert(0, str(source))
     from modules.layer.backbone.unet import UNetBackbone
     from modules.layer.block.resnet_block import ResidualBasicBlock

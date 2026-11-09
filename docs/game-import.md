@@ -25,6 +25,9 @@ new absolute paths. Python virtual environments must be recreated on the new hos
 
 For optional lyric alignment, obtain [SOFA source](https://github.com/qiuqiao/SOFA)
 at commit `9549c6a86d16019c817eefe4bb8183405da524cc` under `models/sofa-source`.
+A git checkout is checked by revision; a release archive without `.git` is
+checked by the SHA-256 of every file the adapter executes
+(`SOFA_FILES` in `server/lyrics_alignment.py`). Any other source is rejected.
 From its official v1.0.1 release, install the Mandarin singing checkpoint at
 `models/sofa-mandarin/pretrained_mandarin_singing/v1.0.0_mandarin_singing.ckpt`,
 retaining upstream license and configuration files. The verified extra packages
