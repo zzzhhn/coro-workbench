@@ -223,3 +223,53 @@ def test_rebuild_endpoint_creates_a_separate_audited_score_and_keeps_source(tmp_
         assert any(item['id'] == result['id'] for item in client.get('/api/projects').json()['projects'])
         assert client.post(f'/api/projects/{result["id"]}/score-rhythm').status_code == 404
     assert original == {path.name: path.read_bytes() for path in source.iterdir()}
+
+
+def test_keyboard_hand_split_follows_register_without_changing_notes():
+    # A low right-hand melody under a held left-hand bass stays in the right
+    # hand: a fixed middle-C split would push G3/A3 into the bass staff.
+    rows = [[0, 4, 36, .8], [0, 4, 43, .8]]
+    rows += [[i * .5, i * .5 + .45, pitch, .8] for i, pitch in enumerate([67, 64, 59, 57, 59, 64, 67, 71])]
+    notes, _ = rhythm(rows, program=0)
+    assert len(notes) == len(rows)
+    assert sorted((n['start'], n['midi']) for n in notes) == sorted((r[0] * 2, r[2]) for r in rows)
+    assert all(n['staff'] == 2 for n in notes if n['midi'] < 48)
+    assert all(n['staff'] == 1 for n in notes if n['midi'] >= 57)
+
+
+def test_unordered_chord_spread_is_gathered_without_an_arpeggio_line():
+    # Decoder jitter, not a sweep: attacks arrive out of pitch order.
+    events = [[2 + d, 4., pitch, .8] for d, pitch in [(.04, 48), (0, 55), (.08, 60), (.02, 64)]]
+    notes, audit = rhythm(events, program=0)
+    assert len({n['start'] for n in notes}) == 1
+    assert not any(n.get('arpeggio') for n in notes)
+    assert any(c['reason'] == 'spread_chord_notation' for c in audit['boundaryChanges'])
+
+
+def test_keyboard_hand_keeps_held_bass_and_two_written_voices():
+    # Measured held bass (4 beats) under a moving inner line in the same hand.
+    rows = [[0, 2, 40, .8], [0, .5, 52, .8], [.5, 1, 55, .8], [1, 1.5, 52, .8], [1.5, 2, 55, .8],
+            [0, 1.9, 76, .8], [1, 1.9, 72, .8]]
+    notes, audit = rhythm(rows, program=0)
+    bass = next(n for n in notes if n['midi'] == 40)
+    assert bass['duration'] == 4 and bass['staff'] == 2
+    for staff in (1, 2):
+        assert len({n['voice'] for n in notes if n['staff'] == staff}) <= 2
+    assert len(notes) == len(rows)
+
+
+def test_held_outer_note_ends_at_the_next_attack_in_its_register():
+    # A long acoustic tail does not cross a new bass attack.
+    rows = [[0, 3.9, 43, .8], [0, .4, 52, .8], [.5, .9, 52, .8], [1., 1.4, 52, .8], [1.5, 2., 38, .8]]
+    notes, audit = rhythm(rows, program=0)
+    bass = next(n for n in notes if n['midi'] == 43)
+    assert bass['start'] + bass['duration'] == 3
+    assert any(c['reason'] == 'keyboard_outer_voice_release' for c in audit['boundaryChanges'])
+    assert len(notes) == len(rows)
+
+
+def test_grace_like_attack_does_not_shrink_a_held_chord_tone_to_a_sliver():
+    rows = [[0, 4, 50, .8], [0, 4, 57, .8], [.03, .15, 61, .8]]
+    notes, _ = rhythm(rows, program=0)
+    held = next(n for n in notes if n['midi'] == 57)
+    assert held['duration'] >= 4
