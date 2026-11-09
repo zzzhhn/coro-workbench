@@ -88,6 +88,49 @@ def run_helper(command, output: Path, status, timeout=1200):
             process.wait()
 
 
+def save_vocal_evidence(directory: Path, stem: Path, raw: dict, lyrics_provided: bool, status) -> dict:
+    """Record GAME align and text-free syllable boundaries as raw evidence.
+
+    Runs after the score is final and is never read back by notation, so the
+    lead notes are identical with or without it. Failures are recorded only.
+    """
+    from .game_align import VERSION as EVIDENCE_VERSION, align_regions, chunk_windows
+    destination = directory/'game'
+    sofa_model = config.MODELS_DIR/'sofa-mandarin/pretrained_mandarin_singing/v1.0.0_mandarin_singing.ckpt'
+    record = {'version': EVIDENCE_VERSION, 'usedByNotation': False, 'referenceNotesUsed': False}
+    if not runtime_health()['lyricsReady']:
+        record.update(syllableBoundary={'status': 'skipped', 'reason': 'sofa-not-installed'},
+                      align={'status': 'skipped', 'reason': 'sofa-not-installed'})
+        return record
+    try:
+        status.update(99, 'game-align', '正在保存无词音节边界证据（不改动谱面）。')
+        atomic_json(destination/'boundary-windows.json', chunk_windows(raw))
+        run_helper([sys.executable, '-m', 'server.lyrics_alignment', '--audio', str(stem),
+            '--windows', str(destination/'boundary-windows.json'), '--model', str(sofa_model),
+            '--output', str(destination/'syllable-boundary.npz')], destination/'boundary.log', status)
+        record['syllableBoundary'] = {'status': 'saved', 'file': 'game/syllable-boundary.npz'}
+    except (ValueError, OSError, KeyError) as error:
+        record['syllableBoundary'] = {'status': 'failed', 'reason': str(error)}
+    if not lyrics_provided:
+        # Known word boundaries come only from user lyrics; ASR drafts stay offline.
+        record['align'] = {'status': 'skipped', 'reason': 'no-lyrics'}
+        return record
+    try:
+        status.update(99, 'game-align', '正在用已知字界运行 GAME 官方 align 模式（只存证据，不改动谱面）。')
+        regions = align_regions(read_json(destination/'sofa/alignment.json'))
+        atomic_json(destination/'align-words.json', regions)
+        root = model_root()
+        run_helper([sys.executable, '-m', 'server.game_runner', '--model', str(root/'medium'),
+            '--source', str(root/'source'), '--audio', str(stem), '--output', str(destination/'align.json'),
+            '--steps', '8', '--words', str(destination/'align-words.json')], destination/'align.log', status)
+        aligned = read_json(destination/'align.json')
+        record['align'] = {'status': 'saved', 'file': 'game/align.json', 'segments': len(aligned['segments']),
+                           'notes': sum(len(s['notes']) for s in aligned['segments'])}
+    except (ValueError, OSError, KeyError) as error:
+        record['align'] = {'status': 'failed', 'reason': str(error)}
+    return record
+
+
 def replace_lead(project, notes, audit, job_id, *, raw=False):
     """Replace only the lead, preserving all instrumental and choir parts."""
     result = copy.deepcopy(project)
@@ -194,6 +237,8 @@ def transcribe_lead(directory, project, request, status):
     status.update(98,'score','正在把 GAME 演唱事件推断为可读节奏，保留真实起音与原始对照。')
     notes, details = build_singing_notes(events,words,grid,project['key'],signals,nucleus)
     audit.update(scoreNotes=len(notes),notationVersion=details['version'])
+    # Evidence only, after notation: the score above cannot depend on it.
+    audit['vocalEvidence'] = save_vocal_evidence(directory, stem, raw, audit['lyricsProvided'], status)
     atomic_json(destination/'score-evidence.json', {'summary':audit,'details':details})
     evidence_path = directory/'quality-evidence.json'
     evidence = read_json(evidence_path) if evidence_path.is_file() else {}

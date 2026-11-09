@@ -6,6 +6,13 @@ This is fresh inference from uploaded audio. Runtime modules never read private 
 
 Optional Mandarin LRC input supplies sentence times and lyric text, e.g. `[00:18.20]这一句歌词`. SOFA derives individual syllable boundaries from the actual separated waveform. Each line must be at most 32 seconds and 70 characters; an empty timestamp can end a line before an instrumental interlude. No lyrics means no lyric-conditioned syllable abstraction. It does **not** reproduce the lyric-assisted V3 candidate simply by selecting GAME.
 
+After the lead score is final, each GAME upload also saves raw vocal evidence
+that notation never reads (stage `game-align`): `game/syllable-boundary.npz`,
+SOFA's text-free phone-boundary posterior over GAME's own chunks, and, only
+when LRC was given, `game/align.json`, the official GAME align output over the
+SOFA word regions. The outcome is recorded under `vocalEvidence` in
+`game/score-evidence.json`; a failure there never fails the upload.
+
 ## Local installation
 
 Use the existing audio and quality environments. Register official GAME 1.0.3 Medium ONNX weights and GAME 1.0.3 source with:
@@ -25,6 +32,9 @@ new absolute paths. Python virtual environments must be recreated on the new hos
 
 For optional lyric alignment, obtain [SOFA source](https://github.com/qiuqiao/SOFA)
 at commit `9549c6a86d16019c817eefe4bb8183405da524cc` under `models/sofa-source`.
+A git checkout is checked by revision; a release archive without `.git` is
+checked by the SHA-256 of every file the adapter executes
+(`SOFA_FILES` in `server/lyrics_alignment.py`). Any other source is rejected.
 From its official v1.0.1 release, install the Mandarin singing checkpoint at
 `models/sofa-mandarin/pretrained_mandarin_singing/v1.0.0_mandarin_singing.ckpt`,
 retaining upstream license and configuration files. The verified extra packages
