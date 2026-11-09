@@ -10,32 +10,46 @@ from bisect import bisect_left
 import math
 import statistics
 
-VERSION = 'multiscore-rhythm-5'
+VERSION = 'multiscore-rhythm-6'
 TICKS = 960
 
 
 def infer_notation_grid(events: list[dict], grid: dict, *, tempo_locked: bool = False) -> dict:
     result = dict(grid)
-    bpm = float(grid['bpm'])
+    bpm = float(grid.get('detectedBpm', grid['bpm']))
+    detected_offset = float(grid.get('detectedOffsetSeconds', grid.get('beatTrackerOffsetSeconds', grid['offsetSeconds'])))
     intervals = []
-    by_program = defaultdict(set)
+    by_program = defaultdict(list)
     for event in events:
         if not event['isDrum']:
-            by_program[event['program']].add(event['start'])
-    for times in by_program.values():
-        times = sorted(times)
+            by_program[(event['program'], event.get('sourceId'))].append(event)
+    fast = 0
+    for part in by_program.values():
+        by_start = defaultdict(list)
+        for event in part:
+            by_start[event['start']].append(event['end'])
+        times = sorted(by_start)
         intervals.extend(b - a for a, b in zip(times, times[1:]) if .035 <= b - a <= 2.)
-    fast = sum(value * bpm / 60 < .125 for value in intervals)
+        # Only sustained sequences of independent attacks can justify a new
+        # beat unit. Notes accumulating into a held chord are not a fast line.
+        run = 0
+        for a, b in zip(times, times[1:]):
+            if .035 <= b - a < 7.5 / bpm and max(by_start[a]) <= b + .045:
+                run += 1
+            else:
+                fast += run if run >= 6 else 0
+                run = 0
+        fast += run if run >= 6 else 0
     # A half-time pulse plus sustained fast subdivisions is evidence for a
     # different written beat unit. This never speeds up the source audio.
     factor = 2 if (not tempo_locked and 60 <= bpm < 90 and bpm * 2 <= 180
                    and fast >= max(12, len(intervals) * .12)) else 1
     result.update(bpm=round(bpm * factor, 4), notationUnitFactor=factor,
-                  detectedBpm=bpm, notationProfile=VERSION)
+                  detectedBpm=bpm, detectedOffsetSeconds=detected_offset, notationProfile=VERSION)
     # Keep the inferred downbeat phase, but do not add an extra empty bar when
     # changing the beat unit. Audio-relative onsets are recomputed afterwards.
     period = 240 / result['bpm']
-    phase = float(grid['offsetSeconds']) % period
+    phase = detected_offset % period
     result['offsetSeconds'] = round(phase - period if phase > .025 else phase, 6)
     correction, support = _shared_onset_phase(events, result)
     result['beatTrackerOffsetSeconds'] = result['offsetSeconds']
@@ -149,7 +163,7 @@ def _turnaround_triplets(rows, spb, offset):
     return proposal
 
 
-def _voice_assignment(notes: list[dict]) -> None:
+def _voice_assignment(notes: list[dict], *, preserve_timing: bool = False) -> None:
     groups = defaultdict(list)
     for note in notes:
         groups[(round(note['start'] * TICKS), round(note['duration'] * TICKS))].append(note)
@@ -169,6 +183,8 @@ def _voice_assignment(notes: list[dict]) -> None:
             available = []
             for i, v in enumerate(voices):
                 overlap = v['end'] - start
+                if preserve_timing and overlap > 0:
+                    continue
                 # A small release tail may overlap the next attack in the same
                 # line. Never truncate an independently sustained long note.
                 if overlap > min(TICKS / 4, v['duration'] * .3, duration * .3):
@@ -270,7 +286,7 @@ def assign_keyboard_staves(notes: list[dict]) -> None:
             note['staff'] = 1 if note['midi'] >= split else 2
 
 
-def _rolled_gesture(attacks: list[tuple[float, int]]) -> bool:
+def _rolled_gesture(attacks: list[tuple[float, int]], minimum_attacks: int = 3) -> bool:
     """Measured onset evidence for a written roll, not merely onset jitter.
 
     A roll sweeps through the chord in pitch order with several distinct
@@ -283,18 +299,28 @@ def _rolled_gesture(attacks: list[tuple[float, int]]) -> bool:
     rising = all(b >= a - ROLL_ORDER_TOLERANCE for a, b in zip(times, times[1:]))
     falling = all(b <= a + ROLL_ORDER_TOLERANCE for a, b in zip(times, times[1:]))
     distinct = len(_clusters(times, ROLL_ORDER_TOLERANCE))
-    return (rising or falling) and distinct >= 3 and max(times) - min(times) >= ROLL_MIN_SPREAD
+    return (rising or falling) and distinct >= minimum_attacks and max(times) - min(times) >= ROLL_MIN_SPREAD - 1e-9
+
+
+def _two_hand_roll(attacks):
+    # Written hand allocation is only a proposal. A plausible register gap
+    # can explain interleaving hands even when the layout split differs.
+    pitches = sorted(set(p for _, p in attacks))
+    for low, high in zip(pitches, pitches[1:]):
+        if high - low < 5:
+            continue
+        hands = [[(t, p) for t, p in attacks if (p >= high) == upper] for upper in (False, True)]
+        if any(max(p for _, p in hand) - min(p for _, p in hand) > HAND_HARD_REACH for hand in hands):
+            continue
+        if all(_rolled_gesture(hand, 2) for hand in hands) and any(_rolled_gesture(hand) for hand in hands):
+            return True
+    return False
 
 
 # Decoder onsets of one struck chord typically scatter by a few tens of ms.
 ROLL_ORDER_TOLERANCE = .02
 ROLL_MIN_SPREAD = .06
 ROLL_REASONS = ('rolled_chord_notation', 'spread_chord_notation')
-# Shortest written inner-voice release (an eighth note); anything closer is an ornament.
-INNER_RELEASE_MINIMUM = .5
-# A chord tone may share its chord's written gate when its measured release
-# lies within this many seconds of it (decoder offsets are this imprecise).
-CHORD_GATE_RELEASE_SLACK = .15
 
 
 def _piano_rolls(notes, rows, changes, spb, offset):
@@ -312,7 +338,8 @@ def _piano_rolls(notes, rows, changes, spb, offset):
         chord = [notes[i] for i in indices]
         at = max(0., round(statistics.median((rows[i][0] - offset) / spb for i in indices) * 2) / 2)
         first_attack = rows[indices[0]][0]
-        rolled = _rolled_gesture([(rows[i][0], rows[i][2]) for i in indices])
+        attacks = [(rows[i][0], rows[i][2]) for i in indices]
+        rolled = _rolled_gesture(attacks) or _two_hand_roll(attacks)
         for i in indices:
             note = notes[i]
             note['start'] = at
@@ -327,16 +354,11 @@ def _piano_rolls(notes, rows, changes, spb, offset):
             owned = [i for i in indices if notes[i]['staff'] == staff]
             if not owned:
                 continue
-            following = [row[0] for j, row in enumerate(rows)
-                         if j not in indices and row[0] > rows[indices[-1]][0] + .025
-                         and (1 if row[2] >= 60 else 2) == staff]
             for i in owned:
                 # A rolled chord shares its attack gesture, not necessarily
                 # every finger's release. A median extended early releases
                 # into the next bar when two other notes had pedal tails.
                 release = (rows[i][1] - offset) / spb
-                if following:
-                    release = min(release, (min(following) - offset) / spb)
                 length = max(.5, round((release - at) * 2) / 2)
                 notes[i]['duration'] = length
                 changes[i].update(reason='rolled_chord_notation' if rolled else 'spread_chord_notation',
@@ -383,148 +405,18 @@ def _joint_onsets(onsets, quantum, spb, weights):
     return result[::-1]
 
 
-def _pedal_hold(note, change, at, following, owned, starts, spb, offset, pedals):
-    """Written end for an inner note held under a measured pedal, or None.
-
-    Both evidence paths must hold over the whole extension: a ByteDance pedal
-    interval covers it, and the note's own refined measured release reaches
-    it (within the chord-gate release tolerance). The end snaps down to an
-    existing same-hand attack, never beyond the current written length.
-    """
-    E = 1e-6
-    if not pedals or change is None or spb is None:
-        return None
-    seconds = lambda beat: offset + beat * spb
-    release = change['sourceEndSeconds'] + CHORD_GATE_RELEASE_SLACK
-    cover = next((p for p in pedals if p['onset_time'] <= seconds(following) + E
-                  and p['offset_time'] > seconds(following)), None)
-    if cover is None:
-        return None
-    end = note['start'] + note['duration']
-    same_pitch = min((n['start'] for n, _ in owned if n['midi'] == note['midi'] and n['start'] > at + E), default=end)
-    limit = min(end, same_pitch)
-    candidates = [t for t in starts if following < t <= limit + E] + ([end] if end <= limit + E else [])
-    allowed = [t for t in candidates if seconds(t) <= release + E and seconds(t) <= cover['offset_time'] + E]
-    return max(allowed) if allowed else None
-
-
-def _second_voice_free(layer, at, kept):
-    """The second written voice can take a note from `at` to `kept`."""
-    E = 1e-6
-    for n in layer:
-        n_end = n['start'] + n['duration']
-        if n['start'] < at - E and n_end > at + E:
-            return False
-        if abs(n['start'] - at) < E and abs(n_end - kept) > E:
-            return False
-    return True
-
-
 def keyboard_voices(notes: list[dict], changes: list[dict] | None = None,
                     spb: float | None = None, offset: float = 0.,
                     pedals: list[dict] | None = None) -> None:
-    """At most two written voices per hand: a main voice plus one outer line.
+    """Allocate compatible written voices without changing the music.
 
-    A note held past the hand's next attack stays sustained only when it is
-    the hand's outer edge (lowest note of the left hand, highest of the right),
-    optionally with chord tones released together with it, and only until the
-    hand next attacks in that outer register. It is never written longer than
-    its existing measured length. Other notes that would overlap the next
-    attack in the same hand are written up to that attack; acoustic releases
-    remain in the audit. No attack, pitch or note is added or removed.
+    Releases have already been inferred from the note evidence. A missing
+    pedal interval is not proof that a finger released a key, and a two-voice
+    layout budget must not truncate sustained inner or outer notes. Reuse a
+    voice when it is free; keep an independent layer when holds overlap.
     """
-    E = 1e-6
-    changes = changes if changes is not None else [None] * len(notes)
     for staff in (1, 2):
-        owned = [(n, c) for n, c in zip(notes, changes) if n.get('staff') == staff]
-        by_start = defaultdict(list)
-        for item in owned:
-            by_start[item[0]['start']].append(item)
-        starts = sorted(by_start)
-        outer = []
-        # Lower notes are "inside" the left hand when they lie above the
-        # held bass; for the right hand, below the held top note.
-        inside = (lambda n, ref: n['midi'] > ref) if staff == 2 else (lambda n, ref: n['midi'] < ref)
-        for index, at in enumerate(starts):
-            following = starts[index + 1] if index + 1 < len(starts) else None
-            # Outer edge first, so its chord partners see its final length.
-            chord = sorted(by_start[at], key=lambda item: item[0]['midi'], reverse=staff == 1)
-            held_until, held_length, seen = None, None, set()
-            for position, (note, change) in enumerate(chord):
-                if note['midi'] in seen:
-                    # Equal-pitch simultaneous events are distinct sources;
-                    # a second layer keeps both written instead of merging.
-                    note['voice'] = '2'
-                    continue
-                seen.add(note['midi'])
-                end = note['start'] + note['duration']
-                if following is None or end <= following + E:
-                    note['voice'] = '1'
-                    continue
-                spanned = [n for n, _ in owned if at < n['start'] < end - E]
-                crossing = min((n['start'] for n in spanned if not inside(n, note['midi'])), default=end)
-                is_edge = position == 0
-                partner = (held_until is not None and abs(note['duration'] - held_length) < E
-                           and crossing >= held_until - E)
-                if (is_edge and crossing > following + E) or partner:
-                    stop = crossing if is_edge else held_until
-                    if is_edge:
-                        held_until, held_length = stop, note['duration']
-                    if stop < end - E:
-                        note['duration'] = round(stop - at, 9)
-                        if change is not None:
-                            change['reason'] = 'keyboard_outer_voice_release'
-                    note['voice'] = '2'
-                    outer.append(note)
-                    continue
-                if following - at < INNER_RELEASE_MINIMUM - E:
-                    # A grace-like attack right after the chord is not a
-                    # rhythmic release point; never shrink a held note to a
-                    # sliver. Keep it, with its own length, in the second layer.
-                    note['voice'] = '2'
-                    continue
-                kept = _pedal_hold(note, change, at, following, owned, starts, spb, offset, pedals)
-                if kept is not None and _second_voice_free(outer, at, kept):
-                    if kept < end - E:
-                        note['duration'] = round(kept - at, 9)
-                    note['voice'] = '2'
-                    outer.append(note)
-                    if change is not None:
-                        change['reason'] = 'keyboard_pedal_inner_hold'
-                    continue
-                note['duration'] = round(following - at, 9)
-                note['voice'] = '1'
-                if change is not None:
-                    change['reason'] = 'keyboard_inner_voice_release'
-        # A main-voice chord shares one written gate: chord tones that release
-        # before the hand's next attack still sound until it is struck, so a
-        # split "short + long" chord does not need a third rhythm layer. Only
-        # applied when the longest tone already reaches the next attack.
-        for index, at in enumerate(starts):
-            main = [n for n, _ in by_start[at] if n.get('voice') == '1']
-            following = starts[index + 1] if index + 1 < len(starts) else None
-            if len(main) < 2 or following is None:
-                continue
-            gate = max(n['duration'] for n in main)
-            if abs(at + gate - following) > E:
-                continue
-            for note, change in by_start[at]:
-                if note.get('voice') == '1' and note['duration'] < gate - E:
-                    # Acoustic evidence: the measured release must already
-                    # reach most of the way to the shared gate.
-                    if change is None or spb is None or (
-                            change['sourceEndSeconds'] < offset + (at + gate) * spb - CHORD_GATE_RELEASE_SLACK):
-                        continue
-                    note['duration'] = gate
-                    if change is not None:
-                        change['reason'] = 'keyboard_shared_chord_gate'
-        # The outer line is itself one rhythm: a later outer attack ends the
-        # previous one rather than stacking a third independent layer.
-        for previous in outer:
-            later = [n['start'] for n in outer
-                     if previous['start'] < n['start'] < previous['start'] + previous['duration'] - E]
-            if later:
-                previous['duration'] = round(min(later) - previous['start'], 9)
+        _voice_assignment([n for n in notes if n.get('staff') == staff], preserve_timing=True)
 
 
 def _keyboard_written_releases(notes, changes, spb, offset):
@@ -780,7 +672,10 @@ def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
         _keyboard_written_releases(notes,changes,spb,offset)
     rapid = [n for n in notes if n['duration'] <= .25]
     sustained = [n for n in notes if n['duration'] >= .75]
-    if len(rapid) >= max(16, len(notes) * .25) and len(sustained) >= 8 and not percussion:
+    if program in (0, 2) and not percussion:
+        assign_keyboard_staves(notes)
+        keyboard_voices(notes, changes, spb, offset, pedals)
+    elif len(rapid) >= max(16, len(notes) * .25) and len(sustained) >= 8 and not percussion:
         # Joint decoders can put several instruments of the same class in one
         # part. Stable rhythmic layers keep the run out of the held-note line.
         layers = defaultdict(list)
@@ -825,9 +720,6 @@ def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
                 _voice_assignment(subset)
                 for note in subset:
                     note['staff'] = staff
-    if program in (0, 2) and not percussion:
-        assign_keyboard_staves(notes)
-        keyboard_voices(notes, changes, spb, offset, pedals)
     for note, change in zip(notes, changes):
         actual_end = offset + (note['start'] + note['duration']) * spb
         if abs(actual_end - change['scoreEndSeconds']) > 1e-6:

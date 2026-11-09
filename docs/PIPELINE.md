@@ -8,6 +8,29 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-10 piano regression repair
+
+`multiscore-rhythm-6` fixes three notation-layer failures found by holding
+decoded events fixed against the previous import. The two-voice keyboard cap
+was shortening sustained inner notes in the canonical score, which also drives
+playback. Keyboard voice allocation now preserves the inferred note gates and
+uses another rhythm layer when necessary. A new bass pitch alone is not release
+evidence; absent pedal detection does not rule out a finger hold.
+
+Roll recognition checks plausible interleaving left/right hands, and a new
+melody attack cannot truncate another chord tone's measured release. Automatic
+beat-unit doubling requires a sustained sequence of short, independently
+released attacks; dense held chords no longer count as a fast melodic line.
+The original detected grid is retained for repeatable rebuilding.
+
+The private comparison retains the actual 90-second import, a piano-only
+ablation, and the combined grid/piano candidate. The full-song piano ablation
+keeps every other part unchanged. Model events and user projects are preserved;
+no reference notes feed inference. Some inner-note durations still disagree
+with the human score, and additional written voices may be necessary. This is
+a regression repair awaiting listening acceptance, not a claim that piano or
+vocal transcription is solved.
+
 ## Production and in-progress branches
 
 ```mermaid
@@ -28,14 +51,13 @@ flowchart TD
     EVD -.->|future fusion, rule fixed first| RX[Re-attack decision · open]
   end
 
-  subgraph Piano["Piano · multiscore-rhythm-5 (merged, PR #4 + #5)"]
+  subgraph Piano["Piano · multiscore-rhythm-6 regression repair"]
     MT --> PC[Stem/mix consensus, ByteDance · recognition]
     PC --> PR[Rhythm grid and onset quantisation · notation inference]
-    PR --> PA{Rolled gesture? onsets sweep in pitch order · notation inference}
+    PR --> PA{Rolled gesture? include interleaving hands · notation inference}
     PA --> PH[Moving hand split, Viterbi with span/finger/held-key priors · notation inference]
-    PH --> PV[Two written voices per hand; outer line keeps measured hold · part presentation]
+    PH --> PV[Compatible voices per hand; preserve all inferred gates · part presentation]
     PV --> PL[Covered grand-staff rests become spacers · layout]
-    PV --> PP[Inner voice held only under measured pedal and own release · notation inference]
     PC --> PO[Low-octave audit, 4 evidence paths; candidates only, not applied · recognition]
   end
 
