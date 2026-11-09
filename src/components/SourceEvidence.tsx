@@ -114,6 +114,19 @@ export default function SourceEvidence({
       live = false;
     };
   }, [pages[page], page]);
+  // Every hook runs before the early return; hook order must not depend on the project.
+  const pipeline = pipelineState && pipelineState.job === evidenceJobId ? pipelineState.value : undefined;
+  useEffect(() => {
+    if (!expanded || !evidenceJobId || pipelineState?.job === evidenceJobId) return;
+    let live = true;
+    fetch(`/api/projects/${evidenceJobId}/pipeline`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => live && setPipelineState({ job: evidenceJobId, value }))
+      .catch(() => live && setPipelineState({ job: evidenceJobId, value: null }));
+    return () => {
+      live = false;
+    };
+  }, [expanded, evidenceJobId, pipelineState?.job]);
   if (!analysis && !pages.length) return null;
   const getRaw = async (open: boolean) => {
     if (!rawUrl || !/^\/api\/projects\/[a-f0-9]{32}\/(?:raw|game-raw)$/.test(rawUrl)) return;
@@ -140,18 +153,6 @@ export default function SourceEvidence({
       setBusy(false);
     }
   };
-  const pipeline = pipelineState && pipelineState.job === evidenceJobId ? pipelineState.value : undefined;
-  useEffect(() => {
-    if (!expanded || !evidenceJobId || pipelineState?.job === evidenceJobId) return;
-    let live = true;
-    fetch(`/api/projects/${evidenceJobId}/pipeline`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((value) => live && setPipelineState({ job: evidenceJobId, value }))
-      .catch(() => live && setPipelineState({ job: evidenceJobId, value: null }));
-    return () => {
-      live = false;
-    };
-  }, [expanded, evidenceJobId, pipelineState?.job]);
   const getEvidence = async () => {
     if (!evidenceJobId) return;
     try {
