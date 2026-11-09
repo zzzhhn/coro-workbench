@@ -89,6 +89,11 @@ is development regression and not evidence of real-song generalization.
 Lead-melody rhythm remains one component: a dense collection of pitch fragments
 is not a useful vocal score. GAME Medium with shared singing notation is now the
 default for multi/separate imports; see [current handoff](WORK_COMPUTER_HANDOFF.md).
+Shared singing notation version 4 changes only audio-only score inference. It
+retains overlapping chunk attacks, notates connected ascending scoops at their
+sung destination when contour evidence agrees, keeps short runs, and applies a
+bounded positive vocal phase correction from the song's own onsets. Raw GAME
+events remain separate; lyric uploads keep their aligned syllable timing.
 In the legacy comparison route the learned `rosvot` path precedes joint rhythmic notation;
 `acoustic`, `standard` and `legato` remain comparison choices. This is an
 engineering choice for rehearsal legibility, not a claim of universally higher

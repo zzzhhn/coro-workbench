@@ -14,6 +14,10 @@ transcription or feature parity with a professional notation publisher.
   not reproduce the lyric-assisted review candidate. Existing saved projects do
   not change automatically. Unavailable learned engines are rejected before queueing.
   Different engines or analysis ranges are not interchangeable result versions.
+- Audio-only GAME notation can treat a connected, short rising entrance as a
+  scoop into the sustained destination pitch. This reduces fragments but may
+  hide an intended grace note; chains of short notes remain. A global vocal
+  phase correction is used only when the vocal onsets clearly prefer it.
 - Readable vocal notation separates acoustic boundaries from written rhythm.
   It can move slow sung boundaries by up to 160 ms in ordinary cases; short
   attacks retain length-scaled bounds. Every source boundary is retained in the

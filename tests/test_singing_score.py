@@ -1,7 +1,9 @@
 import copy
 import unittest
 
-from server.singing_score import abstract_syllables, infer_score_rhythm, resolve_pitch_edges, restore_contour_tails, recover_short_syllable_anchors, mark_legato_transitions
+from server.singing_score import (abstract_syllables, abstract_unworded_approaches, estimate_vocal_phase,
+    infer_score_rhythm, resolve_chunk_seams, resolve_pitch_edges, restore_contour_tails,
+    recover_short_syllable_anchors, mark_legato_transitions)
 
 
 def event(name, start, end, midi, word=None, lyric=None):
@@ -130,6 +132,43 @@ class SingingScoreTests(unittest.TestCase):
         self.assertEqual(mark_legato_transitions(events,seconds_per_beat=1,attack_at=lambda _:True,contour_support=lambda *_:.95)[0],events)
         syllables=[events[0],dict(events[1],lyric='甲'),events[2]]
         self.assertEqual(mark_legato_transitions(syllables,seconds_per_beat=1,attack_at=lambda _:False,contour_support=lambda *_:.95)[0],syllables)
+
+    def unworded(self, events, attack=False, spread=.7):
+        return abstract_unworded_approaches(events, seconds_per_beat=1,
+            attack_at=lambda _: attack, structural_attack=lambda _: attack,
+            pitch_support=lambda *_: .95, onset_pitch_spread=lambda *_: spread)
+
+    def test_audio_only_scoop_uses_destination_without_losing_its_attack_time(self):
+        events=[event('a',1,1.16,62),event('b',1.16,1.8,64),event('c',2,2.5,66)]
+        rows,audit=self.unworded(events)
+        self.assertEqual([(e['midi'],e['start'],e['end']) for e in rows],[(64,1,1.8),(66,2,2.5)])
+        self.assertEqual(audit[0]['sourceIds'],['a','b'])
+        self.assertEqual(self.unworded(events,attack=True)[0],events)
+
+    def test_audio_only_runs_and_stable_short_notes_remain(self):
+        run=[event('x',.84,1,61),event('a',1,1.16,62),event('b',1.16,1.42,64),event('c',1.42,1.6,62)]
+        self.assertEqual(self.unworded(run)[0],run)
+        stable=[event('a',1,1.2,62),event('b',1.2,1.42,64)]
+        self.assertEqual(self.unworded(stable,spread=.2)[0],stable)
+
+    def test_chunk_seam_overlap_keeps_both_attacks_monophonic(self):
+        events=[event('a',1,2.04,67),event('b',2.01,3,67)]
+        rows,audit=resolve_chunk_seams(events)
+        self.assertEqual([(e['id'],e['start'],e['end']) for e in rows],[('a',1,2.01),('b',2.01,3)])
+        self.assertEqual(audit[0]['action'],'resolve-chunk-seam-overlap')
+        with self.assertRaises(ValueError):
+            resolve_chunk_seams([event('a',1,2,67),event('b',1,2,69)])
+
+    def test_vocal_phase_requires_consistent_positive_evidence(self):
+        grid={'bpm':60,'offsetSeconds':0}
+        delayed=[event(str(i),i*.25+.06,i*.25+.2,60) for i in range(40)]
+        phase,audit=estimate_vocal_phase(delayed,grid)
+        self.assertEqual(phase,.06)
+        self.assertTrue(audit['applied'])
+        aligned=[event(str(i),i*.25,i*.25+.2,60) for i in range(40)]
+        self.assertEqual(estimate_vocal_phase(aligned,grid)[0],0.)
+        early=[event(str(i),i*.25-.02,i*.25+.2,60) for i in range(1,41)]
+        self.assertEqual(estimate_vocal_phase(early,grid)[0],0.)
 
 
 if __name__=='__main__':unittest.main()

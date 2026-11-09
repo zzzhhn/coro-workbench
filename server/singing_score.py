@@ -12,7 +12,99 @@ from collections import Counter
 import numpy as np
 from .vocal_notation import value_cost
 
-VERSION = 'syllable-phrasing-3'
+VERSION = 'syllable-phrasing-4'
+
+
+def resolve_chunk_seams(events):
+    """Make overlapping chunk-owned GAME events monophonic without dropping attacks.
+
+    Context windows can let one chunk's sustained event cross the next chunk's
+    owned onset. Keep both attacks and end the earlier event at the later
+    measured boundary. Raw model output remains unchanged elsewhere.
+    """
+    rows, audit = [], []
+    for event in sorted(copy.deepcopy(events), key=lambda e: (e['start'], e['end'])):
+        if rows and rows[-1]['end'] > event['start'] + 1e-6:
+            previous = rows[-1]
+            if event['start'] <= previous['start'] + 1e-6:
+                raise ValueError('Colliding vocal attacks cannot be made monophonic without deleting an event')
+            audit.append({'action': 'resolve-chunk-seam-overlap', 'eventId': previous['id'],
+                          'nextEventId': event['id'], 'originalEndSeconds': previous['end'],
+                          'scoreEndSeconds': event['start'], 'overlapSeconds': previous['end'] - event['start']})
+            previous['end'] = event['start']
+        rows.append(event)
+    return rows, audit
+
+
+def abstract_unworded_approaches(events, *, seconds_per_beat, attack_at, structural_attack,
+                                 pitch_support, onset_pitch_spread):
+    """Notate audio-only scoops as their sung destination, while keeping runs.
+
+    This mirrors the existing lyric-syllable approach rule for events without
+    lyric timing. It requires connected audio, no fresh attack, a supported
+    destination and evidence that the first pitch is an approach. A step inside
+    a chain of short notes is retained as a possible melisma.
+    """
+    rows, audit = [], []
+    i = 0
+    while i < len(events):
+        a = events[i]
+        b = events[i+1] if i+1 < len(events) else None
+        previous = events[i-1] if i else None
+        following = events[i+2] if i+2 < len(events) else None
+        if b and not a.get('wordId') and not b.get('wordId'):
+            da, db = a['end']-a['start'], b['end']-b['start']
+            spread = onset_pitch_spread(a['start'], a['end'])
+            support = pitch_support(b['start']+.03, b['end']-.01, b['midi'])
+            approach = ((spread is not None and spread > .5)
+                        or (da <= .1875*seconds_per_beat and db >= 1.5*da)
+                        or (da/(da+db) <= 1/3 and db >= .35))
+            inside_run = (previous is not None and following is not None
+                          and abs(previous['end']-a['start']) <= .025 and previous['end']-previous['start'] < .30
+                          and abs(b['end']-following['start']) <= .025 and following['end']-following['start'] < .30)
+            if (abs(a['end']-b['start']) <= .025 and 0 < b['midi']-a['midi'] <= 3
+                    and .06 <= da <= min(.24, seconds_per_beat/3) and db >= .18 and da/(da+db) < .45
+                    and approach and support >= .8 and not inside_run
+                    and not attack_at(b['start']) and not structural_attack(b['start'])):
+                row = copy.deepcopy(b)
+                row.update(id=a['id']+'~'+b['id'], start=a['start'],
+                           sourceIds=list(dict.fromkeys(a.get('sourceIds', [a['id']])+b.get('sourceIds', [b['id']]))))
+                rows.append(row)
+                audit.append({'action': 'unworded-onset-approach', 'sourceIds': row['sourceIds'],
+                              'startSeconds': a['start'], 'endSeconds': b['end'],
+                              'sourcePitches': [a['midi'], b['midi']], 'scorePitch': b['midi'],
+                              'destinationPitchSupport': float(support), 'onsetPitchSpreadSemitones': spread,
+                              'independentAttack': False})
+                i += 2
+                continue
+        rows.append(copy.deepcopy(a))
+        i += 1
+    return rows, audit
+
+
+def estimate_vocal_phase(events, grid):
+    """Estimate a shared singing-onset delay from the song's own events.
+
+    The search is bounded to a small positive delay and never uses reference
+    notes. Pitched vocal entries usually lag a percussive beat estimate; an
+    early correction is not inferred from weak evidence.
+    """
+    if len(events) < 24:
+        return 0., {'applied': False, 'reason': 'too-few-events', 'events': len(events)}
+    spb, origin = 60/grid['bpm'], grid['offsetSeconds']
+    step = spb/4
+    starts = np.asarray([e['start'] for e in events], float)
+    def fit(lag):
+        position = (starts-lag-origin)/step
+        distance = np.abs(position-np.rint(position))*step
+        return float(np.mean(np.exp(-(distance/.025)**2)))
+    baseline = fit(0.)
+    candidates = [(fit(float(lag)), float(lag)) for lag in np.arange(0., min(.08, .35*step)+1e-9, .005)]
+    score, lag = max(candidates)
+    applied = score-baseline >= .05 and lag >= .01
+    return (round(lag, 3) if applied else 0.), {'applied': applied, 'phaseSeconds': round(lag, 3),
+        'baselineFit': round(baseline, 4), 'selectedFit': round(score, 4), 'events': len(events),
+        'searchSeconds': [0., round(min(.08, .35*step), 4)], 'referenceUsed': False}
 
 
 def recover_short_syllable_anchors(events, words):
