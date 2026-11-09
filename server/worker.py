@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 
+from .analysis_lock import hold
 from .config import DATA_DIR
 from .storage import JOB_ID, Cancelled, JobStatus, read_json
 
@@ -12,16 +13,22 @@ def main() -> int:
         return 2
     directory = DATA_DIR / sys.argv[1]
     status = JobStatus(directory)
+    def waiting(first: bool) -> None:
+        status.check_cancelled()
+        if first:
+            status.waiting("本机另一份 Coro 正在分析。为避免内存不足，会在它完成后自动开始。")
+
     try:
         status.check_cancelled()
         request = read_json(directory / "request.json")
-        if request.get("action") == "vocal-rebuild":
-            from .vocal_rebuild import rebuild_vocals
-            project = rebuild_vocals(directory, request, status)
-        else:
-            from .pipeline import analyze_audio
-            project = analyze_audio(directory, request, status)
-        status.finish(project)
+        with hold(waiting):
+            if request.get("action") == "vocal-rebuild":
+                from .vocal_rebuild import rebuild_vocals
+                project = rebuild_vocals(directory, request, status)
+            else:
+                from .pipeline import analyze_audio
+                project = analyze_audio(directory, request, status)
+            status.finish(project)
         return 0
     except Cancelled:
         return 0

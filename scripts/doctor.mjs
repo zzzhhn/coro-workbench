@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { backendMismatch, runtimeIdentity, supportedNode } from './runtime.mjs';
+import { backendMismatch, corePorts, runtimeIdentity, supportedNode } from './runtime.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const full = process.argv.includes('--full');
@@ -55,9 +55,10 @@ if (pythonVersion?.status === 0) {
   }
 }
 const expected = runtimeIdentity(root);
+const ports = corePorts();
 for (const [name, url] of [
-  ['后端 8765', 'http://127.0.0.1:8765/api/health'],
-  ['前端 5173', 'http://127.0.0.1:5173/'],
+  [`后端 ${ports.backend}`, `http://127.0.0.1:${ports.backend}/api/health`],
+  [`前端 ${ports.frontend}`, `http://127.0.0.1:${ports.frontend}/`],
 ]) {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(2500) });

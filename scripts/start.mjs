@@ -2,10 +2,11 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { backendMismatch, runtimeIdentity, supportedNode } from './runtime.mjs';
+import { backendMismatch, corePorts, runtimeIdentity, supportedNode } from './runtime.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const children = [];
+const ports = corePorts();
 if (!supportedNode(process.version)) {
   console.error('Unsupported Node.js version. Use the version in .nvmrc, then run npm run doctor.');
   process.exit(1);
@@ -54,7 +55,7 @@ if (!existsSync(python)) {
   process.exit(1);
 }
 
-const backend = await probe('http://127.0.0.1:8765/api/health');
+const backend = await probe(`http://127.0.0.1:${ports.backend}/api/health`);
 if (backend) {
   const health = await backend.json().catch(() => null);
   const mismatch = backendMismatch(health, runtimeIdentity(root));
@@ -62,29 +63,29 @@ if (backend) {
     console.error(`${mismatch}。等待当前任务结束后手动重启；没有停止任何现有进程。`);
     process.exit(1);
   }
-  console.log('Using existing Coro audio engine with matching source on 8765.');
-} else run(python, ['-m', 'uvicorn', 'server.app:app', '--host', '127.0.0.1', '--port', '8765']);
+  console.log(`Using existing Coro audio engine with matching source on ${ports.backend}.`);
+} else run(python, ['-m', 'uvicorn', 'server.app:app', '--host', '127.0.0.1', '--port', String(ports.backend)]);
 
-const frontend = await probe('http://127.0.0.1:5173/');
+const frontend = await probe(`http://127.0.0.1:${ports.frontend}/`);
 if (frontend) {
   const html = await frontend.text();
   if (!html.includes('Coro')) {
-    console.error('Port 5173 belongs to another application. Nothing was stopped.');
+    console.error(`Port ${ports.frontend} belongs to another application. Nothing was stopped.`);
     close(1);
-  } else console.log('Using existing Coro workbench on 5173.');
+  } else console.log(`Using existing Coro workbench on ${ports.frontend}.`);
 } else
   run(process.execPath, [
     'node_modules/vite/bin/vite.js',
     '--host',
     '127.0.0.1',
     '--port',
-    '5173',
+    String(ports.frontend),
     '--strictPort',
   ]);
 
 if (!closing) {
   console.log(
-    '\nCoro workbench: http://127.0.0.1:5173/\nLocal-only. Keep this terminal open. Ctrl+C stops only processes started here.\n',
+    `\nCoro workbench: http://127.0.0.1:${ports.frontend}/\nLocal-only. Keep this terminal open. Ctrl+C stops only processes started here.\n`,
   );
   setInterval(() => {}, 60000);
 }

@@ -172,7 +172,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(create_video_router(directory))
     app.add_middleware(UploadLimitMiddleware)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
-    allowed = [f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (5173, 4173, 3000, 8765)]
+    ports = {5173, 4173, 3000, 8765} | {int(os.environ[name]) for name in ("CORO_FRONTEND_PORT", "CORO_BACKEND_PORT") if os.environ.get(name, "").isdigit()}
+    allowed = [f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in sorted(ports)]
     allowed += [origin.strip() for origin in os.environ.get("CORO_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=allowed, allow_credentials=False, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type", "Range"], expose_headers=["Content-Range", "Accept-Ranges"])
 

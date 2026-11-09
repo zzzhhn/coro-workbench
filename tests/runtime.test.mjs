@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { backendMismatch, runtimeIdentity, supportedNode } from '../scripts/runtime.mjs';
+import { backendMismatch, corePorts, runtimeIdentity, supportedNode } from '../scripts/runtime.mjs';
 
 test('rejects wrong workspace, stale source and legacy unidentified servers', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'coro-runtime-'));
@@ -26,4 +26,10 @@ test('matches installed Vite and Vitest Node requirements', () => {
     assert.equal(supportedNode(version), true);
   for (const version of ['20.19.0', '22.11.0', '23.0.0', '25.5.0'])
     assert.equal(supportedNode(version), false);
+});
+
+test('defaults to the formal ports and accepts per-worktree overrides', () => {
+  assert.deepEqual(corePorts({}), { backend: 8765, frontend: 5173 });
+  assert.deepEqual(corePorts({ CORO_BACKEND_PORT: '8775', CORO_FRONTEND_PORT: '5183' }), { backend: 8775, frontend: 5183 });
+  assert.throws(() => corePorts({ CORO_BACKEND_PORT: '80' }), /Invalid Coro port/);
 });

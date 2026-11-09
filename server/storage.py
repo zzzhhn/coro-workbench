@@ -45,6 +45,13 @@ class JobStatus:
         current.update(status="running", progress=progress, stage=stage, message=message, updatedAt=utc_now(), **extra)
         atomic_json(self.path, current)
 
+    def waiting(self, message: str) -> None:
+        """Keep a queued job queued while it waits for the machine-wide lock."""
+        self.check_cancelled()
+        current = read_json(self.path)
+        current.update(stage="queued", message=message, updatedAt=utc_now())
+        atomic_json(self.path, current)
+
     def finish(self, project: dict) -> None:
         self.check_cancelled()
         current = read_json(self.path)

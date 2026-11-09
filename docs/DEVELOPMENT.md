@@ -110,6 +110,29 @@ Do not solve this by deleting all short notes, merging all repeated pitches,
 stretching rests away, or changing tempo solely to make glyphs larger. Genuine
 fast singing, repeated syllables and breath gaps must remain representable.
 
+## Parallel worktrees
+
+Several checkouts can each run a formal Coro without sharing a stale backend.
+Set ports per worktree and reuse the local runtimes; private assets stay in the
+main checkout and are linked, never copied or committed:
+
+```sh
+CORO_BACKEND_PORT=8775 CORO_FRONTEND_PORT=5183 npm start
+```
+
+Every analysis worker takes a machine-wide lock (`~/.cache/coro/analysis.lock`)
+before loading models, so uploads from different checkouts queue rather than
+running Demucs, YourMT3+ and GAME at the same time. While waiting, a job stays
+`queued` with an explanatory message and can still be cancelled. Offline
+experiments use the same lock:
+
+```sh
+.venv/bin/python -m server.analysis_lock -- .venv/bin/python my_experiment.py
+```
+
+`CORO_ANALYSIS_LOCK=off` disables it (tests, CI); another path selects a
+different lock file.
+
 ## Local tests and evidence
 
 Unit tests contain synthetic, owned fixtures. Some integration tests optionally
