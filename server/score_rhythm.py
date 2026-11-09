@@ -10,7 +10,7 @@ from bisect import bisect_left
 import math
 import statistics
 
-VERSION = 'multiscore-rhythm-4'
+VERSION = 'multiscore-rhythm-5'
 TICKS = 960
 
 
@@ -383,8 +383,46 @@ def _joint_onsets(onsets, quantum, spb, weights):
     return result[::-1]
 
 
+def _pedal_hold(note, change, at, following, owned, starts, spb, offset, pedals):
+    """Written end for an inner note held under a measured pedal, or None.
+
+    Both evidence paths must hold over the whole extension: a ByteDance pedal
+    interval covers it, and the note's own refined measured release reaches
+    it (within the chord-gate release tolerance). The end snaps down to an
+    existing same-hand attack, never beyond the current written length.
+    """
+    E = 1e-6
+    if not pedals or change is None or spb is None:
+        return None
+    seconds = lambda beat: offset + beat * spb
+    release = change['sourceEndSeconds'] + CHORD_GATE_RELEASE_SLACK
+    cover = next((p for p in pedals if p['onset_time'] <= seconds(following) + E
+                  and p['offset_time'] > seconds(following)), None)
+    if cover is None:
+        return None
+    end = note['start'] + note['duration']
+    same_pitch = min((n['start'] for n, _ in owned if n['midi'] == note['midi'] and n['start'] > at + E), default=end)
+    limit = min(end, same_pitch)
+    candidates = [t for t in starts if following < t <= limit + E] + ([end] if end <= limit + E else [])
+    allowed = [t for t in candidates if seconds(t) <= release + E and seconds(t) <= cover['offset_time'] + E]
+    return max(allowed) if allowed else None
+
+
+def _second_voice_free(layer, at, kept):
+    """The second written voice can take a note from `at` to `kept`."""
+    E = 1e-6
+    for n in layer:
+        n_end = n['start'] + n['duration']
+        if n['start'] < at - E and n_end > at + E:
+            return False
+        if abs(n['start'] - at) < E and abs(n_end - kept) > E:
+            return False
+    return True
+
+
 def keyboard_voices(notes: list[dict], changes: list[dict] | None = None,
-                    spb: float | None = None, offset: float = 0.) -> None:
+                    spb: float | None = None, offset: float = 0.,
+                    pedals: list[dict] | None = None) -> None:
     """At most two written voices per hand: a main voice plus one outer line.
 
     A note held past the hand's next attack stays sustained only when it is
@@ -444,6 +482,15 @@ def keyboard_voices(notes: list[dict], changes: list[dict] | None = None,
                     # rhythmic release point; never shrink a held note to a
                     # sliver. Keep it, with its own length, in the second layer.
                     note['voice'] = '2'
+                    continue
+                kept = _pedal_hold(note, change, at, following, owned, starts, spb, offset, pedals)
+                if kept is not None and _second_voice_free(outer, at, kept):
+                    if kept < end - E:
+                        note['duration'] = round(kept - at, 9)
+                    note['voice'] = '2'
+                    outer.append(note)
+                    if change is not None:
+                        change['reason'] = 'keyboard_pedal_inner_hold'
                     continue
                 note['duration'] = round(following - at, 9)
                 note['voice'] = '1'
@@ -513,7 +560,8 @@ def _keyboard_written_releases(notes, changes, spb, offset):
 
 
 def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
-                      *, percussion: bool = False, program: int = 0) -> tuple[list[dict], dict]:
+                      *, percussion: bool = False, program: int = 0,
+                      pedals: list[dict] | None = None) -> tuple[list[dict], dict]:
     bpm, offset = float(grid['bpm']), float(grid['offsetSeconds'])
     if not all(math.isfinite(v) for v in (bpm, offset, duration)) or not 20 <= bpm <= 300 or duration <= 0:
         raise ValueError('Invalid musical score grid')
@@ -779,7 +827,7 @@ def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
                     note['staff'] = staff
     if program in (0, 2) and not percussion:
         assign_keyboard_staves(notes)
-        keyboard_voices(notes, changes, spb, offset)
+        keyboard_voices(notes, changes, spb, offset, pedals)
     for note, change in zip(notes, changes):
         actual_end = offset + (note['start'] + note['duration']) * spb
         if abs(actual_end - change['scoreEndSeconds']) > 1e-6:
