@@ -24,7 +24,10 @@ const fingerprint = (notes: NoteEvent[]): number[][] =>
 function decodeScore(project: ScoreProject) {
   const result = toAbc(project);
   const tune = prepareEngravingTune(abcjs.parseOnly(result.abc)[0], result);
-  const audio = tune.setUpAudio({ chordsOff: true });
+  // Display engraving hides empty auxiliary staves per system line, which
+  // shifts abcjs synth track positions. Audio fidelity is a property of the
+  // ABC itself, so decode the unpruned tune; staffMap indexes its full voices.
+  const audio = abcjs.parseOnly(result.abc)[0].setUpAudio({ chordsOff: true });
   const trackParts = result.staffMap!.flatMap((staff) => staff.voiceIds.map(() => staff.partId));
   const decoded = new Map<string, number[][]>();
   audio.tracks.forEach((track, index) => {
