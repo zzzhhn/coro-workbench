@@ -4,7 +4,7 @@ import type { TuneObject } from 'abcjs';
 import type { ScoreProject } from '../lib/types';
 import type { Selection } from '../lib/editor';
 import { beatsPerBar, toAbc } from '../lib/music';
-import { fitEngravingSystems, prepareEngravingTune } from '../lib/engraving';
+import { alignEngravingStaffNames, fitEngravingSystems, prepareEngravingTune } from '../lib/engraving';
 import type { MeasureRange } from '../lib/scoreWindow';
 import { overlapsUncertainSource } from './workspaceView';
 
@@ -141,7 +141,10 @@ export default function ScoreView({
         ariaLabel: `${project.title}，可交互五线谱。点击音符编辑，键盘上下键改变音高。`,
       });
       tune.current = rendered[0] ?? null;
-      const boxes = fitEngravingSystems([...container.current.querySelectorAll<SVGSVGElement>('svg')]);
+      const systems = [...container.current.querySelectorAll<SVGSVGElement>('svg')];
+      // abcjs places multi-voice staff names above their staff; recentre on the staff itself.
+      alignEngravingStaffNames(systems);
+      const boxes = fitEngravingSystems(systems);
       setEngravedWidth(Math.ceil(Math.max(0, ...boxes.map((box) => box.width))));
       for (const [index, svg] of [...container.current.querySelectorAll('svg')].entries()) {
         svg.setAttribute(
@@ -253,7 +256,9 @@ export default function ScoreView({
     let live = true;
     void document.fonts.ready.then(() => {
       if (!live || !container.current) return;
-      const boxes = fitEngravingSystems([...container.current.querySelectorAll<SVGSVGElement>('svg')]);
+      const systems = [...container.current.querySelectorAll<SVGSVGElement>('svg')];
+      alignEngravingStaffNames(systems);
+      const boxes = fitEngravingSystems(systems);
       setEngravedWidth(Math.ceil(Math.max(0, ...boxes.map((box) => box.width))));
       lastScrolledSystem.current = -1;
       setRenderVersion((value) => value + 1);
