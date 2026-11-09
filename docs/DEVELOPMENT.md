@@ -89,6 +89,11 @@ is development regression and not evidence of real-song generalization.
 Lead-melody rhythm remains one component: a dense collection of pitch fragments
 is not a useful vocal score. GAME Medium with shared singing notation is now the
 default for multi/separate imports; see [current handoff](WORK_COMPUTER_HANDOFF.md).
+Shared singing notation version 4 changes only audio-only score inference. It
+retains overlapping chunk attacks, notates connected ascending scoops at their
+sung destination when contour evidence agrees, keeps short runs, and applies a
+bounded positive vocal phase correction from the song's own onsets. Raw GAME
+events remain separate; lyric uploads keep their aligned syllable timing.
 In the legacy comparison route the learned `rosvot` path precedes joint rhythmic notation;
 `acoustic`, `standard` and `legato` remain comparison choices. This is an
 engineering choice for rehearsal legibility, not a claim of universally higher
@@ -104,6 +109,56 @@ and identified by `harmonyVoiceId`; consumers must map ABC audio tracks through
 Do not solve this by deleting all short notes, merging all repeated pitches,
 stretching rests away, or changing tempo solely to make glyphs larger. Genuine
 fast singing, repeated syllables and breath gaps must remain representable.
+
+## Reference-score evaluation
+
+`server/score_eval.py` compares any Coro projects with a private human reference
+MIDI in score beats. It is evaluation-only; the analysis pipeline never imports
+it, and a reference must never become an inference input or a tuning target.
+
+```sh
+.venv/bin/python -m server.score_eval --reference "<private.mid>" \
+  --tracks "lead=0;piano=1,2;strings=3" --first-bar-beat 4 \
+  --candidate raw=data/<job>/game-raw-project.json \
+  --candidate previous=data/<old-job>/project.json --candidate current=data/<job>/project.json \
+  --output evidence/<private-dir>/score-eval.json
+```
+
+It reports, per section: exact pitch and sixteenth matches, F1, octave-only
+matches, duration agreement, and written dotted notes. For the lead it also
+reports recovered same-pitch re-attacks. For keyboards it reports sustained-bass
+coverage, sub-beat low notes and arpeggio marks. These numbers support a review;
+they are not musical acceptance.
+
+## Parallel worktrees
+
+Several checkouts can each run a formal Coro without sharing a stale backend.
+Set ports per worktree and reuse the local runtimes; private assets stay in the
+main checkout and are linked, never copied or committed:
+
+```sh
+scripts/link-local-assets.sh "/path/to/main/checkout"
+CORO_BACKEND_PORT=8775 CORO_FRONTEND_PORT=5183 npm start
+```
+
+Each worktree keeps its own `data/`. A backend fails interrupted jobs in its data
+directory on startup, so sharing one would break another checkout's analysis.
+Scripts stored under the linked `evidence/` or `work/` resolve to the main checkout
+through `Path(__file__).resolve()`. Use `Path.cwd()` as the import root in
+experiments, and print the imported module's `__file__` before trusting an A/B.
+
+Every analysis worker takes a machine-wide lock (`~/.cache/coro/analysis.lock`)
+before loading models, so uploads from different checkouts queue rather than
+running Demucs, YourMT3+ and GAME at the same time. While waiting, a job stays
+`queued` with an explanatory message and can still be cancelled. Offline
+experiments use the same lock:
+
+```sh
+.venv/bin/python -m server.analysis_lock -- .venv/bin/python my_experiment.py
+```
+
+`CORO_ANALYSIS_LOCK=off` disables it (tests, CI); another path selects a
+different lock file.
 
 ## Local tests and evidence
 

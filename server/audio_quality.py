@@ -221,7 +221,8 @@ def _improve_multi_project(directory: Path, project: dict, model: dict, grid: di
     project['key'], key_evidence = notation_key(model['events'], project.get('key', 'C'))
     project['tempo'] = project['originalAudio']['tempo'] = grid['bpm']
     project['originalAudio']['offsetSeconds'] = grid['offsetSeconds']
-    project['parts'], conversion = parts_from_multi_events(model['events'], grid, duration, readable=True)
+    pedals = (model.get('sourceRefinement') or {}).get('pianoPedals')
+    project['parts'], conversion = parts_from_multi_events(model['events'], grid, duration, readable=True, pedals=pedals)
     refinement = model.get('sourceRefinement')
     if refinement:
         for part in project['parts']:

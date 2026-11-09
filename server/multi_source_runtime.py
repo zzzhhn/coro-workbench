@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import numpy as np
 import logging
 from pathlib import Path
 import subprocess
@@ -11,7 +12,7 @@ from . import config
 from .storage import Cancelled, atomic_json, read_json
 from .multi_sources import VERSION, fuse_sources, harmonic_source_evidence, piano_finger_durations
 
-RUNTIME_VERSION = 'multiscore-sources-6'
+RUNTIME_VERSION = 'multiscore-sources-7'
 
 
 def _check_vocal_disagreements(models, native, vocal, waveform, status):
@@ -149,6 +150,32 @@ def build_source_proposal(directory: Path, native: dict, paths: dict[str, Path],
                 result['sourceRefinement'][key]=learned_vocal[key]
     result['sourceRefinement']['version'] = RUNTIME_VERSION
     result['events'], finger = piano_finger_durations(result['events'], pedals)
+    # Measured sustain-pedal intervals feed keyboard notation (written holds
+    # under the pedal); they never change note events.
+    result['sourceRefinement']['pianoPedals'] = [
+        {'onset_time': float(p['onset_time']), 'offset_time': float(p['offset_time'])} for p in pedals]
+    stem_frames = models / 'piano-activations.npz'
+    if stem_frames.is_file() and 'bass' in paths and 'piano' in paths:
+        # Recognition-layer audit of long low piano notes for a missed lower
+        # octave. Candidates are recorded; the default score is unchanged.
+        from .piano_low_octave import audit_low_octaves
+        import soundfile as sf
+        try:
+            mix_path = models / 'piano-mixture' / 'piano-activations.npz'
+            with np.load(stem_frames) as stem:
+                stem_frame = stem['frame_output']
+            mix_frame = None
+            if mix_path.is_file():
+                with np.load(mix_path) as mix:
+                    mix_frame = mix['frame_output']
+            bass, rate = sf.read(paths['bass'], always_2d=True)
+            piano_audio, piano_rate = sf.read(paths['piano'], always_2d=True)
+            if piano_rate == rate:
+                result['events'], octave_audit = audit_low_octaves(
+                    result['events'], stem_frame, mix_frame, bass.mean(1), piano_audio.mean(1), rate)
+                result['sourceRefinement']['pianoLowOctave'] = octave_audit
+        except (OSError, ValueError, KeyError):
+            logging.exception('Piano low-octave audit unavailable; events unchanged')
     result['sourceRefinement']['outputEvents'] = len(result['events'])
     result['sourceRefinement']['fingerDurationProposals'] = finger
     result['sourceRefinement']['engines'] = engines

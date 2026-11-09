@@ -1,7 +1,7 @@
 import abcjs from 'abcjs';
 import { zip } from 'fflate';
 import { beatsPerBar, toAbc } from './music';
-import { fitEngravingSystems, prepareEngravingTune } from './engraving';
+import { alignEngravingStaffNames, fitEngravingSystems, prepareEngravingTune } from './engraving';
 import { renderProjectAudio } from './audio';
 import { jsonResponse } from './api';
 import type { ScoreProject } from './types';
@@ -71,6 +71,7 @@ export async function createVideoPackage(
     };
     const notation = toAbc(score, undefined, { barsPerSystem: 2, staffSep: 30, systemSep: 26 });
     abcjs.renderAbc(holder, notation.abc, {
+      add_classes: true,
       oneSvgPerLine: true,
       staffwidth: 1650,
       paddingtop: 0,
@@ -87,6 +88,7 @@ export async function createVideoPackage(
     });
     await document.fonts.ready;
     const systems = [...holder.querySelectorAll<SVGSVGElement>('svg')];
+    alignEngravingStaffNames(systems);
     const boxes = fitEngravingSystems(systems);
     if (!systems.length || systems.length > 512) throw new Error('谱面系统过多或没有可导出的谱面。');
     const canvas = document.createElement('canvas');

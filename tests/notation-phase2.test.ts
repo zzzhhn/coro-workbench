@@ -24,7 +24,10 @@ const fingerprint = (notes: NoteEvent[]): number[][] =>
 function decodeScore(project: ScoreProject) {
   const result = toAbc(project);
   const tune = prepareEngravingTune(abcjs.parseOnly(result.abc)[0], result);
-  const audio = tune.setUpAudio({ chordsOff: true });
+  // Display engraving hides empty auxiliary staves per system line, which
+  // shifts abcjs synth track positions. Audio fidelity is a property of the
+  // ABC itself, so decode the unpruned tune; staffMap indexes its full voices.
+  const audio = abcjs.parseOnly(result.abc)[0].setUpAudio({ chordsOff: true });
   const trackParts = result.staffMap!.flatMap((staff) => staff.voiceIds.map(() => staff.partId));
   const decoded = new Map<string, number[][]>();
   audio.tracks.forEach((track, index) => {
@@ -155,6 +158,27 @@ describe('Phase 2 non-destructive notation projection', () => {
     );
     expect(decodeScore(imported).decoded.get(imported.parts[0].id)).toEqual(fingerprint(part.notes));
     expect(imported.source.warnings.join('')).not.toContain('多谱表乐器合并');
+  });
+
+  it('hides a grand-staff rest covered by the other voice without changing decoded audio', () => {
+    const project = createBlankProject();
+    project.measures = 1;
+    const part = project.parts[0];
+    part.role = 'instrument';
+    part.staves = [
+      { number: 1, clef: 'treble' },
+      { number: 2, clef: 'bass' },
+    ];
+    // Upper voice enters late; the lower voice sounds through its rest.
+    part.notes = [
+      note('held', 43, 0, 4, { staff: 2, voice: '2' }),
+      note('late', 55, 2, 2, { staff: 2, voice: '1' }),
+      note('rh', 72, 0, 4, { staff: 1, voice: '1' }),
+    ];
+    const { result, decoded } = decodeScore(project);
+    const lowerVoices = result.abc.split('\n').filter((line) => line.startsWith('[V:P1S2'));
+    expect(lowerVoices.join(' ')).not.toMatch(/(^|\s)z\d/);
+    expect(decoded.get(part.id)).toEqual(fingerprint(part.notes));
   });
 
   it('validates additive OMR/rhythm metadata without requiring it in legacy projects', () => {

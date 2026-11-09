@@ -1,0 +1,63 @@
+import json
+
+from server import pipeline_manifest as pm
+from server.storage import JobStatus, atomic_json
+
+
+def test_status_updates_become_a_layered_timeline_and_diagram(tmp_path):
+    atomic_json(tmp_path / 'status.json', {'id': 'x', 'status': 'queued', 'stage': 'queued'})
+    status = JobStatus(tmp_path)
+    status.update(3, 'decoding', 'a')
+    status.update(35, 'multi', 'b')
+    status.update(40, 'multi', 'c')
+    status.update(95, 'game', 'd')
+    status.update(97, 'experimental-stage', 'e')
+    status.finish({'parts': []})
+    timeline = pm.stage_timeline(pm.read_trace(tmp_path))
+    assert [s['stage'] for s in timeline] == ['decoding', 'multi', 'game', 'experimental-stage', 'complete']
+    assert timeline[1]['updates'] == 2 and timeline[1]['lastMessage'] == 'c'
+    assert timeline[1]['layer'] == 'recognition' and timeline[3]['layer'] == 'unclassified'
+    diagram = pm.mermaid(timeline)
+    assert diagram.startswith('flowchart LR') and 'S0 --> S1' in diagram and 'complete' not in diagram
+
+
+def test_manifest_records_versions_outputs_and_no_quality_claim(tmp_path):
+    atomic_json(tmp_path / 'status.json', {'id': 'x', 'status': 'queued', 'stage': 'queued'})
+    JobStatus(tmp_path).update(95, 'game', 'd')
+    project = {'parts': [{'id': 'game-vocals', 'notes': [{}, {}]}],
+               'source': {'analysis': {'quality': {'decoderProfile': 'game'},
+                                       'game': {'notationVersion': 'syllable-phrasing-4', 'rawEvents': 3}}}}
+    manifest = pm.build_manifest(tmp_path, {'id': 'x', 'lyrics_lrc': 'secret words'}, project)
+    assert manifest['outputs']['parts'] == {'game-vocals': 2}
+    assert manifest['outputs']['leadNotationVersion'] == 'syllable-phrasing-4'
+    assert manifest['components']['singing_score'].startswith('syllable-phrasing')
+    assert manifest['request']['lyricsProvided'] is True and 'lyrics_lrc' not in manifest['request']
+    assert manifest['claimsMusicalCorrectness'] is False
+    json.dumps(manifest)
+
+
+def test_tracing_failure_never_breaks_analysis(tmp_path):
+    missing = tmp_path / 'gone'
+    pm.record(missing, 'decoding', 1, 'x')  # directory absent: silently ignored
+
+
+def test_provenance_is_compact_and_versioned(tmp_path):
+    manifest = {'jobId': 'j', 'runtime': {'revision': 'abc', 'codeHash': 'f' * 64},
+                'components': {'score_rhythm': 'multiscore-rhythm-5', 'singing_score': 'syllable-phrasing-4',
+                               'multi_source_runtime': 'multiscore-sources-7'}}
+    stamp = pm.provenance(manifest)
+    assert stamp == {'generation': pm.PIPELINE_GENERATION, 'revision': 'abc', 'codeHash': 'f' * 16, 'matchesBackend': None,
+                     'scoreRhythm': 'multiscore-rhythm-5', 'singingScore': 'syllable-phrasing-4',
+                     'sourceRuntime': 'multiscore-sources-7', 'jobId': 'j'}
+
+
+
+def test_manifest_records_worker_code_and_backend_mismatch(tmp_path, monkeypatch):
+    from server.storage import JobStatus, atomic_json
+    atomic_json(tmp_path / 'status.json', {'id': 'x', 'status': 'queued', 'stage': 'queued'})
+    JobStatus(tmp_path).update(3, 'decoding', 'a')
+    monkeypatch.setattr(pm, 'WORKER_IDENTITY', {'codeHash': 'new', 'revision': 'r2', 'workspaceId': 'w'})
+    monkeypatch.setenv('CORO_BACKEND_CODE_HASH', 'old')
+    manifest = pm.write_manifest(tmp_path, {'id': 'x'}, {'parts': [], 'source': {}})
+    assert manifest['runtime']['codeHash'] == 'new' and manifest['runtime']['matchesBackend'] is False
+    assert pm.provenance(manifest)['matchesBackend'] is False

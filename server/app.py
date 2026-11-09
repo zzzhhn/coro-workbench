@@ -35,6 +35,7 @@ class JobManager:
         self.processes: dict[str, subprocess.Popen] = {}
         self.futures: dict[str, concurrent.futures.Future] = {}
         self.pending_uploads = 0
+        self.backend_code_hash: str | None = None
 
     def recover(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -73,7 +74,8 @@ class JobManager:
         status = JobStatus(directory)
         if status.cancel_path.exists():
             return
-        env = dict(os.environ, CORO_DATA_DIR=str(self.data_dir), CORO_MODELS_DIR=str(config.MODELS_DIR), OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", TOKENIZERS_PARALLELISM="false")
+        env = dict(os.environ, CORO_DATA_DIR=str(self.data_dir), CORO_MODELS_DIR=str(config.MODELS_DIR), OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", TOKENIZERS_PARALLELISM="false",
+                   CORO_BACKEND_CODE_HASH=self.backend_code_hash or "")
         try:
             with (directory / "worker.log").open("a", encoding="utf-8") as log:
                 process = subprocess.Popen([sys.executable, "-m", "server.worker", job_id], cwd=config.ROOT, env=env, stdout=log, stderr=log, start_new_session=True)
@@ -159,6 +161,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     runtime = runtime_identity(config.ROOT)
     directory = data_dir or config.DATA_DIR
     manager = JobManager(directory)
+    # Workers are fresh processes that load the code on disk at start; record
+    # the backend's own identity too, so a stale backend is visible per job.
+    manager.backend_code_hash = runtime['codeHash']
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -172,7 +177,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(create_video_router(directory))
     app.add_middleware(UploadLimitMiddleware)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
-    allowed = [f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (5173, 4173, 3000, 8765)]
+    ports = {5173, 4173, 3000, 8765} | {int(os.environ[name]) for name in ("CORO_FRONTEND_PORT", "CORO_BACKEND_PORT") if os.environ.get(name, "").isdigit()}
+    allowed = [f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in sorted(ports)]
     allowed += [origin.strip() for origin in os.environ.get("CORO_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=allowed, allow_credentials=False, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type", "Range"], expose_headers=["Content-Range", "Accept-Ranges"])
 
@@ -468,12 +474,19 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 if analyzed_audio.is_file() and not analyzed_audio.is_symlink():
                     with wave.open(str(analyzed_audio), "rb") as audio_file:
                         analyzed = audio_file.getnframes() / audio_file.getframerate()
-                results.append({"id": path.parent.name, "title": project.get("title", "未命名转写"), "filename": project.get("source", {}).get("filename", ""), "createdAt": state.get("createdAt", ""), "updatedAt": state.get("updatedAt", ""), "tempo": project.get("tempo"), "measures": project.get("measures"), "parts": len(project.get("parts", [])), "duration": full, "analyzedSeconds": analyzed, "mode": request.get("mode", "unknown"), "operation": request.get("action"), "vocalSource": quality.get("vocalInputSource"), "decoder": quality.get("decoderProfile", request.get("decoder", "standard")), "hasRaw": (path.parent / "raw-project.json").is_file(), "uncertainRegions": len(analysis.get("uncertaintyIntervals") or []), "proposal": bool(analysis.get("transforms"))})
+                results.append({"id": path.parent.name, "title": project.get("title", "未命名转写"), "filename": project.get("source", {}).get("filename", ""), "createdAt": state.get("createdAt", ""), "updatedAt": state.get("updatedAt", ""), "tempo": project.get("tempo"), "measures": project.get("measures"), "parts": len(project.get("parts", [])), "duration": full, "analyzedSeconds": analyzed, "mode": request.get("mode", "unknown"), "operation": request.get("action"), "vocalSource": quality.get("vocalInputSource"), "decoder": quality.get("decoderProfile", request.get("decoder", "standard")), "hasRaw": (path.parent / "raw-project.json").is_file(), "uncertainRegions": len(analysis.get("uncertaintyIntervals") or []), "proposal": bool(analysis.get("transforms")), "pipeline": (project.get("source", {}).get("pipeline") or {}).get("generation"), "createdAtLocal": state.get("createdAt", "")})
                 if len(results) >= limit:
                     break
             except (OSError, ValueError, KeyError, TypeError, wave.Error, EOFError):
                 continue
         return {"projects": results, "localOnly": True}
+
+    @app.get("/api/projects/{job_id}/pipeline")
+    def pipeline_manifest(job_id: str):
+        path = get_directory(job_id) / "pipeline-manifest.json"
+        if not path.is_file() or path.is_symlink():
+            raise HTTPException(404, "该任务没有流水线记录（早于记录功能的任务）。")
+        return FileResponse(path, media_type="application/json", filename="pipeline-manifest.json")
 
     @app.get("/api/projects/{job_id}/evidence")
     def quality_evidence(job_id: str):

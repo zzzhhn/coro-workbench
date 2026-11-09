@@ -44,12 +44,25 @@ class JobStatus:
         current = read_json(self.path)
         current.update(status="running", progress=progress, stage=stage, message=message, updatedAt=utc_now(), **extra)
         atomic_json(self.path, current)
+        from .pipeline_manifest import record
+        record(self.directory, stage, progress, message)
+
+    def waiting(self, message: str) -> None:
+        """Keep a queued job queued while it waits for the machine-wide lock."""
+        self.check_cancelled()
+        current = read_json(self.path)
+        current.update(stage="queued", message=message, updatedAt=utc_now())
+        atomic_json(self.path, current)
+        from .pipeline_manifest import record
+        record(self.directory, "queued", 0, message)
 
     def finish(self, project: dict) -> None:
         self.check_cancelled()
         current = read_json(self.path)
         current.update(status="complete", progress=100, stage="complete", message="分析完成，请校对节拍、音高和乐器候选。", project=project, updatedAt=utc_now())
         atomic_json(self.path, current)
+        from .pipeline_manifest import record
+        record(self.directory, "complete", 100, "complete")
 
     def fail(self, message: str) -> None:
         if self.cancel_path.exists():

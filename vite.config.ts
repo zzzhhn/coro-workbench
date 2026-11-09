@@ -14,16 +14,21 @@ export function privateFileDeny(root: string) {
   ];
 }
 
+const backend = `http://127.0.0.1:${process.env.CORO_BACKEND_PORT ?? 8765}`;
+// Worktrees share one linked node_modules; keep each instance's dep cache apart.
+const frontendPort = process.env.CORO_FRONTEND_PORT;
+
 export default defineConfig({
   plugins: [react()],
+  ...(frontendPort && frontendPort !== '5173' ? { cacheDir: `node_modules/.vite-${frontendPort}` } : {}),
   server: {
-    proxy: { '/api': 'http://127.0.0.1:8765' },
+    proxy: { '/api': backend },
     watch: { ignored: ['**/models/**', '**/.venv/**', '**/data/**', '**/evidence/**'] },
     fs: {
       deny: privateFileDeny(fileURLToPath(new URL('.', import.meta.url))),
     },
   },
-  preview: { proxy: { '/api': 'http://127.0.0.1:8765' } },
+  preview: { proxy: { '/api': backend } },
   build: {
     rollupOptions: {
       output: {

@@ -43,7 +43,9 @@ def rebuild(directory: Path, *, exact: bool = False) -> tuple[dict, dict]:
         grid = infer_notation_grid(model['events'], grid, tempo_locked=request.get('tempo') is not None)
     result['tempo'] = result['originalAudio']['tempo'] = grid['bpm']
     result['originalAudio']['offsetSeconds'] = grid['offsetSeconds']
-    result['parts'], audit = parts_from_multi_events(model['events'], grid, evidence['analyzedDurationSeconds'], readable=not exact)
+    pedals = (model.get('sourceRefinement') or {}).get('pianoPedals')
+    result['parts'], audit = parts_from_multi_events(model['events'], grid, evidence['analyzedDurationSeconds'],
+                                                     readable=not exact, pedals=pedals)
     previous_parts = {p['id']: p for p in project['parts']}
     for part in result['parts']:
         previous = previous_parts.get(part['id'], {})

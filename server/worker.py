@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 
+from .analysis_lock import hold
 from .config import DATA_DIR
 from .storage import JOB_ID, Cancelled, JobStatus, read_json
 
@@ -11,17 +12,31 @@ def main() -> int:
     if len(sys.argv) != 2 or not JOB_ID.fullmatch(sys.argv[1]):
         return 2
     directory = DATA_DIR / sys.argv[1]
+    from .pipeline_manifest import capture_worker_identity
+    capture_worker_identity()
     status = JobStatus(directory)
+    def waiting(first: bool) -> None:
+        status.check_cancelled()
+        if first:
+            status.waiting("本机另一份 Coro 正在分析。为避免内存不足，会在它完成后自动开始。")
+
     try:
         status.check_cancelled()
         request = read_json(directory / "request.json")
-        if request.get("action") == "vocal-rebuild":
-            from .vocal_rebuild import rebuild_vocals
-            project = rebuild_vocals(directory, request, status)
-        else:
-            from .pipeline import analyze_audio
-            project = analyze_audio(directory, request, status)
-        status.finish(project)
+        with hold(waiting):
+            if request.get("action") == "vocal-rebuild":
+                from .vocal_rebuild import rebuild_vocals
+                project = rebuild_vocals(directory, request, status)
+            else:
+                from .pipeline import analyze_audio
+                project = analyze_audio(directory, request, status)
+            from .pipeline_manifest import provenance, write_manifest
+            manifest = write_manifest(directory, request, project)
+            if manifest and isinstance(project, dict):
+                project.setdefault('source', {})['pipeline'] = provenance(manifest)
+                from .storage import atomic_json
+                atomic_json(directory / "project.json", project)
+            status.finish(project)
         return 0
     except Cancelled:
         return 0

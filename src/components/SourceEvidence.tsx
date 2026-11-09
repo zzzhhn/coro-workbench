@@ -7,6 +7,23 @@ import { Headphones } from '@phosphor-icons/react';
 import { pitchVerificationSummary } from '../lib/verificationSummary';
 import { VOCAL_INPUT_LABELS, type VocalInputChoice } from '../lib/vocalRebuild';
 import { pitchEvidenceJobId } from '../lib/pitchReview';
+import { pipelineStatus } from '../lib/provenance';
+
+type PipelineManifest = {
+  timeline: Array<{ stage: string; label: string; layer: string; seconds: number | null }>;
+  components: Record<string, string | string[]>;
+  runtime?: { revision?: string; codeHash?: string } | null;
+  outputs?: { leadNotationVersion?: string; scoreQuantizerVersion?: string };
+};
+
+const LAYER_LABELS: Record<string, string> = {
+  input: '输入',
+  recognition: '识别',
+  notation: '记谱推断',
+  presentation: '声部呈现',
+  layout: '排版',
+  unclassified: '其他',
+};
 
 export default function SourceEvidence({
   project,
@@ -16,6 +33,7 @@ export default function SourceEvidence({
   onAudio,
   onPitchReview,
   onVocalRebuild,
+  onReanalyze,
 }: {
   project: ScoreProject;
   onImportCopy: (project: ScoreProject) => Promise<boolean>;
@@ -24,11 +42,15 @@ export default function SourceEvidence({
   onAudio?: (url: string, name: string) => void;
   onPitchReview?: (seconds: number) => void;
   onVocalRebuild?: () => void;
+  /** Re-transcribe this song with the current pipeline (opens the import dialog). */
+  onReanalyze?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(0);
   const [pageUrl, setPageUrl] = useState<string>();
   const [busy, setBusy] = useState(false);
+  // Keyed by job, so switching projects never shows or suppresses another job's record.
+  const [pipelineState, setPipelineState] = useState<{ job: string; value: PipelineManifest | null }>();
   const analysis = project.source.analysis;
   const displayedTransforms = [...new Set((analysis?.transforms ?? []).map((text) =>
     text.replace(/^(前序版本记录：)+/, '前序版本记录：'),
@@ -96,6 +118,19 @@ export default function SourceEvidence({
       live = false;
     };
   }, [pages[page], page]);
+  // Every hook runs before the early return; hook order must not depend on the project.
+  const pipeline = pipelineState && pipelineState.job === evidenceJobId ? pipelineState.value : undefined;
+  useEffect(() => {
+    if (!expanded || !evidenceJobId || pipelineState?.job === evidenceJobId) return;
+    let live = true;
+    fetch(`/api/projects/${evidenceJobId}/pipeline`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((value) => live && setPipelineState({ job: evidenceJobId, value }))
+      .catch(() => live && setPipelineState({ job: evidenceJobId, value: null }));
+    return () => {
+      live = false;
+    };
+  }, [expanded, evidenceJobId, pipelineState?.job]);
   if (!analysis && !pages.length) return null;
   const getRaw = async (open: boolean) => {
     if (!rawUrl || !/^\/api\/projects\/[a-f0-9]{32}\/(?:raw|game-raw)$/.test(rawUrl)) return;
@@ -132,8 +167,22 @@ export default function SourceEvidence({
       onMessage(error instanceof Error ? error.message : '读取模型证据失败', true);
     }
   };
+  const provenance = pipelineStatus(project);
   return (
     <section className={`source-evidence ${expanded ? 'expanded' : ''}`}>
+      {provenance.kind === 'legacy' && (
+        <div className="legacy-pipeline" role="status">
+          <Info size={15} />
+          <span>
+            这份转写来自<b>{provenance.reason}</b>，不是当前 v5 流水线（YourMT3+ 多声部 + GAME 主唱 + 新版钢琴记谱）。谱面、琶音和声部分配都会不同。
+          </span>
+          {onReanalyze && (
+            <button className="text-button" onClick={onReanalyze}>
+              用当前流水线重新转写
+            </button>
+          )}
+        </div>
+      )}
       <div className="source-evidence-bar">
         <button
           className="evidence-toggle"
@@ -247,6 +296,27 @@ export default function SourceEvidence({
                   <li key={index}>{transform}</li>
                 ))}
               </ul>
+              {pipeline && (
+                <section className="pipeline-trace" aria-label="本次实际运行流程">
+                  <strong>本次实际流程</strong>
+                  <ol>
+                    {pipeline.timeline
+                      .filter((span) => !['queued', 'complete'].includes(span.stage))
+                      .map((span, index) => (
+                        <li key={index} data-layer={span.layer}>
+                          <span>{span.label}</span>
+                          <em>{LAYER_LABELS[span.layer] ?? span.layer}</em>
+                          {span.seconds !== null && <small>{Math.round(span.seconds)} 秒</small>}
+                        </li>
+                      ))}
+                  </ol>
+                  <p>
+                    代码 {pipeline.runtime?.revision ?? '未知'} · 主唱记谱{' '}
+                    {pipeline.outputs?.leadNotationVersion ?? '—'} · 伴奏记谱 {pipeline.outputs?.scoreQuantizerVersion ?? '—'}
+                    。这里记录的是来源和版本，不代表音乐正确性。
+                  </p>
+                </section>
+              )}
               {analysis.rhythm && (
                 <p>
                   节拍来源：{analysis.rhythm.method}；第 1 拍相对原音频{' '}

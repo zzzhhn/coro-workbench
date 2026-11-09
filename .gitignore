@@ -35,6 +35,7 @@ work/
 !/docs/MELBAND_SETUP.md
 !/docs/PRODUCT_DECISIONS.md
 !/docs/MVP_STATUS.md
+!/docs/PIPELINE.md
 *.coro
 *.coro.json
 *.wav

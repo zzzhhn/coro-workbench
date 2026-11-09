@@ -3,6 +3,7 @@ import { ArrowRight, CircleNotch, FileAudio, WarningCircle } from '@phosphor-ico
 import { getJob, jsonResponse } from '../lib/api';
 import type { ScoreProject } from '../lib/types';
 import { VOCAL_INPUT_LABELS, type VocalInputChoice } from '../lib/vocalRebuild';
+import { CURRENT_PIPELINE_GENERATION } from '../lib/provenance';
 
 interface ProjectRow {
   id: string;
@@ -19,6 +20,8 @@ interface ProjectRow {
   decoder: string;
   proposal: boolean;
   uncertainRegions: number;
+  pipeline?: string | null;
+  createdAt?: string;
 }
 
 export default function LocalResults({
@@ -83,7 +86,12 @@ export default function LocalResults({
           >
             <FileAudio size={19} />
             <span>
-              <strong>{row.title}</strong>
+              <strong>
+                {row.title}
+                <em className={row.pipeline === CURRENT_PIPELINE_GENERATION ? 'pipeline-tag current' : 'pipeline-tag legacy'}>
+                  {row.pipeline === CURRENT_PIPELINE_GENERATION ? '当前流水线' : '旧版流水线'}
+                </em>
+              </strong>
               <small>
                 {row.analyzedSeconds <= 0
                   ? '分析时长未记录'
@@ -108,6 +116,7 @@ export default function LocalResults({
                       : '原始模型'}
                 {row.uncertainRegions > 0 ? ` · ${row.uncertainRegions} 段待定` : ''}
                 {row.vocalSource && row.vocalSource !== 'current' ? ` · ${VOCAL_INPUT_LABELS[row.vocalSource] ?? row.vocalSource}` : ''}
+                {row.createdAt ? ` · ${new Date(row.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}
               </small>
             </span>
             {opening === row.id ? <CircleNotch className="spin" size={17} /> : <ArrowRight size={16} />}

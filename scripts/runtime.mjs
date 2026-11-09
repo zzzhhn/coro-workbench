@@ -27,6 +27,16 @@ export function backendMismatch(health, expected) {
   return undefined;
 }
 
+// Separate worktrees can run their own Coro side by side on other ports.
+export function corePorts(env = process.env) {
+  const parse = (value, fallback) => {
+    const port = Number(value ?? fallback);
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error(`Invalid Coro port: ${value}`);
+    return port;
+  };
+  return { backend: parse(env.CORO_BACKEND_PORT, 8765), frontend: parse(env.CORO_FRONTEND_PORT, 5173) };
+}
+
 export function supportedNode(version) {
   const [major, minor] = version.replace(/^v/, '').split('.').map(Number);
   return (major === 22 && minor >= 12) || major === 24 || major >= 26;

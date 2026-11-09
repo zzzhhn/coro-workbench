@@ -1,7 +1,7 @@
 import abcjs from 'abcjs';
 import type { ScoreProject } from './types';
 import { toAbc } from './music';
-import { fitEngravingSystems, prepareEngravingTune } from './engraving';
+import { alignEngravingStaffNames, fitEngravingSystems, prepareEngravingTune } from './engraving';
 
 let fontPromise: Promise<string> | undefined;
 async function localFont(): Promise<string> {
@@ -101,6 +101,7 @@ export async function renderScorePdf(project: ScoreProject, partIds?: string[]):
     y += 6;
     const systems = [...holder.querySelectorAll<SVGSVGElement>('svg')];
     if (!systems.length) throw new Error('没有可导出的谱面。');
+    alignEngravingStaffNames(systems);
     const boxes = fitEngravingSystems(systems);
     for (const [index, system] of systems.entries()) {
       const { width: originalWidth, height: originalHeight } = boxes[index];

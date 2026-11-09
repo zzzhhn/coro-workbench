@@ -1080,6 +1080,26 @@
   background: #fbfaf7;
   border-top: 1px solid #e3ded5;
 }
+.legacy-pipeline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 18px;
+  background: #fbf0dc;
+  border-bottom: 1px solid #ecd3a6;
+  color: #7a4f12;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.legacy-pipeline span {
+  flex: 1;
+  min-width: 0;
+}
+.legacy-pipeline .text-button {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: #7a4f12;
+}
 .source-evidence-bar {
   display: flex;
   flex-shrink: 0;
@@ -1129,6 +1149,42 @@
 }
 .source-evidence-body p {
   margin: 5px 0 10px;
+}
+.pipeline-trace {
+  margin: 4px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #e8e3db;
+  border-radius: var(--radius);
+  background: #fffdf9;
+}
+.pipeline-trace ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.pipeline-trace li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  border-left: 3px solid #b9b2a6;
+  background: #f6f3ee;
+  line-height: 1.6;
+}
+.pipeline-trace li[data-layer='recognition'] {
+  border-left-color: #3b6ea5;
+}
+.pipeline-trace li[data-layer='notation'] {
+  border-left-color: #b5762a;
+}
+.pipeline-trace li em,
+.pipeline-trace li small {
+  color: #9a917f;
+  font-style: normal;
+  font-size: 10px;
 }
 .source-evidence-body .field-label {
   max-width: 210px;
@@ -1361,6 +1417,23 @@
   background: white;
   padding: 11px;
   text-align: left;
+}
+.pipeline-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+.pipeline-tag.current {
+  background: #e3efe6;
+  color: #3f6a4c;
+}
+.pipeline-tag.legacy {
+  background: #f6ead3;
+  color: #85571a;
 }
 .local-result-list > button.current {
   border-color: #b0bdc9;
