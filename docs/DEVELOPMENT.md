@@ -117,8 +117,12 @@ Set ports per worktree and reuse the local runtimes; private assets stay in the
 main checkout and are linked, never copied or committed:
 
 ```sh
+scripts/link-local-assets.sh "/path/to/main/checkout"
 CORO_BACKEND_PORT=8775 CORO_FRONTEND_PORT=5183 npm start
 ```
+
+Each worktree keeps its own `data/`. A backend fails interrupted jobs in its data
+directory on startup, so sharing one would break another checkout's analysis.
 
 Every analysis worker takes a machine-wide lock (`~/.cache/coro/analysis.lock`)
 before loading models, so uploads from different checkouts queue rather than
