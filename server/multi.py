@@ -25,7 +25,8 @@ INSTRUMENT_NAMES = {
 }
 
 
-def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, readable: bool = False) -> tuple[list[dict], dict]:
+def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, readable: bool = False,
+                            pedals: list[dict] | None = None) -> tuple[list[dict], dict]:
     """Preserve decoded classes and attacks, with bounded or editorial rhythm."""
     grouped = {}
     source_labels = {}
@@ -72,7 +73,8 @@ def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, 
             notes, rhythm = quantize_vocal_rhythm(rows, grid, duration, part_id, preserve_confidence=False)
         elif readable:
             from .score_rhythm import infer_part_rhythm
-            notes, rhythm = infer_part_rhythm(rows, grid, duration, part_id, percussion=drum, program=program)
+            notes, rhythm = infer_part_rhythm(rows, grid, duration, part_id, percussion=drum, program=program,
+                                              pedals=pedals if program in (0, 2) and not drum else None)
         else:
             notes, rhythm = quantize_polyphonic_events(rows, grid, duration, part_id, percussion=drum)
         audits[part_id] = {'program': program, 'isDrum': drum, 'family': family,

@@ -149,6 +149,10 @@ def build_source_proposal(directory: Path, native: dict, paths: dict[str, Path],
                 result['sourceRefinement'][key]=learned_vocal[key]
     result['sourceRefinement']['version'] = RUNTIME_VERSION
     result['events'], finger = piano_finger_durations(result['events'], pedals)
+    # Measured sustain-pedal intervals feed keyboard notation (written holds
+    # under the pedal); they never change note events.
+    result['sourceRefinement']['pianoPedals'] = [
+        {'onset_time': float(p['onset_time']), 'offset_time': float(p['offset_time'])} for p in pedals]
     result['sourceRefinement']['outputEvents'] = len(result['events'])
     result['sourceRefinement']['fingerDurationProposals'] = finger
     result['sourceRefinement']['engines'] = engines

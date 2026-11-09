@@ -273,3 +273,41 @@ def test_grace_like_attack_does_not_shrink_a_held_chord_tone_to_a_sliver():
     notes, _ = rhythm(rows, program=0)
     held = next(n for n in notes if n['midi'] == 57)
     assert held['duration'] >= 4
+
+
+def _inner_hold_rows():
+    # An upper left-hand chord tone sounding 2 beats over bass attacks every
+    # beat. At 120 BPM one beat = 0.5 s.
+    # Left hand: a C3 chord tone over a moving bass (no outer hold occupies
+    # the second voice). A right-hand line keeps the registers unambiguous.
+    return [[0, 1.0, 48, .8], [0, .4, 36, .8], [.5, .9, 43, .8], [1, 2, 38, .8],
+            [0, 2, 76, .8], [1, 2, 79, .8]]
+
+
+def test_inner_note_is_cut_at_next_attack_without_pedal_evidence():
+    notes, audit = rhythm(_inner_hold_rows(), program=0)
+    assert next(n for n in notes if n['midi'] == 48)['staff'] == 2
+    inner = next(n for n in notes if n['midi'] == 48)
+    assert inner['duration'] == 1  # written to the next same-hand attack (beat 1)
+    assert not any(c['reason'] == 'keyboard_pedal_inner_hold' for c in audit['boundaryChanges'])
+
+
+def test_inner_note_holds_only_when_pedal_and_its_own_release_cover_it():
+    pedal = [{'onset_time': 0., 'offset_time': 1.2}]
+    notes, audit = infer_part_rhythm(_inner_hold_rows(), {'bpm': 120, 'offsetSeconds': 0}, 20, 't',
+                                     program=0, pedals=pedal)
+    inner = next(n for n in notes if n['midi'] == 48)
+    assert inner['duration'] == 2 and inner['voice'] == '2'
+    assert any(c['reason'] == 'keyboard_pedal_inner_hold' for c in audit['boundaryChanges'])
+    assert len(notes) == len(_inner_hold_rows())
+    for staff in (1, 2):
+        assert len({n['voice'] for n in notes if n['staff'] == staff}) <= 2
+    # Pedal lifted before the next attack: no hold.
+    notes, _ = infer_part_rhythm(_inner_hold_rows(), {'bpm': 120, 'offsetSeconds': 0}, 20, 't',
+                                 program=0, pedals=[{'onset_time': 0., 'offset_time': .4}])
+    assert next(n for n in notes if n['midi'] == 48)['duration'] == 1
+    # Pedal down but the note itself was released early: no hold beyond it.
+    rows = _inner_hold_rows()
+    rows[1] = [0, .55, 48, .8]
+    notes, _ = infer_part_rhythm(rows, {'bpm': 120, 'offsetSeconds': 0}, 20, 't', program=0, pedals=pedal)
+    assert next(n for n in notes if n['midi'] == 48)['duration'] <= 1
