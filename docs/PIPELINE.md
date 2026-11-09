@@ -30,14 +30,15 @@ flowchart TD
     SOFA --> SS
   end
 
-  subgraph Piano["Piano · multiscore-rhythm-4 (merged, PR #4)"]
+  subgraph Piano["Piano · multiscore-rhythm-5 (merged, PR #4 + #5)"]
     MT --> PC[Stem/mix consensus, ByteDance · recognition]
     PC --> PR[Rhythm grid and onset quantisation · notation inference]
     PR --> PA{Rolled gesture? onsets sweep in pitch order · notation inference}
     PA --> PH[Moving hand split, Viterbi with span/finger/held-key priors · notation inference]
     PH --> PV[Two written voices per hand; outer line keeps measured hold · part presentation]
     PV --> PL[Covered grand-staff rests become spacers · layout]
-    PV -.-> PD[Pedal-aware sustained bass; recognition misses G1/A1 first · open]
+    PV --> PP[Inner voice held only under measured pedal and own release · notation inference]
+    PC --> PO[Low-octave audit, 4 evidence paths; candidates only, not applied · recognition]
   end
 
   MT --> STR[String sustain consensus · recognition]
@@ -92,6 +93,11 @@ What this suggests about which layer to work on:
 | arpeggio marks | 197 | 93 |
 | max voices per staff-bar | 5 | 2 |
 | sustained bass covered | 16/33 | 16/33 |
+
+v5.1 (PR #5) adds a pedal-aware inner hold. Kong Er duration agreement is 444,
+dotted notes 133, frame F .591. It fires on only 35 notes, because the detected
+pedals are short and fragmented. The low-octave audit was right on 2 of 4 promotions,
+so it records candidates and does not change the score.
 
 Open trade-off: the inner left-hand voice is written to the next attack. On the Fragile
 holdout, reference duration agreement drops 1211 → 1139. Frame agreement with ByteDance
