@@ -45,7 +45,8 @@ export default function SourceEvidence({
   const [page, setPage] = useState(0);
   const [pageUrl, setPageUrl] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const [pipeline, setPipeline] = useState<PipelineManifest | null>();
+  // Keyed by job, so switching projects never shows or suppresses another job's record.
+  const [pipelineState, setPipelineState] = useState<{ job: string; value: PipelineManifest | null }>();
   const analysis = project.source.analysis;
   const displayedTransforms = [...new Set((analysis?.transforms ?? []).map((text) =>
     text.replace(/^(前序版本记录：)+/, '前序版本记录：'),
@@ -139,17 +140,18 @@ export default function SourceEvidence({
       setBusy(false);
     }
   };
+  const pipeline = pipelineState && pipelineState.job === evidenceJobId ? pipelineState.value : undefined;
   useEffect(() => {
-    if (!expanded || !evidenceJobId || pipeline !== undefined) return;
+    if (!expanded || !evidenceJobId || pipelineState?.job === evidenceJobId) return;
     let live = true;
     fetch(`/api/projects/${evidenceJobId}/pipeline`)
       .then((response) => (response.ok ? response.json() : null))
-      .then((value) => live && setPipeline(value))
-      .catch(() => live && setPipeline(null));
+      .then((value) => live && setPipelineState({ job: evidenceJobId, value }))
+      .catch(() => live && setPipelineState({ job: evidenceJobId, value: null }));
     return () => {
       live = false;
     };
-  }, [expanded, evidenceJobId, pipeline]);
+  }, [expanded, evidenceJobId, pipelineState?.job]);
   const getEvidence = async () => {
     if (!evidenceJobId) return;
     try {
