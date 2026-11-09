@@ -58,12 +58,12 @@ def source_revision(source: Path) -> str:
     return SOFA_COMMIT
 
 
-def align(audio: Path, segments: list[dict], model: Path, output: Path):
+def _load_network(model: Path):
+    """Frozen official SOFA network, mel extractor and decoder functions."""
     import numpy as np
     import numba
     import torch
     import yaml
-    from pypinyin import lazy_pinyin
 
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
@@ -100,6 +100,65 @@ def align(audio: Path, segments: list[dict], model: Path, output: Path):
     backbone.eval(); head.eval()
     mel = mel_module.MelSpectrogram(sc['n_mels'], sc['sample_rate'], sc['win_length'], sc['hop_length'],
         sc['n_fft'], sc['fmin'], sc['fmax'], sc['clamp'])
+    return {'source': source, 'revision': revision, 'namespace': namespace, 'vocab': vocab, 'sc': sc,
+            'backbone': backbone, 'head': head, 'mel': mel}
+
+
+def _forward(net, audio: Path, start: float, end: float):
+    """Network logits and text-independent phone-boundary posterior for one window."""
+    import numpy as np
+    import torch
+    sc = net['sc']
+    pcm = subprocess.check_output(['ffmpeg', '-v', 'error', '-nostdin', '-ss', str(start), '-t', str(end-start),
+        '-i', str(audio), '-f', 'f32le', '-ac', '1', '-ar', str(sc['sample_rate']), '-'])
+    waveform = torch.from_numpy(np.frombuffer(pcm, dtype='<f4').copy())[None]
+    length = waveform.shape[1] / sc['sample_rate']
+    with torch.inference_mode():
+        features = net['mel'](waveform)
+        features = (features-features.mean())/features.std()
+        features = features.repeat_interleave(sc['scale_factor'], dim=2)
+        logits = net['head'](net['backbone'](features.transpose(1, 2)))
+        count = int((length*sc['scale_factor']*sc['sample_rate']+.5)/sc['hop_length'])
+        logits = logits[0, :count]
+        # Edge head is computed before any text masking: it does not use lyrics.
+        edges = ((torch.sigmoid(logits[:, 0])-.1)/.8).clamp(0, 1).numpy()
+    hop = sc['hop_length']/(sc['sample_rate']*sc['scale_factor'])
+    return logits, edges, hop
+
+
+def boundary_curve(audio: Path, windows: list[tuple[float, float]], model: Path, output: Path):
+    """Text-free SOFA phone-boundary posterior over the given audio windows.
+
+    Used as syllable/phoneme-change evidence when no lyrics exist. Only the
+    official network's boundary head is used; no lyrics, scores or references.
+    """
+    import numpy as np
+    net = _load_network(model)
+    times, values = [], []
+    for start, end in windows:
+        if end - start < .3:
+            continue
+        _, edges, hop = _forward(net, audio, start, end)
+        times.append(start + np.arange(len(edges))*hop); values.append(edges)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    t = np.concatenate(times) if times else np.zeros(0)
+    v = np.concatenate(values) if values else np.zeros(0)
+    np.savez_compressed(output, time=t, edge=v)
+    meta = {'engine': 'SOFA Mandarin v1.0.0 boundary head', 'sourceCommit': net['revision'],
+            'checkpointSha256': sha(model), 'audioSha256': sha(audio), 'windows': len(times),
+            'inputKind': 'audio only (text-free boundary head)', 'referenceNotesUsed': False}
+    output.with_suffix('.json').write_text(json.dumps(meta, indent=2)+'\n')
+    return meta
+
+
+def align(audio: Path, segments: list[dict], model: Path, output: Path):
+    import numpy as np
+    import torch
+    from pypinyin import lazy_pinyin
+
+    net = _load_network(model)
+    source, revision, namespace = net['source'], net['revision'], net['namespace']
+    vocab, sc = net['vocab'], net['sc']
     dictionary_path = source / 'dictionary/opencpop-extension.txt'
     dictionary = dict(line.split('\t', 1) for line in dictionary_path.read_text().strip().splitlines())
     output.mkdir(parents=True, exist_ok=True)
@@ -123,25 +182,14 @@ def align(audio: Path, segments: list[dict], model: Path, output: Path):
             ps = dictionary[syllable].split()
             phones.extend(ps + ['SP']); owners.extend([i] * len(ps) + [-1])
         ids = np.asarray([vocab[p] for p in phones], np.int64)
-        pcm = subprocess.check_output(['ffmpeg', '-v', 'error', '-nostdin', '-ss', str(start), '-t', str(end-start),
-            '-i', str(audio), '-f', 'f32le', '-ac', '1', '-ar', str(sc['sample_rate']), '-'])
-        waveform = torch.from_numpy(np.frombuffer(pcm, dtype='<f4').copy())[None]
-        length = waveform.shape[1] / sc['sample_rate']
+        logits, edges, hop = _forward(net, audio, start, end)
         with torch.inference_mode():
-            features = mel(waveform)
-            features = (features-features.mean())/features.std()
-            features = features.repeat_interleave(sc['scale_factor'], dim=2)
-            logits = head(backbone(features.transpose(1, 2)))
-            count = int((length*sc['scale_factor']*sc['sample_rate']+.5)/sc['hop_length'])
-            logits = logits[0, :count]
             mask = torch.full((vocab['<vocab_size>'],), -1e9)
             mask[ids] = 0; mask[0] = 0
             logp = torch.log_softmax(logits[:, 2:].float()+mask, dim=-1).numpy()
-            edges = ((torch.sigmoid(logits[:, 0])-.1)/.8).clamp(0, 1).numpy()
         edge_diff = np.r_[np.diff(edges), 0]
         edge_prob = np.clip(edges+np.r_[0, edges[:-1]], 0, 1)
         indices, frames, frame_confidence = namespace['decode'](ids, logp, edge_prob)
-        hop = sc['hop_length']/(sc['sample_rate']*sc['scale_factor'])
         times = np.r_[frames+np.clip(edge_diff[frames]/2, -.5, .5), len(logp)]*hop
         aligned = []
         for j, index in enumerate(indices):
@@ -172,8 +220,12 @@ def align(audio: Path, segments: list[dict], model: Path, output: Path):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--audio', type=Path, required=True)
-    parser.add_argument('--segments', type=Path, required=True)
+    parser.add_argument('--segments', type=Path, help='lyric segments for forced alignment')
+    parser.add_argument('--windows', type=Path, help='JSON [[start,end],...] for the text-free boundary curve')
     parser.add_argument('--model', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    align(args.audio, json.loads(args.segments.read_text()), args.model, args.output)
+    if args.windows:
+        boundary_curve(args.audio, [tuple(w) for w in json.loads(args.windows.read_text())], args.model, args.output)
+    else:
+        align(args.audio, json.loads(args.segments.read_text()), args.model, args.output)

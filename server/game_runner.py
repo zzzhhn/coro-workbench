@@ -1,4 +1,11 @@
-"""Isolated GAME 1.0.3 ONNX inference. Accepts fresh audio, never reference scores."""
+"""Isolated GAME 1.0.3 ONNX inference. Accepts fresh audio, never reference scores.
+
+Two official modes share one network call:
+- extract: silence-sliced chunks with only the chunk duration as a known region.
+- align (``--words``): the same Medium network with known word boundaries
+  (DiffSinger-style ``infer.py align``), followed by the official
+  ``align_notes_to_words`` routine from the registered GAME source.
+"""
 from pathlib import Path
 import argparse, hashlib, importlib.util, json, resource, subprocess, time
 import numpy as np
@@ -18,6 +25,8 @@ def main():
     p.add_argument('--steps', type=int, default=8)
     p.add_argument('--max-chunk-seconds', type=float, default=18,
                    help='Maximum unsplit silence-delimited phrase; set 0 to use official silence chunks intact.')
+    p.add_argument('--words', type=Path,
+                   help='Align mode: JSON segments of contiguous {start,end,voiced} word regions (seconds).')
     args = p.parse_args()
     if args.steps < 1: p.error('--steps must be positive')
     cfg=json.loads((args.model/'config.json').read_text()); sr=cfg['samplerate']
@@ -30,6 +39,23 @@ def main():
     sessions={n:ort.InferenceSession(str(args.model/(n+'.onnx')),opt,providers=['CPUExecutionProvider'])
               for n in ['encoder','segmenter','estimator','dur2bd','bd2dur']}
     def run(name,**inputs): return sessions[name].run(None,inputs)
+    def infer(y, known_durations):
+        """One official GAME pass; known_durations sum to the waveform length."""
+        duration=np.array([len(y)/sr],np.float32)
+        xseg,xest,mask=run('encoder',waveform=y[None].astype(np.float32),duration=duration)
+        known,=run('dur2bd',durations=np.asarray(known_durations,np.float32)[None],maskT=mask)
+        boundaries=known
+        for t in np.arange(args.steps,dtype=np.float32)/args.steps:
+            boundaries,=run('segmenter',x_seg=xseg,language=np.array([cfg['languages'][args.language]],np.int64),
+                           known_boundaries=known,prev_boundaries=boundaries,t=np.array([t],np.float32),maskT=mask,
+                           threshold=np.array(.2,np.float32),radius=np.array(2,np.int64))
+        durations,nmask=run('bd2dur',boundaries=boundaries,maskT=mask)
+        presence,scores=run('estimator',x_est=xest,boundaries=boundaries,maskT=mask,maskN=nmask,threshold=np.array(.2,np.float32))
+        assert np.all(np.isfinite(scores)) and np.all(durations>=0)
+        assert abs(float(durations.sum())-float(duration[0])) <= cfg['timestep']*1.1
+        return [(float(d),bool(v),float(s)) for d,v,s,valid in zip(durations[0],presence[0],scores[0],nmask[0]) if valid]
+    if args.words:
+        return align(args, wave, sr, infer)
     spec=importlib.util.spec_from_file_location('official_slicer',args.source/'inference/slicer2.py')
     mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
     chunks=mod.Slicer(sr=sr,threshold=-40,min_length=1000,min_interval=200,max_sil_kept=100).slice(wave)
@@ -48,20 +74,8 @@ def main():
     events=[];segments=[];started=time.monotonic()
     for index,(offset,y,keep_start,keep_end) in enumerate(jobs):
         duration=np.array([len(y)/sr],np.float32)
-        xseg,xest,mask=run('encoder',waveform=y[None].astype(np.float32),duration=duration)
-        known,=run('dur2bd',durations=duration[:,None],maskT=mask)
-        boundaries=known
-        for t in np.arange(args.steps,dtype=np.float32)/args.steps:
-            boundaries,=run('segmenter',x_seg=xseg,language=np.array([cfg['languages'][args.language]],np.int64),
-                           known_boundaries=known,prev_boundaries=boundaries,t=np.array([t],np.float32),maskT=mask,
-                           threshold=np.array(.2,np.float32),radius=np.array(2,np.int64))
-        durations,nmask=run('bd2dur',boundaries=boundaries,maskT=mask)
-        presence,scores=run('estimator',x_est=xest,boundaries=boundaries,maskT=mask,maskN=nmask,threshold=np.array(.2,np.float32))
-        assert np.all(np.isfinite(scores)) and np.all(durations>=0)
-        assert abs(float(durations.sum())-float(duration[0])) <= cfg['timestep']*1.1
         cursor=0.; records=[]
-        for d,voiced,score,valid in zip(durations[0],presence[0],scores[0],nmask[0]):
-            if not valid: continue
+        for d,voiced,score in infer(y,duration):
             left=cursor;cursor+=float(d)
             records.append({'start':left,'end':cursor,'voiced':bool(voiced),'midiFloat':float(score)})
             if voiced and keep_start<=left<keep_end:
@@ -82,5 +96,58 @@ def main():
     result['runnerVersion']='game-import-1'
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+
+
+def align(args, wave, sr, infer):
+    """Official GAME align over known word regions; one call per lyric segment.
+
+    Word regions come from a forced aligner over audio and text only. The
+    official routine decides note/word membership and slurs; Coro deletes or
+    retimes nothing here. Unaligned network regions are kept for audit.
+    """
+    import librosa
+    spec=importlib.util.spec_from_file_location('official_game_utils',args.source/'inference/utils.py')
+    official=importlib.util.module_from_spec(spec);spec.loader.exec_module(official)
+    segments=json.loads(args.words.read_text());rows=[];started=time.monotonic()
+    for index,segment in enumerate(segments):
+        words=segment['words']
+        if not words or any(abs(a['end']-b['start'])>1e-6 for a,b in zip(words,words[1:])):
+            raise ValueError(f"Align segment {segment.get('id',index)} needs contiguous word regions")
+        begin,end=words[0]['start'],words[-1]['end']
+        y=wave[round(begin*sr):round(end*sr)]
+        word_dur=[w['end']-w['start'] for w in words]
+        word_vuv=[int(bool(w['voiced'])) for w in words]
+        # As the official dataset does, merge consecutive unvoiced words before
+        # inference (GAME has no boundaries inside unvoiced regions).
+        known,_=official.merge_consecutive_uv_words(word_dur,word_vuv)
+        scale=(len(y)/sr)/sum(known)
+        notes=infer(y,[d*scale for d in known])
+        note_dur=[d for d,_,_ in notes]
+        note_seq=[librosa.midi_to_note(s,unicode=False,cents=True) if v else 'rest' for _,v,s in notes]
+        # uv-note-cond "predict" (official default): model presence decides rests.
+        aligned_seq,aligned_dur,slur=official.align_notes_to_words(word_dur,word_vuv,note_seq,note_dur,
+                                                                    apply_word_uv=False)
+        cursor=begin;word_index=-1;out=[]
+        for name,d,s in zip(aligned_seq,aligned_dur,slur):
+            if not s:word_index+=1
+            if name!='rest':
+                midi_float=float(librosa.note_to_midi(name,round_midi=False))
+                out.append({'start':args.start+cursor,'end':args.start+cursor+d,'midi':int(np.rint(midi_float)),
+                            'midiFloat':midi_float,'slur':bool(s),'wordIndex':word_index,'segment':index})
+            cursor+=d
+        rows.append({'id':segment.get('id',str(index)),'startSeconds':args.start+begin,'endSeconds':args.start+end,
+                     'wordBoundaries':[args.start+w['start'] for w in words],'wordVoiced':word_vuv,'notes':out,
+                     'unalignedRegions':[{'duration':d,'voiced':v,'midiFloat':s} for d,v,s in notes]})
+        print(f'align {index+1}/{len(segments)} at {begin:.2f}s notes={len(out)} elapsed={time.monotonic()-started:.1f}s',flush=True)
+    result={'mode':'align','model':args.model.name,'sourceAudio':str(args.audio.resolve()),
+            'sourceSha256':hashlib.file_digest(args.audio.open('rb'),'sha256').hexdigest(),
+            'modelHashes':{q.name:hashlib.file_digest(q.open('rb'),'sha256').hexdigest() for q in args.model.glob('*.onnx')},
+            'language':args.language,'steps':args.steps,'thresholds':[.2,.2],'uvNoteCond':'predict',
+            'officialAlignment':'inference/utils.py align_notes_to_words','referenceUsed':False,
+            'seconds':len(wave)/sr,'elapsedSeconds':time.monotonic()-started,'segments':rows,
+            'runnerVersion':'game-align-1'}
+    args.output.parent.mkdir(parents=True,exist_ok=True)
+    args.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+
 
 if __name__=='__main__': main()
