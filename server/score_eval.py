@@ -189,7 +189,7 @@ def main(argv=None) -> int:
                              'Single global alignment; tempo drift in the recording is not modelled.']
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
+        args.output.write_text(json.dumps(report, ensure_ascii=False, indent=1, default=int) + '\n')
     for role in tracks:
         print(f'\n[{role}] exact/ref, F, written dotted notes')
         print(format_table(report, role))
