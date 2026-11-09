@@ -4,6 +4,7 @@ import { encodeWav } from '../src/lib/audio';
 const realStorage = window.localStorage;
 const rescued = new URLSearchParams(location.search).has('rescued');
 const phonemeFixture = new URLSearchParams(location.search).get('phoneme');
+const gameFixture = new URLSearchParams(location.search).get('game');
 const prefix = rescued ? 'coro-test-rescued-review:' : 'coro-test-review:';
 Object.defineProperty(window, 'localStorage', {
   configurable: true,
@@ -60,9 +61,11 @@ for (let i = 0; i < 16000; i++)
 const wave = Uint8Array.from(encodeWav(audio));
 window.fetch = async (input, init) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-  if (url === '/api/health') return Response.json(phonemeFixture
+  if (url === '/api/health') return Response.json(phonemeFixture || gameFixture
     ? { status: 'ok', localOnly: true, engines: { ffmpeg: { ready: true }, basicPitch: { ready: true },
-        demucs: { ready: true }, yourMT3: { ready: true }, quality: { ready: true }, phonemeNotes: { ready: phonemeFixture === 'ready' } } }
+        demucs: { ready: true }, yourMT3: { ready: true }, quality: { ready: true },
+        game: { ready: gameFixture === 'ready', lyricsReady: false },
+        phonemeNotes: { ready: phonemeFixture === 'ready' } } }
     : { status: 'setup_required', localOnly: true, engines: {} });
   if (url.startsWith('/api/projects?')) return Response.json({ projects: [] });
   if (url === `/api/audio/${jobId}/original.wav`)

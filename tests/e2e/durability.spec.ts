@@ -111,7 +111,7 @@ test('whole-song multi import defaults to 600 seconds and clamps other modes', a
     submitted = route.request().postData() ?? '';
     await route.fulfill({ status: 422, json: { detail: '已记录测试请求' } });
   });
-  await page.goto('/tests/browser-review.html?phoneme=ready');
+  await page.goto('/tests/browser-review.html?phoneme=ready&game=ready');
   await page.getByRole('button', { name: '工程库', exact: true }).click();
   await page.getByRole('button', { name: '导入音乐', exact: true }).click();
   await page.getByLabel('选择音乐文件').setInputFiles({ name: 'full-song.wav', mimeType: 'audio/wav', buffer: Buffer.from('RIFF-test-audio') });
@@ -135,6 +135,7 @@ test('whole-song multi import defaults to 600 seconds and clamps other modes', a
   await expect(page.getByText('已记录测试请求', { exact: true })).toBeVisible();
   expect(submitted).toMatch(/name="max_seconds"\r\n\r\n600/);
   expect(submitted).toMatch(/name="mode"\r\n\r\nmulti/);
+  expect(submitted).toMatch(/name="decoder"\r\n\r\ngame/);
 });
 test('a rescued vocal remains reviewable without offering an invalid empty baseline', async ({ page }) => {
   await page.goto('/tests/browser-review.html?rescued=1');
@@ -155,10 +156,14 @@ for (const ready of [false, true]) {
       name: 'synthetic.wav', mimeType: 'audio/wav', buffer: Buffer.from('RIFF-test-audio'),
     });
     await page.getByRole('radio', { name: /分轨转谱/ }).click();
-    await expect(page.getByLabel('主唱分段策略')).toHaveValue(ready ? 'phoneme' : 'standard');
+    await expect(page.getByLabel('主唱分段策略')).toHaveValue('game');
+    await expect(page.getByRole('button', { name: '开始转谱', exact: true })).toBeDisabled();
     await expect(page.getByRole('option', { name: /词音节奏/ })).toBeDisabled();
     if (ready) await expect(page.getByRole('option', { name: /发音边界/ })).toBeEnabled();
     else await expect(page.getByRole('option', { name: /发音边界/ })).toBeDisabled();
+    // Missing GAME must not silently select a legacy engine. A deliberate
+    // comparison choice still works when that engine is available.
+    await page.getByLabel('主唱分段策略').selectOption(ready ? 'phoneme' : 'standard');
     await expect(page.getByRole('button', { name: '开始转谱', exact: true })).toBeEnabled();
   });
 }
