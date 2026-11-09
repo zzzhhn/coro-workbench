@@ -16,18 +16,16 @@ flowchart TD
   B --> SEP[Demucs htdemucs_6s stems · recognition]
   B --> MT[YourMT3+ multi-instrument · recognition]
 
-  subgraph Vocal["Lead vocal · branch codex/vocal-reattack-align"]
+  subgraph Vocal["Lead vocal · syllable-phrasing-4 + evidence (merged, PR #6)"]
     SEP --> GE[GAME 1.0.3 Medium extract · recognition]
     SEP --> FC[FCPE f0 evidence · recognition]
-    LRC[User LRC] --> SOFA[SOFA word boundaries · recognition]
-    ASR[Local whisper LRC draft] -.-> LRC
-    SOFA -.->|known boundaries| GA[GAME align · recognition]
-    SEP -.-> RX[Re-attack evidence: flux + pitch stability + syllables · recognition]
+    LRC[User LRC] --> SOFA[SOFA word boundaries, content-pinned · recognition]
+    ASR[Local whisper LRC draft · offline only] -.-> LRC
     GE --> SS[singing_score · notation inference]
-    GA -.-> SS
-    RX -.-> SS
     FC --> SS
     SOFA --> SS
+    SS --> EVD[After notation: GAME align + text-free syllable edges saved as evidence · recognition]
+    EVD -.->|future fusion, rule fixed first| RX[Re-attack decision · open]
   end
 
   subgraph Piano["Piano · multiscore-rhythm-5 (merged, PR #4 + #5)"]
