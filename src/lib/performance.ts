@@ -1,9 +1,31 @@
 import { notesWithActiveDynamics } from './dynamics';
 import type { NoteEvent, ScorePart } from './types';
 
+/** Damper pedal: a released key keeps sounding while the pedal is down, until
+ * the pedal lifts or the same key is struck again. Written values stay the
+ * finger gates; only playback length changes. */
+export function pedalSustained(notes: NoteEvent[], pedals: ScorePart['pedals']): NoteEvent[] {
+  if (!pedals?.length) return notes;
+  const nextSamePitch = new Map<number, number[]>();
+  for (const note of notes)
+    if (note.midi !== null) (nextSamePitch.get(note.midi) ?? nextSamePitch.set(note.midi, []).get(note.midi)!).push(note.start);
+  for (const starts of nextSamePitch.values()) starts.sort((a, b) => a - b);
+  return notes.map((note) => {
+    if (note.midi === null || note.velocity <= 0) return note;
+    const release = note.start + note.duration;
+    // The pedal must be down at the key release and continue past it. A pedal
+    // change exactly at the release lifts the dampers then: no extension.
+    const pedal = pedals.find((p) => p.start < release - 1e-6 && p.end > release + 1e-6);
+    if (!pedal) return note;
+    const restrike = nextSamePitch.get(note.midi)!.find((start) => start > note.start + 1e-6);
+    const end = Math.min(pedal.end, restrike ?? Infinity);
+    return end > release + 1e-6 ? { ...note, duration: end - note.start } : note;
+  });
+}
+
 export function performanceNotes(part: ScorePart, tempo: number): NoteEvent[] {
   // Resolve printed dynamics at the written beat before moving any attacks.
-  const notes = notesWithActiveDynamics(part);
+  const notes = pedalSustained(notesWithActiveDynamics(part), part.pedals);
   if (part.role === 'percussion') return notes;
 
   const rolls = new Map<number, Array<{ note: NoteEvent; index: number }>>();

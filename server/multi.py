@@ -97,6 +97,12 @@ def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, 
             audits[part_id]['rhythmEvidence'] = MONOPHONIC_LEAD
         if program in (0, 2) and not drum:
             part['staves'] = [{'number': 1, 'clef': 'treble'}, {'number': 2, 'clef': 'bass'}]
+            if readable and pedals:
+                from .score_rhythm import notated_pedals
+                total = max((n['start'] + n['duration'] for n in notes), default=0.)
+                marks = notated_pedals(pedals, 60 / float(grid['bpm']), float(grid['offsetSeconds']), total)
+                if marks:
+                    part['pedals'] = marks
             for note in notes:
                 note.setdefault('staff', 1 if note['midi'] >= 60 else 2)
         parts.append(part)

@@ -10,7 +10,7 @@ from bisect import bisect_left
 import math
 import statistics
 
-VERSION = 'multiscore-rhythm-6'
+VERSION = 'multiscore-rhythm-7'
 TICKS = 960
 
 
@@ -451,6 +451,65 @@ def _keyboard_written_releases(notes, changes, spb, offset):
                 change.update(reason='terminal_keyboard_handoff',scoreEndSeconds=offset+boundary*spb)
 
 
+PEDAL_TOLERANCE = .12
+
+
+def notated_pedals(pedals, spb, offset, total_beats):
+    """Measured sustain-pedal intervals on the written grid (sixteenths), for Ped./* marks.
+
+    A release and re-press closer than a sixteenth is a pedal change: the
+    previous interval ends where the next begins.
+    """
+    rows = []
+    for pedal in sorted(pedals or [], key=lambda p: p['onset_time']):
+        start = max(0., round((pedal['onset_time'] - offset) / spb * 4) / 4)
+        end = min(total_beats, round((pedal['offset_time'] - offset) / spb * 4) / 4)
+        if end - start < .25:
+            continue
+        if rows and start - rows[-1]['end'] < .25:
+            start = max(start, rows[-1]['end'])
+            if end <= start:
+                continue
+            if start < rows[-1]['end']:
+                rows[-1]['end'] = start
+        rows.append({'start': start, 'end': end})
+    return [r for r in rows if r['end'] - r['start'] >= .25]
+
+
+def _finger_gates_under_pedal(notes, changes, spb, offset, pedals):
+    """Write the finger gate, not the pedal resonance (keyboard only).
+
+    A note whose written value runs past the same hand's next attack is ended
+    at that attack when a measured pedal is down there: the key was released
+    for the next attack and the pedal carries the sound. Without a pedal, or
+    without a later attack in that hand, the inferred value stays. Only
+    shortens; never adds, removes or moves an attack.
+    """
+    if not pedals or spb is None:
+        return 0
+    def pedal_down(seconds):
+        # The pedal must already be down when the hand re-attacks (a press up to
+        # 0.12 s after the attack still catches the released key) and remain down.
+        return any(p['onset_time'] - PEDAL_TOLERANCE <= seconds < p['offset_time'] for p in pedals)
+    count = 0
+    for staff in (1, 2):
+        owned = [(n, c) for n, c in zip(notes, changes) if n.get('staff') == staff]
+        starts = sorted(set(n['start'] for n, _ in owned))
+        for note, change in owned:
+            end = note['start'] + note['duration']
+            later = [t for t in starts if note['start'] + 1e-6 < t < end - 1e-6]
+            if not later:
+                continue
+            cut = later[0]
+            if not pedal_down(offset + cut * spb):
+                continue
+            note['duration'] = round(cut - note['start'], 9)
+            note['pedalSustain'] = True
+            change.update(reason='keyboard_finger_gate_under_pedal', scoreEndSeconds=offset + cut * spb)
+            count += 1
+    return count
+
+
 def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
                       *, percussion: bool = False, program: int = 0,
                       pedals: list[dict] | None = None) -> tuple[list[dict], dict]:
@@ -672,8 +731,10 @@ def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
         _keyboard_written_releases(notes,changes,spb,offset)
     rapid = [n for n in notes if n['duration'] <= .25]
     sustained = [n for n in notes if n['duration'] >= .75]
+    finger_gates = 0
     if program in (0, 2) and not percussion:
         assign_keyboard_staves(notes)
+        finger_gates = _finger_gates_under_pedal(notes, changes, spb, offset, pedals)
         keyboard_voices(notes, changes, spb, offset, pedals)
     elif len(rapid) >= max(16, len(notes) * .25) and len(sustained) >= 8 and not percussion:
         # Joint decoders can put several instruments of the same class in one
@@ -737,4 +798,5 @@ def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
                    'detachedPattern': detached_pattern, 'noAttackDeduplication': True,
                    'maximumOnsetShiftSeconds': max((abs(c['scoreStartSeconds'] - c['sourceStartSeconds']) for c in changes), default=0),
                    'maximumOffsetShiftSeconds': max((abs(c['scoreEndSeconds'] - c['sourceEndSeconds']) for c in changes), default=0),
+                   'fingerGatesUnderPedal': finger_gates,
                    'boundaryChanges': changes}

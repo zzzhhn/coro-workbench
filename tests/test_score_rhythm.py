@@ -292,12 +292,15 @@ def test_inner_finger_hold_does_not_require_pedal_evidence():
     assert inner['duration'] == 2
 
 
-def test_pedal_detection_does_not_override_the_notes_own_refined_release():
+def test_pedal_down_writes_the_finger_gate_and_marks_pedal_sustain():
+    # Option B (Bobby 2026-11-10): under a measured pedal the written value is
+    # the finger gate to the hand's next attack; the pedal carries the sound.
     pedal = [{'onset_time': 0., 'offset_time': 1.2}]
     notes, audit = infer_part_rhythm(_inner_hold_rows(), {'bpm': 120, 'offsetSeconds': 0}, 20, 't',
                                      program=0, pedals=pedal)
     inner = next(n for n in notes if n['midi'] == 48)
-    assert inner['duration'] == 2 and inner['voice'] == '2'
+    assert inner['duration'] == 1 and inner['pedalSustain'] is True
+    assert audit['fingerGatesUnderPedal'] >= 1
     assert len(notes) == len(_inner_hold_rows())
     for staff in (1, 2):
         assert len({n['voice'] for n in notes if n['staff'] == staff}) <= 2
@@ -310,3 +313,10 @@ def test_pedal_detection_does_not_override_the_notes_own_refined_release():
     rows[0] = [0, .55, 48, .8]
     notes, _ = infer_part_rhythm(rows, {'bpm': 120, 'offsetSeconds': 0}, 20, 't', program=0, pedals=pedal)
     assert next(n for n in notes if n['midi'] == 48)['duration'] <= 1
+
+
+def test_notated_pedals_quantise_and_treat_quick_repress_as_a_change():
+    from server.score_rhythm import notated_pedals
+    marks = notated_pedals([{'onset_time': .02, 'offset_time': 1.98}, {'onset_time': 2.03, 'offset_time': 3.0},
+                            {'onset_time': 5.0, 'offset_time': 5.05}], .5, 0., 20)
+    assert marks == [{'start': 0.0, 'end': 4.0}, {'start': 4.0, 'end': 6.0}]

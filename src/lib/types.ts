@@ -40,6 +40,9 @@ export interface ScorePart {
   range?: [number, number];
   stemUrl?: string;
   staves?: Array<{ number: number; clef: Clef }>;
+  /** Measured sustain-pedal intervals in beats (keyboard). Notes keep finger
+   * gates; the pedal carries their resonance in playback and is printed as Ped./*. */
+  pedals?: Array<{ start: number; end: number }>;
 }
 
 export interface ChordEvent {
