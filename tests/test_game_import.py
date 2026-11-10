@@ -84,6 +84,12 @@ def test_real_multi_orchestration_calls_game_after_instruments_and_propagates_fa
         if fail_game:raise ValueError('GAME failed explicitly')
         return replace_lead(project,[{'id':'g1','midi':65,'start':0,'duration':1}],{'lyricsProvided':False},request['id'])
     monkeypatch.setattr(game,'transcribe_lead',singing)
+    from server import backing_harmony
+    backing_calls=[]
+    def backing(directory,project,request,status):
+        backing_calls.append(project['parts'][0]['id'])
+        return project
+    monkeypatch.setattr(backing_harmony,'transcribe_backing_line',backing)
     class Status:
         def update(self,*a):pass
         def check_cancelled(self):pass
@@ -97,4 +103,6 @@ def test_real_multi_orchestration_calls_game_after_instruments_and_propagates_fa
         assert result['parts'][0]['id']=='game-vocals'
         assert json.loads((tmp_path/'analysis-evidence.json').read_text())['decoderRequested']=='game'
     assert called==['game']
+    # The backing line runs only after the lead is final, and never on a failed GAME.
+    assert backing_calls==([] if fail_game else ['game-vocals'])
     assert (tmp_path/'raw-project.json').is_file()

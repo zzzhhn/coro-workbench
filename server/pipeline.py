@@ -394,6 +394,10 @@ def analyze_audio(directory: Path, request: dict, status: JobStatus) -> dict:
         # score while reporting this model as used. Raw instrument output survives.
         from .game import transcribe_lead
         project = transcribe_lead(directory, project, request, status)
+        if request.get('mode') == 'multi':
+            # Optional addition after the lead is final; failures only warn.
+            from .backing_harmony import transcribe_backing_line
+            project = transcribe_backing_line(directory, project, request, status)
     if not any(part["notes"] for part in project["parts"]):
         raise ValueError("基础模型和主唱模型均未检出可用音符，请换用更清晰的片段；未生成空谱或示例音符。")
     atomic_json(directory / "project.json", project)
