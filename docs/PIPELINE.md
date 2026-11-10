@@ -57,34 +57,43 @@ once and abandoned: 45–54 exact 58 → 57, whole song 239 → 232, same-pitch
 re-attacks 67 → 64. Audio rules alone cannot tell a word attack from a
 scoop there; lyric/SOFA syllable evidence is needed.
 
-## Next: lead and backing voices (planned)
+## 2026-11-10 evening: backing-vocal line (`backing-dominant-line-1`)
 
-Bobby heard at least one lead and two harmony voices in bars 55–66. The
-whole Demucs vocal stem currently goes to GAME, a monophonic model, so the
-harmony is either dropped or leaks into the lead. Planned chain, to be
-A/B-tested before it reaches the formal upload:
+Bobby heard at least one lead and two harmony voices in bars 55–66. GAME is a
+monophonic model, so the full vocal stem gives one line. Each step below was
+written down before its numbers were seen and run once.
+
+| Step | Layer | Result | Decision |
+|---|---|---|---|
+| Lead from the KARA2 lead stem instead of the full stem | recognition input | 1–70 exact 239 → 238; 45–54 58 → 54 | rejected; lead stays on the full stem |
+| Lead/backing separator: KARA2 vs becruily Mel karaoke (same Demucs stem) | recognition | Bobby's blind listen preferred KARA2 overall; becruily's backing carried more lead-pitch notes | KARA2 |
+| Backing → YourMT3+ → joint two-voice assignment | recognition + notation | YourMT3+ decoded the backing as one voice (92 notes, no overlaps): A 83, B 0 | rejected |
+| Backing → Basic Pitch → same assignment | recognition + notation | A 198, B 27; 40% of notes ≤ 1/32, rendered score unreadable | rejected |
+| Backing → GAME Medium 8 steps → shared singing notation | recognition + notation | 78 notes, 3.8% ≤ 1/32 (lead 6.2%), no notes in the no-backing control bars, 0 lead duplicates in 55–66 | adopted |
+
+What ships in the formal multi upload, after the GAME lead is final:
 
 ```mermaid
 flowchart TD
-  V[Demucs vocal stem] --> K[Lead/backing separation · recognition]
-  K --> L[Lead stem]
+  V[Demucs vocal stem] --> G[GAME Medium 8 steps · recognition]
+  G --> SS[singing_score, lead · notation inference]
+  V --> K[KARA2 lead/backing split · recognition]
   K --> BK[Backing stem]
-  L --> G[GAME Medium 8 steps · recognition]
-  G --> SS[singing_score · notation inference]
-  BK --> GATE{Backing present? energy + voicing per phrase · recognition}
-  GATE -->|yes| MP[Multi-pitch on backing · recognition]
-  MP --> VA[Voice assignment by pitch continuity · notation inference]
-  VA --> H1[Harmony 1]
-  VA --> H2[Harmony 2]
-  GATE -->|no| REST[Rests]
-  SS --> PRJ[Lead + harmony staves · part presentation]
-  H1 --> PRJ
-  H2 --> PRJ
+  BK --> BG[GAME Medium 8 steps on backing · recognition]
+  BK --> BF[FCPE on backing · recognition]
+  BG --> BS[singing_score, no lyrics · notation inference]
+  BF --> BS
+  SS --> PRJ[Lead · Harmony backing line · instruments]
+  BS --> PRJ
+  BS -. failure .-> W[warning only; lead and instruments unchanged]
 ```
 
-The hand reference has no harmony voices, so harmony acceptance is by ear.
-The lead must not get worse against the reference when it is transcribed
-from the separated lead stem instead of the full vocal stem.
+The part is named “和声 · 伴唱主导线” and plays the backing stem as its
+reference audio. It is one line: when two backing voices sing at once it
+follows the dominant one. The second harmony is not recovered and is not
+invented. Recovering it needs a recognizer that is polyphonic for voices;
+the two multi-pitch models tried here fail in recognition, not assignment.
+The hand reference has no harmony voices, so the harmony is accepted by ear.
 
 ## 2026-11-10 piano regression repair
 
