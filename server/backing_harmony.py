@@ -43,7 +43,6 @@ def insert_after_lead(project: dict, part: dict) -> dict:
 def transcribe_backing_line(directory: Path, project: dict, request: dict, status) -> dict:
     import numpy as np
     from .game import model_root, run_helper
-    from .lead_separation import separate_lead_backing
     from .singing_evidence import acoustic_evidence
     from .singing_pipeline import build_singing_notes
 
@@ -61,6 +60,8 @@ def transcribe_backing_line(directory: Path, project: dict, request: dict, statu
     try:
         backing = directory / 'stem-backing.wav'
         if not backing.is_file():
+            # Optional ONNX runtime: a missing package must only skip this part.
+            from .lead_separation import separate_lead_backing
             status.update(98, 'vocal-identity', '正在从人声中分出伴唱（KARA2），主唱不受影响。')
             separation = separate_lead_backing(stem, model, destination / 'kara2', status.check_cancelled)
             for name in ('lead', 'backing'):
