@@ -25,7 +25,7 @@ export function pedalSustained(notes: NoteEvent[], pedals: ScorePart['pedals']):
 
 export function performanceNotes(part: ScorePart, tempo: number): NoteEvent[] {
   // Resolve printed dynamics at the written beat before moving any attacks.
-  const notes = pedalSustained(notesWithActiveDynamics(part), part.pedals);
+  const notes = pedalSustained(notesWithActiveDynamics(part), part.pedalSustain ?? part.pedals);
   if (part.role === 'percussion') return notes;
 
   const rolls = new Map<number, Array<{ note: NoteEvent; index: number }>>();

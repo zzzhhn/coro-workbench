@@ -236,6 +236,12 @@ export function validateProject(project: ScoreProject): string[] {
         ))
     )
       problems.push(`${part.name}: 踏板记号无效。`);
+    if (
+      part.pedalSustain !== undefined &&
+      (!Array.isArray(part.pedalSustain) || part.pedalSustain.length > 20_000 ||
+        part.pedalSustain.some((p) => !p || !Number.isFinite(p.start) || !Number.isFinite(p.end) || p.start < 0 || p.end <= p.start))
+    )
+      problems.push(`${part.name}: 踏板延音数据无效。`);
     if (!Array.isArray(part.notes)) {
       problems.push(`${part.name}: 音符列表无效。`);
       continue;

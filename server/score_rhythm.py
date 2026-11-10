@@ -454,26 +454,64 @@ def _keyboard_written_releases(notes, changes, spb, offset):
 PEDAL_TOLERANCE = .12
 
 
-def notated_pedals(pedals, spb, offset, total_beats):
-    """Measured sustain-pedal intervals on the written grid (sixteenths), for Ped./* marks.
+PEDAL_MERGE_GAP = .4
 
-    A release and re-press closer than a sixteenth is a pedal change: the
-    previous interval ends where the next begins.
+
+def notated_pedals(pedals, spb, offset, total_beats, chord_starts=()):
+    """Printable sustain pedal on the written grid (beats), for Ped./* marks.
+
+    Detected pedal intervals are fragmented (gaps of ~0.1 s between them are
+    mostly detector noise or quick re-pedals). Gaps under PEDAL_MERGE_GAP join
+    into one depression. A pedal change is kept only where the harmony
+    changes and a measured release falls within an eighth of that change.
+    Marks are snapped to sixteenths; anything shorter than a quarter beat is
+    not printed. Playback uses these same printed intervals.
     """
+    measured = sorted(pedals or [], key=lambda p: p['onset_time'])
+    if not measured:
+        return []
+    beat = lambda seconds: (seconds - offset) / spb
+    merged = [[measured[0]['onset_time'], measured[0]['offset_time'], []]]
+    for pedal in measured[1:]:
+        if pedal['onset_time'] - merged[-1][1] < PEDAL_MERGE_GAP:
+            merged[-1][2].append(merged[-1][1])  # an internal re-pedal at this release
+            merged[-1][1] = max(merged[-1][1], pedal['offset_time'])
+        else:
+            merged.append([pedal['onset_time'], pedal['offset_time'], []])
+    chords = sorted(set(chord_starts))
+    rows = []
+    for on, off_, releases in merged:
+        start = max(0., round(beat(on) * 4) / 4)
+        end = min(total_beats, round(beat(off_) * 4) / 4)
+        cuts = []
+        for release in releases:
+            at = beat(release)
+            change = next((c for c in chords if abs(c - at) <= .125 and start < c < end), None)
+            if change is not None and change not in cuts:
+                cuts.append(change)
+        points = [start, *sorted(cuts), end]
+        for a, b in zip(points, points[1:]):
+            if b - a >= .25:
+                rows.append({'start': a, 'end': b})
+    # Snapped neighbours may overlap; a later press starts a change there.
+    for a, b in zip(rows, rows[1:]):
+        if b['start'] < a['end']:
+            a['end'] = b['start']
+    return [r for r in rows if r['end'] - r['start'] >= .25]
+
+
+def sounding_pedals(pedals, spb, offset, total_beats):
+    """Measured pedal intervals in beats for playback resonance (1/32 grid)."""
     rows = []
     for pedal in sorted(pedals or [], key=lambda p: p['onset_time']):
-        start = max(0., round((pedal['onset_time'] - offset) / spb * 4) / 4)
-        end = min(total_beats, round((pedal['offset_time'] - offset) / spb * 4) / 4)
-        if end - start < .25:
-            continue
-        if rows and start - rows[-1]['end'] < .25:
-            start = max(start, rows[-1]['end'])
-            if end <= start:
-                continue
-            if start < rows[-1]['end']:
-                rows[-1]['end'] = start
-        rows.append({'start': start, 'end': end})
-    return [r for r in rows if r['end'] - r['start'] >= .25]
+        start = max(0., round((pedal['onset_time'] - offset) / spb * 8) / 8)
+        end = min(total_beats, round((pedal['offset_time'] - offset) / spb * 8) / 8)
+        if end > start:
+            if rows and start < rows[-1]['end']:
+                start = rows[-1]['end']
+            if end > start:
+                rows.append({'start': start, 'end': end})
+    return rows
 
 
 def _finger_gates_under_pedal(notes, changes, spb, offset, pedals):

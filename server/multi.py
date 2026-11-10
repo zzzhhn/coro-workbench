@@ -26,7 +26,8 @@ INSTRUMENT_NAMES = {
 
 
 def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, readable: bool = False,
-                            pedals: list[dict] | None = None) -> tuple[list[dict], dict]:
+                            pedals: list[dict] | None = None,
+                            chord_starts: list[float] | None = None) -> tuple[list[dict], dict]:
     """Preserve decoded classes and attacks, with bounded or editorial rhythm."""
     grouped = {}
     source_labels = {}
@@ -100,9 +101,12 @@ def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, 
             if readable and pedals:
                 from .score_rhythm import notated_pedals
                 total = max((n['start'] + n['duration'] for n in notes), default=0.)
-                marks = notated_pedals(pedals, 60 / float(grid['bpm']), float(grid['offsetSeconds']), total)
+                marks = notated_pedals(pedals, 60 / float(grid['bpm']), float(grid['offsetSeconds']), total,
+                                       chord_starts=chord_starts or ())
                 if marks:
                     part['pedals'] = marks
+                    from .score_rhythm import sounding_pedals
+                    part['pedalSustain'] = sounding_pedals(pedals, 60 / float(grid['bpm']), float(grid['offsetSeconds']), total)
             for note in notes:
                 note.setdefault('staff', 1 if note['midi'] >= 60 else 2)
         parts.append(part)

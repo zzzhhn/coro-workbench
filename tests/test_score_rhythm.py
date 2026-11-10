@@ -315,8 +315,13 @@ def test_pedal_down_writes_the_finger_gate_and_marks_pedal_sustain():
     assert next(n for n in notes if n['midi'] == 48)['duration'] <= 1
 
 
-def test_notated_pedals_quantise_and_treat_quick_repress_as_a_change():
+def test_notated_pedals_merge_detector_gaps_and_change_only_at_harmony():
     from server.score_rhythm import notated_pedals
-    marks = notated_pedals([{'onset_time': .02, 'offset_time': 1.98}, {'onset_time': 2.03, 'offset_time': 3.0},
-                            {'onset_time': 5.0, 'offset_time': 5.05}], .5, 0., 20)
+    # 0.5 s per beat. Three detected fragments with short gaps form one press;
+    # the re-pedal at 2.0 s (beat 4) coincides with a chord change and is kept,
+    # the one at 1.0 s (beat 2) has no chord change and is merged away.
+    pedals = [{'onset_time': .02, 'offset_time': .98}, {'onset_time': 1.05, 'offset_time': 1.98},
+              {'onset_time': 2.06, 'offset_time': 3.0}, {'onset_time': 5.0, 'offset_time': 5.05}]
+    marks = notated_pedals(pedals, .5, 0., 20, chord_starts=[0, 4])
     assert marks == [{'start': 0.0, 'end': 4.0}, {'start': 4.0, 'end': 6.0}]
+    assert notated_pedals(pedals, .5, 0., 20) == [{'start': 0.0, 'end': 6.0}]
