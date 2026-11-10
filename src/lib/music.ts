@@ -227,6 +227,21 @@ export function validateProject(project: ScoreProject): string[] {
         new Set(part.staves.map((staff) => staff.number)).size !== part.staves.length)
     )
       problems.push(`${part.name}: 多谱表定义无效。`);
+    if (
+      part.pedals !== undefined &&
+      (!Array.isArray(part.pedals) ||
+        part.pedals.length > 10_000 ||
+        part.pedals.some(
+          (pedal) => !pedal || !Number.isFinite(pedal.start) || !Number.isFinite(pedal.end) || pedal.start < 0 || pedal.end <= pedal.start,
+        ))
+    )
+      problems.push(`${part.name}: 踏板记号无效。`);
+    if (
+      part.pedalSustain !== undefined &&
+      (!Array.isArray(part.pedalSustain) || part.pedalSustain.length > 20_000 ||
+        part.pedalSustain.some((p) => !p || !Number.isFinite(p.start) || !Number.isFinite(p.end) || p.start < 0 || p.end <= p.start))
+    )
+      problems.push(`${part.name}: 踏板延音数据无效。`);
     if (!Array.isArray(part.notes)) {
       problems.push(`${part.name}: 音符列表无效。`);
       continue;
@@ -598,6 +613,20 @@ export interface AbcLayoutOptions {
   measureNumberOffset?: number;
 }
 
+/** Printed sustain-pedal marks: "Ped." at a press, "*" at a release; a release
+ * immediately followed by a press is a pedal change ("* Ped." at one point). */
+export function pedalMarks(pedals: Array<{ start: number; end: number }>): Array<{ at: number; label: string }> {
+  const marks: Array<{ at: number; label: string }> = [];
+  const sorted = [...pedals].filter((p) => p.end > p.start).sort((a, b) => a.start - b.start);
+  sorted.forEach((pedal, index) => {
+    const previous = sorted[index - 1];
+    if (previous && Math.abs(previous.end - pedal.start) < EPSILON) marks[marks.length - 1].label = '* Ped.';
+    else marks.push({ at: pedal.start, label: 'Ped.' });
+    marks.push({ at: pedal.end, label: '*' });
+  });
+  return marks;
+}
+
 export function toAbc(
   project: ScoreProject,
   partIds?: string[],
@@ -640,8 +669,18 @@ export function toAbc(
     lanes: staff.voices.map((voice) => ({ ...voice, lane: voice.groups })),
   }));
   const harmonyVoiceId = displayedHarmony.length ? 'CoroHarmony' : undefined;
+  // Ped./* marks ride in an invisible annotation voice on each pedalled part's
+  // lowest staff. It carries no notes, so playback and note mapping are unchanged.
+  const pedalVoiceIds = new Map<(typeof voices)[number], string>();
+  parts.forEach((part, partIndex) => {
+    if (!part.pedals?.length) return;
+    const staves = voices.filter((staff) => staff.part.id === part.id);
+    const lowest = staves[staves.length - 1];
+    if (lowest && lowest.clef !== 'percussion') pedalVoiceIds.set(lowest, `CoroPedal${partIndex + 1}`);
+  });
   const staffVoiceIds = (staff: (typeof voices)[number]): string[] => [
     ...staff.lanes.map((lane) => lane.id),
+    ...(pedalVoiceIds.has(staff) ? [pedalVoiceIds.get(staff)!] : []),
     ...(staff === voices[0] && harmonyVoiceId ? [harmonyVoiceId] : []),
   ];
   const staffExpression = (staff: (typeof voices)[number]): string => {
@@ -677,6 +716,7 @@ export function toAbc(
   // label must not split the singer's note into artificial tied fragments.
   if (harmonyVoiceId)
     abc += `V:${harmonyVoiceId} clef=${voices[0].clef === 'percussion' ? 'perc' : voices[0].clef} stems=up\n`;
+  for (const [staff, id] of pedalVoiceIds) abc += `V:${id} clef=${staff.clef}\n`;
   abc += `K:${normalizeKey(project.key)}\n`;
   if (firstMeasure > 1 || layout.measureNumberOffset) abc += `%%setbarnb ${printedFirstMeasure}\n`;
   const [meterBeats, meterUnit] = project.timeSignature;
@@ -809,6 +849,26 @@ export function toAbc(
         abc += '\n';
         if (hasLyrics) abc += `w:${lyrics.join(' ')}\n`;
       });
+      const pedalVoice = pedalVoiceIds.get(voices[staffIndex]);
+      if (pedalVoice) {
+        if (firstSystem || hasPercussion) abc += `V:${pedalVoice}\n`;
+        if (hasPercussion) abc += `K:${normalizeKey(project.key)}\n`;
+        abc += `[V:${pedalVoice}] `;
+        const marks = pedalMarks(part.pedals ?? []);
+        for (let bar = firstBar; bar < systemEnd; bar++) {
+          const start = bar * barLength, end = start + barLength;
+          const here = marks.filter((mark) => mark.at >= start - EPSILON && mark.at < end - EPSILON);
+          const times = [...new Set([start, ...here.map((mark) => mark.at), end])].sort((a, b) => a - b);
+          for (let i = 0; i < times.length - 1; i++) {
+            const labels = here.filter((mark) => Math.abs(mark.at - times[i]) < EPSILON);
+            abc += labels.map((mark) => `"_${mark.label}"`).join('');
+            for (const spacer of splitAbcSegment({ start: times[i], duration: times[i + 1] - times[i], notes: [], tiedFrom: false, tiedTo: false }))
+              abc += `x${abcDuration(spacer.duration)} `;
+          }
+          abc += bar === project.measures - 1 ? '|] ' : '| ';
+        }
+        abc += '\n';
+      }
       if (staffIndex === 0 && harmonyVoiceId) {
         if (firstSystem || hasPercussion) abc += `V:${harmonyVoiceId}\n`;
         if (hasPercussion) abc += `K:${part.role === 'percussion' || clef === 'percussion' ? 'none' : normalizeKey(project.key)}\n`;
@@ -1096,6 +1156,16 @@ export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
             .filter((chord) => chord.start >= start - EPSILON && chord.start < start + barLength - EPSILON)
             .map((chord) => xmlHarmony(chord, chord.start - start))
             .join('');
+        // Sustain pedal as MusicXML <pedal> directions on the lowest staff, each
+        // positioned with <offset> from the bar start (no notes are added).
+        if (part.pedals?.length) {
+          const lowStaff = Math.max(...staves.map((staff) => staff.number));
+          for (const mark of pedalMarks(part.pedals).filter((m) => m.at >= start - EPSILON && m.at < start + barLength - EPSILON)) {
+            const offsetTicks = Math.round((mark.at - start) * DIVISIONS);
+            const type = mark.label === 'Ped.' ? '<pedal type="start" line="no"/>' : mark.label === '*' ? '<pedal type="stop" line="no"/>' : '<pedal type="change" line="no"/>';
+            content += `<direction placement="below"><direction-type>${type}</direction-type>${offsetTicks ? `<offset>${offsetTicks}</offset>` : ''}${staves.length > 1 ? `<staff>${lowStaff}</staff>` : ''}</direction>`;
+          }
+        }
         lanes.forEach((lane, voiceIndex) => {
           if (voiceIndex)
             content += `<backup><duration>${Math.round(barLength * DIVISIONS)}</duration></backup>`;

@@ -10,7 +10,7 @@ from bisect import bisect_left
 import math
 import statistics
 
-VERSION = 'multiscore-rhythm-6'
+VERSION = 'multiscore-rhythm-7'
 TICKS = 960
 
 
@@ -451,6 +451,120 @@ def _keyboard_written_releases(notes, changes, spb, offset):
                 change.update(reason='terminal_keyboard_handoff',scoreEndSeconds=offset+boundary*spb)
 
 
+PEDAL_TOLERANCE = .12
+
+
+PEDAL_MERGE_GAP = .4
+
+
+def notated_pedals(pedals, spb, offset, total_beats, chord_starts=()):
+    """Printable sustain pedal on the written grid (beats), for Ped./* marks.
+
+    Detected pedal intervals are fragmented (gaps of ~0.1 s between them are
+    mostly detector noise or quick re-pedals). Gaps under PEDAL_MERGE_GAP join
+    into one depression. A pedal change is kept only where the harmony
+    changes and a measured release falls within an eighth of that change.
+    Marks are snapped to sixteenths; anything shorter than a quarter beat is
+    not printed. These marks are for reading only; playback resonance uses
+    ``sounding_pedals`` (the measured intervals).
+    """
+    measured = sorted(pedals or [], key=lambda p: p['onset_time'])
+    if not measured:
+        return []
+    beat = lambda seconds: (seconds - offset) / spb
+    merged = [[measured[0]['onset_time'], measured[0]['offset_time'], []]]
+    for pedal in measured[1:]:
+        if pedal['onset_time'] - merged[-1][1] < PEDAL_MERGE_GAP:
+            merged[-1][2].append(merged[-1][1])  # an internal re-pedal at this release
+            merged[-1][1] = max(merged[-1][1], pedal['offset_time'])
+        else:
+            merged.append([pedal['onset_time'], pedal['offset_time'], []])
+    chords = sorted(set(chord_starts))
+    rows = []
+    for on, off_, releases in merged:
+        start = max(0., round(beat(on) * 4) / 4)
+        end = min(total_beats, round(beat(off_) * 4) / 4)
+        cuts = []
+        for release in releases:
+            at = beat(release)
+            change = next((c for c in chords if abs(c - at) <= .125 and start < c < end), None)
+            if change is not None and change not in cuts:
+                cuts.append(change)
+        points = [start, *sorted(cuts), end]
+        for a, b in zip(points, points[1:]):
+            if b - a >= .25:
+                rows.append({'start': a, 'end': b})
+    # Snapped neighbours may overlap; a later press starts a change there.
+    for a, b in zip(rows, rows[1:]):
+        if b['start'] < a['end']:
+            a['end'] = b['start']
+    return [r for r in rows if r['end'] - r['start'] >= .25]
+
+
+def reprint_pedals_at_harmony(parts, pedals, grid, chords):
+    """Recompute printed Ped./* once the score's chord symbols are known.
+
+    Both the formal upload and the cached-event score rebuild call this after
+    chord inference, so the printed pedal changes come from one rule.
+    """
+    if not pedals:
+        return
+    chord_starts = [c['start'] for c in chords or []]
+    for part in parts:
+        if 'pedals' in part:
+            total = max((n['start'] + n['duration'] for n in part['notes']), default=0.)
+            part['pedals'] = notated_pedals(pedals, 60 / float(grid['bpm']), float(grid['offsetSeconds']), total,
+                                            chord_starts=chord_starts)
+
+
+def sounding_pedals(pedals, spb, offset, total_beats):
+    """Measured pedal intervals in beats for playback resonance (1/32 grid)."""
+    rows = []
+    for pedal in sorted(pedals or [], key=lambda p: p['onset_time']):
+        start = max(0., round((pedal['onset_time'] - offset) / spb * 8) / 8)
+        end = min(total_beats, round((pedal['offset_time'] - offset) / spb * 8) / 8)
+        if end > start:
+            if rows and start < rows[-1]['end']:
+                start = rows[-1]['end']
+            if end > start:
+                rows.append({'start': start, 'end': end})
+    return rows
+
+
+def _finger_gates_under_pedal(notes, changes, spb, offset, pedals):
+    """Write the finger gate, not the pedal resonance (keyboard only).
+
+    A note whose written value runs past the same hand's next attack is ended
+    at that attack when a measured pedal is down there: the key was released
+    for the next attack and the pedal carries the sound. Without a pedal, or
+    without a later attack in that hand, the inferred value stays. Only
+    shortens; never adds, removes or moves an attack.
+    """
+    if not pedals or spb is None:
+        return 0
+    def pedal_down(seconds):
+        # The pedal must already be down when the hand re-attacks (a press up to
+        # 0.12 s after the attack still catches the released key) and remain down.
+        return any(p['onset_time'] - PEDAL_TOLERANCE <= seconds < p['offset_time'] for p in pedals)
+    count = 0
+    for staff in (1, 2):
+        owned = [(n, c) for n, c in zip(notes, changes) if n.get('staff') == staff]
+        starts = sorted(set(n['start'] for n, _ in owned))
+        for note, change in owned:
+            end = note['start'] + note['duration']
+            later = [t for t in starts if note['start'] + 1e-6 < t < end - 1e-6]
+            if not later:
+                continue
+            cut = later[0]
+            if not pedal_down(offset + cut * spb):
+                continue
+            note['duration'] = round(cut - note['start'], 9)
+            note['pedalSustain'] = True
+            change.update(reason='keyboard_finger_gate_under_pedal', scoreEndSeconds=offset + cut * spb)
+            count += 1
+    return count
+
+
 def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
                       *, percussion: bool = False, program: int = 0,
                       pedals: list[dict] | None = None) -> tuple[list[dict], dict]:
@@ -672,8 +786,10 @@ def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
         _keyboard_written_releases(notes,changes,spb,offset)
     rapid = [n for n in notes if n['duration'] <= .25]
     sustained = [n for n in notes if n['duration'] >= .75]
+    finger_gates = 0
     if program in (0, 2) and not percussion:
         assign_keyboard_staves(notes)
+        finger_gates = _finger_gates_under_pedal(notes, changes, spb, offset, pedals)
         keyboard_voices(notes, changes, spb, offset, pedals)
     elif len(rapid) >= max(16, len(notes) * .25) and len(sustained) >= 8 and not percussion:
         # Joint decoders can put several instruments of the same class in one
@@ -737,4 +853,5 @@ def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
                    'detachedPattern': detached_pattern, 'noAttackDeduplication': True,
                    'maximumOnsetShiftSeconds': max((abs(c['scoreStartSeconds'] - c['sourceStartSeconds']) for c in changes), default=0),
                    'maximumOffsetShiftSeconds': max((abs(c['scoreEndSeconds'] - c['sourceEndSeconds']) for c in changes), default=0),
+                   'fingerGatesUnderPedal': finger_gates,
                    'boundaryChanges': changes}
