@@ -258,13 +258,14 @@ def test_keyboard_hand_keeps_held_bass_and_two_written_voices():
     assert len(notes) == len(rows)
 
 
-def test_held_outer_note_ends_at_the_next_attack_in_its_register():
-    # A long acoustic tail does not cross a new bass attack.
+def test_different_bass_attack_does_not_release_an_independently_held_note():
+    # The note's refined release is authoritative; another bass pitch is not
+    # evidence of a release. Voice allocation must not cut it to three beats.
     rows = [[0, 3.9, 43, .8], [0, .4, 52, .8], [.5, .9, 52, .8], [1., 1.4, 52, .8], [1.5, 2., 38, .8]]
     notes, audit = rhythm(rows, program=0)
     bass = next(n for n in notes if n['midi'] == 43)
-    assert bass['start'] + bass['duration'] == 3
-    assert any(c['reason'] == 'keyboard_outer_voice_release' for c in audit['boundaryChanges'])
+    assert bass['start'] + bass['duration'] == 8
+    assert next(n for n in notes if n['midi'] == 38)['voice'] != bass['voice']
     assert len(notes) == len(rows)
 
 
@@ -284,30 +285,28 @@ def _inner_hold_rows():
             [0, 2, 76, .8], [1, 2, 79, .8]]
 
 
-def test_inner_note_is_cut_at_next_attack_without_pedal_evidence():
+def test_inner_finger_hold_does_not_require_pedal_evidence():
     notes, audit = rhythm(_inner_hold_rows(), program=0)
     assert next(n for n in notes if n['midi'] == 48)['staff'] == 2
     inner = next(n for n in notes if n['midi'] == 48)
-    assert inner['duration'] == 1  # written to the next same-hand attack (beat 1)
-    assert not any(c['reason'] == 'keyboard_pedal_inner_hold' for c in audit['boundaryChanges'])
+    assert inner['duration'] == 2
 
 
-def test_inner_note_holds_only_when_pedal_and_its_own_release_cover_it():
+def test_pedal_detection_does_not_override_the_notes_own_refined_release():
     pedal = [{'onset_time': 0., 'offset_time': 1.2}]
     notes, audit = infer_part_rhythm(_inner_hold_rows(), {'bpm': 120, 'offsetSeconds': 0}, 20, 't',
                                      program=0, pedals=pedal)
     inner = next(n for n in notes if n['midi'] == 48)
     assert inner['duration'] == 2 and inner['voice'] == '2'
-    assert any(c['reason'] == 'keyboard_pedal_inner_hold' for c in audit['boundaryChanges'])
     assert len(notes) == len(_inner_hold_rows())
     for staff in (1, 2):
         assert len({n['voice'] for n in notes if n['staff'] == staff}) <= 2
-    # Pedal lifted before the next attack: no hold.
+    # Pedal lifted: a finger can still hold the key.
     notes, _ = infer_part_rhythm(_inner_hold_rows(), {'bpm': 120, 'offsetSeconds': 0}, 20, 't',
                                  program=0, pedals=[{'onset_time': 0., 'offset_time': .4}])
-    assert next(n for n in notes if n['midi'] == 48)['duration'] == 1
+    assert next(n for n in notes if n['midi'] == 48)['duration'] == 2
     # Pedal down but the note itself was released early: no hold beyond it.
     rows = _inner_hold_rows()
-    rows[1] = [0, .55, 48, .8]
+    rows[0] = [0, .55, 48, .8]
     notes, _ = infer_part_rhythm(rows, {'bpm': 120, 'offsetSeconds': 0}, 20, 't', program=0, pedals=pedal)
     assert next(n for n in notes if n['midi'] == 48)['duration'] <= 1

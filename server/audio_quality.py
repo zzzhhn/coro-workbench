@@ -243,7 +243,7 @@ def _improve_multi_project(directory: Path, project: dict, model: dict, grid: di
         '乐器名称是模型候选；已知独立来源分别保留，未分离的同类演奏者仍可能共用一个复音谱表。',
     ]
     project['source']['analysis'] = {
-        'rhythm': {k: grid[k] for k in ('bpm', 'offsetSeconds', 'beatTimesSeconds', 'downbeatTimesSeconds', 'method', 'confidence', 'notationUnitFactor', 'detectedBpm', 'beatTrackerOffsetSeconds', 'onsetPhaseCorrectionSeconds', 'onsetPhaseSupportPrograms') if k in grid},
+        'rhythm': {k: grid[k] for k in ('bpm', 'offsetSeconds', 'beatTimesSeconds', 'downbeatTimesSeconds', 'method', 'confidence', 'notationUnitFactor', 'detectedBpm', 'detectedOffsetSeconds', 'beatTrackerOffsetSeconds', 'onsetPhaseCorrectionSeconds', 'onsetPhaseSupportPrograms') if k in grid},
         'rawProjectUrl': f"/api/projects/{project['id']}/raw", 'transforms': transforms,
         'quality': {'stage': 'multitrack_musical_score', 'decoderProfile': 'yourmt3',
                     'instrumentVocabulary': 'MT3_FULL_PLUS', 'editorialTiming': True,

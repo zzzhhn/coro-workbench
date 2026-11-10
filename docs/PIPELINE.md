@@ -1,12 +1,59 @@
 # Coro pipeline (v5)
 
-Status 2026-11-09. Each node names its layer. A change touches one layer at a
+Status 2026-11-10. Each node names its layer. A change touches one layer at a
 time and must keep raw model output, the previous notation and the current
 candidate for comparison. Passing tests or a connected model is not musical
 acceptance. Bobby's ear and the human reference score are.
 
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
+
+## 2026-11-10 piano regression repair
+
+`multiscore-rhythm-6` fixes three notation-layer failures found by holding
+decoded events fixed against the previous import. The two-voice keyboard cap
+was shortening sustained inner notes in the canonical score, which also drives
+playback. Keyboard voice allocation now preserves the inferred note gates and
+uses another rhythm layer when necessary. A new bass pitch alone is not release
+evidence; absent pedal detection does not rule out a finger hold.
+
+Roll recognition checks plausible interleaving left/right hands, and a new
+melody attack cannot truncate another chord tone's measured release. Automatic
+beat-unit doubling requires a sustained sequence of short, independently
+released attacks; dense held chords no longer count as a fast melodic line.
+The original detected grid is retained for repeatable rebuilding.
+
+The private comparison retains the actual 90-second import, a piano-only
+ablation, and the combined grid/piano candidate. The full-song piano ablation
+keeps every other part unchanged. Model events and user projects are preserved;
+no reference notes feed inference. Some inner-note durations still disagree
+with the human score, and additional written voices may be necessary. This is
+a regression repair, not a claim that piano or vocal transcription is solved.
+On 2026-11-10 Bobby accepted the retained comparison as the next development
+baseline and requested publication. Remaining differences below stay open.
+
+## 2026-11-10 accepted continuation baseline
+
+`piano-two-view-consensus-2` recovers a held key's missing reattack only when
+the stem and mixture piano views agree and native notes support a repeated
+chord or regular running voice. These are two views of the same piano model,
+not independent models. No previous attack is deleted; the old release is kept
+as acoustic evidence. Existing finger-duration inference then sees the complete
+run. The source-proposal cache advances to `multiscore-sources-8`.
+
+`syllable-phrasing-5` makes partial-lyric exclusions local, keeps audio-only phase
+inference in uncovered phrases, admits ordinary rhythm positions for regularly
+repeated same-pitch syllables, and recognizes relatively dominant destinations
+in short paired syllable scoops. Genuine word attacks and later melisma remain.
+The timing audit now reports the canonical times actually played. No-lyrics
+output is unchanged in the fixed-input song comparison.
+
+The frozen GAME Medium / FCPE / piano evidence yields three recovered piano
+attacks with none removed; the same-input vocal comparison improves early
+repeated syllables. Reference notes are evaluation only. Voice bars 45–54 and
+remaining piano inner/bass differences are still open. Keep the accepted
+candidate and prior score separately. See `docs/WORK_COMPUTER_HANDOFF.md` for
+the user's acceptance scope, private-asset requirements and new research link.
 
 ## Production and in-progress branches
 
@@ -16,7 +63,7 @@ flowchart TD
   B --> SEP[Demucs htdemucs_6s stems · recognition]
   B --> MT[YourMT3+ multi-instrument · recognition]
 
-  subgraph Vocal["Lead vocal · syllable-phrasing-4 + evidence (merged, PR #6)"]
+  subgraph Vocal["Lead vocal · syllable-phrasing-5 + evidence"]
     SEP --> GE[GAME 1.0.3 Medium extract · recognition]
     SEP --> FC[FCPE f0 evidence · recognition]
     LRC[User LRC] --> SOFA[SOFA word boundaries, content-pinned · recognition]
@@ -28,14 +75,13 @@ flowchart TD
     EVD -.->|future fusion, rule fixed first| RX[Re-attack decision · open]
   end
 
-  subgraph Piano["Piano · multiscore-rhythm-5 (merged, PR #4 + #5)"]
-    MT --> PC[Stem/mix consensus, ByteDance · recognition]
+  subgraph Piano["Piano · multiscore-rhythm-6 regression repair"]
+    MT --> PC[Stem/mix consensus + corroborated reattacks, ByteDance · recognition]
     PC --> PR[Rhythm grid and onset quantisation · notation inference]
-    PR --> PA{Rolled gesture? onsets sweep in pitch order · notation inference}
+    PR --> PA{Rolled gesture? include interleaving hands · notation inference}
     PA --> PH[Moving hand split, Viterbi with span/finger/held-key priors · notation inference]
-    PH --> PV[Two written voices per hand; outer line keeps measured hold · part presentation]
+    PH --> PV[Compatible voices per hand; preserve all inferred gates · part presentation]
     PV --> PL[Covered grand-staff rests become spacers · layout]
-    PV --> PP[Inner voice held only under measured pedal and own release · notation inference]
     PC --> PO[Low-octave audit, 4 evidence paths; candidates only, not applied · recognition]
   end
 
