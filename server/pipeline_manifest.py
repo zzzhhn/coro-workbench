@@ -52,6 +52,7 @@ STAGES = {
     'lyrics': ('SOFA 歌词对齐', 'recognition'),
     'asr-draft': ('本地 ASR 歌词草稿', 'recognition'),
     'game-align': ('GAME 词边界对齐（证据）', 'recognition'),
+    'backing-game': ('GAME Medium 伴唱主导线', 'recognition'),
     'score': ('记谱推断与总谱', 'notation'),
     'complete': ('完成', 'runtime'),
 }
@@ -154,6 +155,8 @@ def build_manifest(directory: Path, request: dict, project: dict | None, runtime
             'sourceRefinementVersion': quality.get('sourceRefinementVersion'),
             'leadNotationVersion': game.get('notationVersion'),
             'leadRawEvents': game.get('rawEvents'),
+            'backingHarmony': {k: ((project or {}).get('source', {}).get('analysis', {}).get('backingHarmony') or {}).get(k)
+                               for k in ('version', 'status', 'rawEvents', 'scoreNotes')},
         },
         'mermaid': mermaid(timeline),
         'claimsMusicalCorrectness': False,
