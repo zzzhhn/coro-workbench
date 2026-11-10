@@ -58,6 +58,9 @@ def rebuild(directory: Path, *, exact: bool = False) -> tuple[dict, dict]:
     end = max(n['start'] + n['duration'] for p in result['parts'] for n in p['notes'])
     result['measures'] = max(1, math.ceil(max(end, (evidence['analyzedDurationSeconds'] - grid['offsetSeconds']) * grid['bpm'] / 60) / (project['timeSignature'][0] * 4 / project['timeSignature'][1])))
     result['chords'] = infer_accompaniment_chords(result['parts'], result['measures'] * 4)
+    # Same printed-pedal rule as the formal upload (after chord inference).
+    from .score_rhythm import reprint_pedals_at_harmony
+    reprint_pedals_at_harmony(result['parts'], pedals, grid, result['chords'])
     analysis = result['source'].setdefault('analysis', {'transforms': []})
     analysis['rhythm'] = grid
     analysis.setdefault('quality', {}).pop('timingToleranceSeconds', None)

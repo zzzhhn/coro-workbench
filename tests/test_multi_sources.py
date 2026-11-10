@@ -135,3 +135,26 @@ def test_score_rebuild_uses_the_selected_refined_events_and_preserves_stem_links
     assert result['parts'][0]['notes'][0]['midi']==64
     assert result['parts'][0]['stemUrl']=='/api/audio/saved/stem-piano.wav'
     assert audit['sourceRefinementVersion']=='multiscore-sources-1'
+
+
+def test_score_rebuild_prints_pedal_changes_at_harmony_like_the_upload(tmp_path):
+    import json
+    from server.score_rebuild import rebuild
+    from server.score_rhythm import notated_pedals
+    project={'id':'saved','tempo':60,'timeSignature':[4,4],'parts':[{'id':'piano-0-piano'}],
+             'originalAudio':{'offsetSeconds':0},'source':{'warnings':[], 'analysis':{'transforms':[],
+             'rhythm':{'bpm':60,'offsetSeconds':0},'quality':{'sourceRefinementVersion':'multiscore-sources-1'}}}}
+    events=[note(48,0,3.9,sourceId='piano'),note(52,0,3.9,sourceId='piano'),note(55,0,3.9,sourceId='piano'),
+            note(43,4,7.9,sourceId='piano'),note(47,4,7.9,sourceId='piano'),note(50,4,7.9,sourceId='piano')]
+    pedals=[{'onset_time':0.,'offset_time':3.95},{'onset_time':4.05,'offset_time':7.9}]
+    files={'project.json':project,'multi-events.json':{'events':events},
+           'multi-source-events.json':{'events':events,'sourceRefinement':{'version':'multiscore-sources-1','pianoPedals':pedals}},
+           'analysis-evidence.json':{'analyzedDurationSeconds':8},'request.json':{'tempo':60}}
+    for filename,value in files.items():(tmp_path/filename).write_text(json.dumps(value))
+    result,_=rebuild(tmp_path)
+    piano=next(p for p in result['parts'] if 'pedals' in p)
+    total=max(n['start']+n['duration'] for n in piano['notes'])
+    expected=notated_pedals(pedals,1.,0.,total,chord_starts=[c['start'] for c in result['chords']])
+    assert piano['pedals']==expected
+    # The quick re-pedal at 4 s coincides with the harmony change, so it prints as a change.
+    assert len(piano['pedals'])==2

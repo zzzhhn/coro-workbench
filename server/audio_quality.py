@@ -236,14 +236,9 @@ def _improve_multi_project(directory: Path, project: dict, model: dict, grid: di
     end = max(n['start'] + n['duration'] for p in project['parts'] for n in p['notes'])
     project['measures'] = max(1, math.ceil(max(end, (duration - grid['offsetSeconds']) * grid['bpm'] / 60) / 4))
     project['chords'] = infer_accompaniment_chords(project['parts'], project['measures'] * 4)
-    if pedals:
-        # Print pedal changes only at harmony changes the score already shows.
-        from .score_rhythm import notated_pedals
-        for part in project['parts']:
-            if 'pedals' in part:
-                total = max((n['start'] + n['duration'] for n in part['notes']), default=0.)
-                part['pedals'] = notated_pedals(pedals, 60 / float(grid['bpm']), float(grid['offsetSeconds']), total,
-                                                chord_starts=[c['start'] for c in project['chords']])
+    # Print pedal changes only at harmony changes the score already shows.
+    from .score_rhythm import reprint_pedals_at_harmony
+    reprint_pedals_at_harmony(project['parts'], pedals, grid, project['chords'])
     transforms = [
         '节拍网格由原始音频估计，多声部音符从原始秒数直接映射到新网格，不对已经量化的谱面再次取整。',
         '按乐句推断常规节奏、断奏和持续声部；记谱时值与声学收音分开，原始起止时间和逐音调整记录另存。',

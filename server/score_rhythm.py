@@ -465,7 +465,8 @@ def notated_pedals(pedals, spb, offset, total_beats, chord_starts=()):
     into one depression. A pedal change is kept only where the harmony
     changes and a measured release falls within an eighth of that change.
     Marks are snapped to sixteenths; anything shorter than a quarter beat is
-    not printed. Playback uses these same printed intervals.
+    not printed. These marks are for reading only; playback resonance uses
+    ``sounding_pedals`` (the measured intervals).
     """
     measured = sorted(pedals or [], key=lambda p: p['onset_time'])
     if not measured:
@@ -498,6 +499,22 @@ def notated_pedals(pedals, spb, offset, total_beats, chord_starts=()):
         if b['start'] < a['end']:
             a['end'] = b['start']
     return [r for r in rows if r['end'] - r['start'] >= .25]
+
+
+def reprint_pedals_at_harmony(parts, pedals, grid, chords):
+    """Recompute printed Ped./* once the score's chord symbols are known.
+
+    Both the formal upload and the cached-event score rebuild call this after
+    chord inference, so the printed pedal changes come from one rule.
+    """
+    if not pedals:
+        return
+    chord_starts = [c['start'] for c in chords or []]
+    for part in parts:
+        if 'pedals' in part:
+            total = max((n['start'] + n['duration'] for n in part['notes']), default=0.)
+            part['pedals'] = notated_pedals(pedals, 60 / float(grid['bpm']), float(grid['offsetSeconds']), total,
+                                            chord_starts=chord_starts)
 
 
 def sounding_pedals(pedals, spb, offset, total_beats):
