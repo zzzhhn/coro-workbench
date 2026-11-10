@@ -8,6 +8,84 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-10 afternoon: piano option B (finger gates + printed pedal)
+
+Bobby chose option B: write what the fingers hold, and show the resonance as
+a pedal mark. `multiscore-rhythm-7` changes two layers, one at a time, with
+recognition fixed (pitches and attacks are identical to the accepted import).
+
+- Notation inference: `_finger_gates_under_pedal`. When the same hand attacks
+  again inside a note's written value while the measured pedal is down
+  (pressed by `t + 0.12 s`, not lifted before `t`), the note is written to
+  that attack and flagged `pedalSustain`. Kong Er: 337 notes.
+- Presentation: `part.pedals` holds printed Ped./* marks. Detector fragments
+  closer than 0.4 s merge; a pedal change prints only at a chord change
+  within an eighth of a measured release; marks under a quarter beat are not
+  printed (86 marks). `part.pedalSustain` holds the measured intervals
+  (209) and drives playback resonance only. ABC prints Ped./* below the bass
+  staff; MusicXML exports `<pedal>`. The cached-event score rebuild uses the
+  same reprint rule as the formal upload.
+
+| Kong Er, reference bars | accepted | option B |
+|---|---:|---:|
+| exact pitch+onset, 1–70 | 675/1072 | 675/1072 |
+| duration agree, 1–70 | 388 | 475 |
+| duration agree, 13–24 / 21–35 / 45–54 | 85 / 84 / 65 | 100 / 104 / 70 |
+| dotted values | 142 | 137 |
+| reference-free frame F (Kong Er / Fragile) | .618 / .615 | .668 / .615 |
+
+A formal upload on the candidate instance reproduced the offline result note
+for note, including all printed and measured pedal intervals. The mark
+placement and the playback were checked in the rendered score; the musical
+judgment of the pedal sound is Bobby's.
+
+## 2026-11-10 research post and rejected vocal rule
+
+The Xiaohongshu post lists RVC, so-vits-svc, UVR, audiocraft, demucs,
+DiffSinger, stable-audio-tools, basic-pitch, jukebox and DDSP-SVC. Two were
+tested against the accepted baseline:
+
+- Vocal input Mel-Band RoFormer vs Demucs, both into GAME Medium with the
+  same notation: 236 vs 239 exact (1–70). Bobby heard no difference between
+  the two separations. Not adopted.
+- Basic Pitch for piano: onset F .396 vs .584 for the current path. Not
+  adopted.
+
+Pre-registered vocal rule `approach-direction-and-energy` for bars 45–54
+(allow falling scoops; an energy attack no longer blocks a merge) was run
+once and abandoned: 45–54 exact 58 → 57, whole song 239 → 232, same-pitch
+re-attacks 67 → 64. Audio rules alone cannot tell a word attack from a
+scoop there; lyric/SOFA syllable evidence is needed.
+
+## Next: lead and backing voices (planned)
+
+Bobby heard at least one lead and two harmony voices in bars 55–66. The
+whole Demucs vocal stem currently goes to GAME, a monophonic model, so the
+harmony is either dropped or leaks into the lead. Planned chain, to be
+A/B-tested before it reaches the formal upload:
+
+```mermaid
+flowchart TD
+  V[Demucs vocal stem] --> K[Lead/backing separation · recognition]
+  K --> L[Lead stem]
+  K --> BK[Backing stem]
+  L --> G[GAME Medium 8 steps · recognition]
+  G --> SS[singing_score · notation inference]
+  BK --> GATE{Backing present? energy + voicing per phrase · recognition}
+  GATE -->|yes| MP[Multi-pitch on backing · recognition]
+  MP --> VA[Voice assignment by pitch continuity · notation inference]
+  VA --> H1[Harmony 1]
+  VA --> H2[Harmony 2]
+  GATE -->|no| REST[Rests]
+  SS --> PRJ[Lead + harmony staves · part presentation]
+  H1 --> PRJ
+  H2 --> PRJ
+```
+
+The hand reference has no harmony voices, so harmony acceptance is by ear.
+The lead must not get worse against the reference when it is transcribed
+from the separated lead stem instead of the full vocal stem.
+
 ## 2026-11-10 piano regression repair
 
 `multiscore-rhythm-6` fixes three notation-layer failures found by holding
