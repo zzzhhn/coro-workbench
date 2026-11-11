@@ -8,6 +8,20 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-11 vocal attempts rejected (no code shipped)
+
+Both were written down before their numbers were seen and run once on Kong Er.
+
+| Attempt | Layer | Kong Er result | Decision |
+|---|---|---|---|
+| `scoop-grace-1`: an unworded short lower note glued to a stable target 1–3 st higher becomes a grace note before the target | notation inference | exact 239 → 243; reattacks 67 → 64; bars 13–24 and 45–54 each −1 | rejected |
+| Phase tolerance band: accept the whole span from the raw onset back to the raw onset minus 0.06 s, instead of shifting by 0.06 s | notation inference | exact 239 → 236; S2 still 8 | rejected |
+
+Without lyrics, a sung scoop and two syllables on adjacent pitches look the same,
+and the onsets helped or hurt by the song-level vocal phase overlap. Both need
+syllable evidence (LRC + SOFA). Diffs are kept privately in `work/vocal-scoop-20261111/`
+and `work/vocal-phase-20261111/`.
+
 ## 2026-11-11: drum-kit evidence gate (`drum-kit-evidence-1`, recognition layer)
 
 Kong Er has no percussion, yet YourMT3+ emitted 25 GM drum events (program 128)
@@ -242,7 +256,7 @@ string ensemble and its bassoon/clarinet stay separate. Low-evidence guitar,
 bass, synth lead and synth pad in Kong Er have no same-channel host and no
 unison cover; they are kept unchanged and listed as pending in the audit.
 
-## Production and in-progress branches
+## Production pipeline (main `f014bcc`, 2026-11-11)
 
 ```mermaid
 flowchart TD
@@ -250,36 +264,46 @@ flowchart TD
   B --> SEP[Demucs htdemucs_6s stems · recognition]
   B --> MT[YourMT3+ multi-instrument · recognition]
 
-  subgraph Vocal["Lead vocal · syllable-phrasing-5 + evidence"]
-    SEP --> GE[GAME 1.0.3 Medium extract · recognition]
+  subgraph Vocal["Lead vocal · syllable-phrasing-5"]
+    SEP --> GE[GAME 1.0.3 Medium, 8 steps · recognition]
     SEP --> FC[FCPE f0 evidence · recognition]
-    LRC[User LRC] --> SOFA[SOFA word boundaries, content-pinned · recognition]
-    ASR[Local whisper LRC draft · offline only] -.-> LRC
-    GE --> SS[singing_score · notation inference]
+    LRC[Optional user LRC] --> SOFA[SOFA word boundaries · recognition]
+    GE --> SS[singing_score: approaches, song-level vocal phase, rhythm · notation inference]
     FC --> SS
     SOFA --> SS
-    SS --> EVD[After notation: GAME align + text-free syllable edges saved as evidence · recognition]
-    EVD -.->|future fusion, rule fixed first| RX[Re-attack decision · open]
   end
 
-  subgraph Piano["Piano · multiscore-rhythm-6 regression repair"]
-    MT --> PC[Stem/mix consensus + corroborated reattacks, ByteDance · recognition]
-    PC --> PR[Rhythm grid and onset quantisation · notation inference]
-    PR --> PA{Rolled gesture? include interleaving hands · notation inference}
-    PA --> PH[Moving hand split, Viterbi with span/finger/held-key priors · notation inference]
-    PH --> PV[Compatible voices per hand; preserve all inferred gates · part presentation]
-    PV --> PL[Covered grand-staff rests become spacers · layout]
-    PC --> PO[Low-octave audit, 4 evidence paths; candidates only, not applied · recognition]
+  subgraph Backing["Backing line · backing-dominant-line-1"]
+    SEP --> K[KARA2 lead/backing split · recognition]
+    K --> BG[GAME Medium on backing + FCPE · recognition]
+    BG --> BS[singing_score, no lyrics · notation inference]
   end
 
-  MT --> STR[String sustain consensus · recognition]
+  subgraph Sources["Source review · multiscore-sources-9"]
+    MT --> PC[Piano stem/mix consensus, pedals · recognition]
+    MT --> STR[String sustain consensus · recognition]
+    SEP --> DK{Drum-kit evidence gate: 3-12 kHz kit onsets >= 32 · recognition}
+    MT --> DK
+  end
+
+  subgraph Attribution["Instrument attribution · instrument-sections-1"]
+    STR --> SW{Strings: one ensemble OR <= 3 sections per song}
+    MT --> LOW[Low-evidence isolated classes fold into a same-channel or unison host, else pending]
+  end
+
+  PC --> PR[Piano: finger gates under pedal, Ped./* marks · multiscore-rhythm-8]
+  SW --> SR[Bowed parts: one staff, <= 2 voices, chords · multiscore-rhythm-8]
+  DK -->|kit present| DR[Percussion part]
+  DK -->|no kit| WH[Withheld drum events kept in audit only]
   SS --> PRJ[Multipart project]
+  BS --> PRJ
   PR --> PRJ
-  STR --> PRJ
-  PRJ --> VIEW[Display: hide empty auxiliary staves · layout]
-  PRJ --> AUD[Playback/MIDI from project notes, not pruned ABC]
-  PRJ --> MAN[pipeline-manifest.json: executed stages, versions, fingerprint]
-  PRJ --> EV["score_eval (eval): exact/F, dots, re-attacks, sustained bass, error taxonomy"]
+  SR --> PRJ
+  LOW --> PRJ
+  DR --> PRJ
+  PRJ --> AUD[Playback/MIDI from project notes; pedal resonance]
+  PRJ --> MAN[pipeline-manifest.json: stages, versions, fingerprint]
+  PRJ --> EV["score_eval (eval only)"]
 ```
 
 ## Supporting infrastructure (landed on `codex/coro-v5`)
