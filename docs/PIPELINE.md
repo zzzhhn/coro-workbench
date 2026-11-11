@@ -8,6 +8,48 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-11 evening: listening feedback round 2 (in progress)
+
+Bobby listened in Chrome (Safari's media process was wedged, see below).
+Section quality against the hand score, formal job `24b80117…`, evaluation only:
+
+| Part | 5–20 | 21–35 | 36–43 (interlude) | 44–54 | 55–66 |
+|---|---:|---:|---:|---:|---:|
+| Lead F | .71 | .78 | – | .71 | .77 |
+| Piano F | .72 | .61 | .69 | .53 | .53 |
+| Strings F | – | .21 | .24 | .27 | .13 |
+
+After the interlude the piano loses accuracy (missed, extra and octave notes all rise), and the strings
+part writes 2.5–4× the hand score's notes. The hand score's strings after the interlude are
+incomplete, so bars 44–66 are only indicative for strings.
+
+Work routed to the existing dedicated sessions (Bobby's preference: no new session per issue):
+
+```mermaid
+flowchart LR
+  FB[Listening feedback 11-11] --> V[Vocal & harmony session]
+  FB --> S[Strings session]
+  FB --> P[Piano session]
+  FB --> M[Main session]
+  V --> V1[One harmony line after the interlude; pitch/duration feel unnatural]
+  V --> V2[Consonance prior: choose between acoustic candidates only]
+  S --> S1[Ensemble too dense: cap voices or split into violin/viola/cello]
+  P --> P1[Arpeggio mark misplaced on a split-staff chord]
+  P --> P2[Unrecognised spread chord, first note cut to a 16th]
+  M --> M1[Audio hygiene so Coro cannot wedge Safari audio]
+```
+
+Consonance prior (Bobby's idea): 50 of 78 backing-line notes are outside the piano's sounding
+pitch classes; 44 of 78 are non-chord tones of Coro's own chord symbols, against 143/340 for the lead.
+The prior may only decide between candidates that already have acoustic support (GAME pitch vs
+FCPE contour, octave or neighbouring semitone). It never invents or deletes notes, and must not
+use chord symbols inferred from the same uncertain notes.
+
+Safari: after an AirPods route change, `com.apple.WebKit.GPU` (running for 26 days) failed to
+acquire the CoreAudio assertion (RBS error 4099) and `_StartIO` failed until Safari was quit.
+Coro now keeps one media element per context, warms samples in an OfflineAudioContext, and
+suspends the audio device after 20 s idle or when hidden (PR #14).
+
 ## 2026-11-11 vocal attempts rejected (no code shipped)
 
 Both were written down before their numbers were seen and run once on Kong Er.
