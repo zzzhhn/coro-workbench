@@ -4,7 +4,7 @@ import type { TuneObject } from 'abcjs';
 import type { ScoreProject } from '../lib/types';
 import type { Selection } from '../lib/editor';
 import { beatsPerBar, toAbc } from '../lib/music';
-import { alignEngravingStaffNames, fitEngravingSystems, prepareEngravingTune } from '../lib/engraving';
+import { alignEngravingArpeggios, alignEngravingStaffNames, fitEngravingSystems, prepareEngravingTune } from '../lib/engraving';
 import type { MeasureRange } from '../lib/scoreWindow';
 import { overlapsUncertainSource } from './workspaceView';
 
@@ -144,6 +144,7 @@ export default function ScoreView({
       const systems = [...container.current.querySelectorAll<SVGSVGElement>('svg')];
       // abcjs places multi-voice staff names above their staff; recentre on the staff itself.
       alignEngravingStaffNames(systems);
+      alignEngravingArpeggios(systems);
       const boxes = fitEngravingSystems(systems);
       setEngravedWidth(Math.ceil(Math.max(0, ...boxes.map((box) => box.width))));
       for (const [index, svg] of [...container.current.querySelectorAll('svg')].entries()) {
@@ -258,6 +259,7 @@ export default function ScoreView({
       if (!live || !container.current) return;
       const systems = [...container.current.querySelectorAll<SVGSVGElement>('svg')];
       alignEngravingStaffNames(systems);
+      alignEngravingArpeggios(systems);
       const boxes = fitEngravingSystems(systems);
       setEngravedWidth(Math.ceil(Math.max(0, ...boxes.map((box) => box.width))));
       lastScrolledSystem.current = -1;

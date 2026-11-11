@@ -304,6 +304,48 @@ export function alignEngravingStaffNames(systems: SVGSVGElement[]): number {
   return moved;
 }
 
+/** abcjs 6.7.2 moves every "ornament" above a beamed note clear of its beam.
+ * The left-side arpeggio line is also classed as an ornament, so on an
+ * up-stemmed beamed chord each wavy segment is pushed above the beam, away
+ * from the chord. Re-stack each note's arpeggio segments to span that note's
+ * own noteheads. Pure SVG geometry: notes, timing and audio are unchanged. */
+export function alignEngravingArpeggios(systems: SVGSVGElement[]): number {
+  let moved = 0;
+  for (const svg of systems) {
+    for (const note of svg.querySelectorAll<SVGGElement>('g.abcjs-note')) {
+      const segments = [...note.querySelectorAll<SVGPathElement>('path[data-name="scripts.arpeggio"]')];
+      const heads = [...note.querySelectorAll<SVGGraphicsElement>('.abcjs-notehead')];
+      if (!segments.length || !heads.length) continue;
+      const headBoxes = heads.map(head => head.getBBox());
+      const top = Math.min(...headBoxes.map(box => box.y));
+      const bottom = Math.max(...headBoxes.map(box => box.y + box.height));
+      const boxes = segments.map(segment => ({ segment, box: segment.getBBox() }))
+        .sort((a, b) => b.box.y - a.box.y);
+      const height = boxes[0].box.height;
+      const currentTop = Math.min(...boxes.map(item => item.box.y));
+      const currentBottom = Math.max(...boxes.map(item => item.box.y + item.box.height));
+      // Already spanning its chord (unbeamed or stems-down): leave it alone.
+      if (currentTop <= top + height && currentBottom >= bottom - height
+          && currentTop >= top - height * 2 && currentBottom <= bottom + height * 2) continue;
+      // Same stacking abcjs uses when the line is not displaced: one segment
+      // per two staff steps (one notehead height), from half a notehead below
+      // the lowest head to the top head, bottom segment first.
+      const headHeight = headBoxes[0].height;
+      const needed = Math.max(1, Math.floor((bottom - top) / headHeight) + 1);
+      boxes.forEach(({ segment, box }, index) => {
+        if (index >= needed) {
+          segment.setAttribute('visibility', 'hidden');
+          return;
+        }
+        const targetY = bottom + headHeight / 2 - height - index * headHeight;
+        segment.setAttribute('transform', `translate(0 ${targetY - box.y})`);
+      });
+      moved++;
+    }
+  }
+  return moved;
+}
+
 export function expandedViewBox(view: EngravingBox, ink: EngravingBox, sharedRight?: number): EngravingBox {
   const x = Math.min(view.x, ink.x - 3);
   const y = Math.min(view.y, ink.y - 3);
