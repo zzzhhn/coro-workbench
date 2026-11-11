@@ -26,6 +26,8 @@ export interface PlaybackOptions {
 const bankPromises = new Map<string, Promise<Bank>>();
 /** Seconds of music that must have decoded samples before score playback starts. */
 export const PLAYBACK_READY_SECONDS = 2.5;
+/** Release the audio device after this long without playback. */
+export const IDLE_SUSPEND_MS = 20000;
 const sampleBuffers = new Map<string, AudioBuffer>();
 const flatNames = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 const nameForMidi = (midi: number) => `${flatNames[midi % 12]}${Math.floor(midi / 12) - 1}`;
@@ -305,6 +307,11 @@ function click(
   return osc;
 }
 
+/** Rate of the last real output context; before the first press we guess the
+ * common Mac/Bluetooth rate. A wrong guess only means the real context decodes
+ * its own copies later, as it did before warming existed. */
+let lastDeviceRate = 48000;
+
 export class PlaybackEngine {
   private context?: AudioContext;
   private master?: GainNode;
@@ -355,6 +362,7 @@ export class PlaybackEngine {
   }
   private createContext(): AudioContext {
     const context = new AudioContext();
+    lastDeviceRate = context.sampleRate;
     this.context = context;
     this.master = context.createGain();
     this.master.gain.value = 0.64;
@@ -369,9 +377,35 @@ export class PlaybackEngine {
     this.analyser.connect(context.destination);
     return context;
   }
-  private dropContext() {
+  /** One <audio> element and one MediaElementSource per audio context.
+   * Creating a new element (and source node) on every play leaks live media
+   * players in WebKit; the source URL is swapped on the same element instead. */
+  private mediaFor(context: AudioContext, url: string): HTMLAudioElement {
+    if (!this.source || !this.sourceNode || this.sourceNode.context !== context) {
+      this.releaseMedia();
+      const media = new Audio();
+      media.preload = 'auto';
+      this.source = media;
+      this.sourceNode = context.createMediaElementSource(media);
+      this.sourceNode.connect(this.master!);
+    }
+    const media = this.source;
+    const absolute = new URL(url, window.location.href).href;
+    if (media.src !== absolute) media.src = url;
+    return media;
+  }
+  private releaseMedia() {
+    if (this.source) {
+      this.source.pause();
+      this.source.removeAttribute('src');
+      this.source.load();
+    }
     this.sourceNode?.disconnect();
+    this.source = undefined;
     this.sourceNode = undefined;
+  }
+  private dropContext() {
+    this.releaseMedia();
     for (const gain of this.partGains.values()) gain.disconnect();
     this.partGains.clear();
     this.partPanners.forEach((panner) => panner.disconnect());
@@ -394,17 +428,17 @@ export class PlaybackEngine {
       /* A missing bank surfaces as a play error; warming is best effort. */
     }
   }
-  /** Create the audio context ahead of the first press (needs a user gesture
-   * in Safari before it can run, but decoding works while suspended). */
+  /** Decode a score's samples before the first press, without opening the
+   * audio device. A live AudioContext created outside a user gesture is left
+   * 'interrupted' by Safari, so warming uses a short-lived OfflineAudioContext
+   * at the device rate; the buffers are reused by the real context later. */
   prime(project: ScoreProject) {
-    if (!this.context) {
-      try {
-        this.createContext();
-      } catch {
-        return;
-      }
+    if (this.context && this.context.state !== 'closed' && (this.context.state as string) !== 'interrupted') {
+      void this.warm(project);
+      return;
     }
-    void this.warm(project);
+    const offline = new OfflineAudioContext(1, 1, this.context?.sampleRate ?? lastDeviceRate);
+    void decodeAll(offline, sampleRequests(project), 4).catch(() => undefined);
   }
   private track(nodes: AudioScheduledSourceNode[]) {
     for (const node of nodes) {
@@ -435,12 +469,7 @@ export class PlaybackEngine {
     if (options.mode === 'source') {
       const url = options.sourceUrl ?? project.originalAudio?.url;
       if (!url) throw new Error('当前工程没有原始音频。请先导入音频，或生成示例试听。');
-      this.sourceNode?.disconnect();
-      const media = new Audio(url);
-      this.source = media;
-      media.preload = 'auto';
-      this.sourceNode = context.createMediaElementSource(media);
-      this.sourceNode.connect(this.master!);
+      const media = this.mediaFor(context, url);
       const sourceTempo = project.originalAudio?.tempo ?? project.tempo;
       if (project.tempo / sourceTempo < 0.25 || project.tempo / sourceTempo > 4)
         throw new Error('原音频变速支持原速的 0.25–4 倍。请调整速度，或改用谱曲播放。');
@@ -514,7 +543,7 @@ export class PlaybackEngine {
     this.dropContext();
     if (this.restartedForClock) {
       this.restartedForClock = false;
-      this.onOutputProblem?.('浏览器的音频输出没有在走，可能是耳机切换后浏览器音频卡住了。请刷新页面；若仍无声，重启浏览器。');
+      this.onOutputProblem?.('浏览器的音频输出卡住了（常见于 Safari 切换蓝牙耳机后）。刷新页面通常不够：请完全退出浏览器（⌘Q）再打开，或改用 Chrome。');
       return;
     }
     this.restartedForClock = true;
@@ -639,6 +668,22 @@ export class PlaybackEngine {
     const step = this.project ? metronomeGrid(this.project).step : 1;
     this.nextClick = Math.ceil(this.beat / step) * step;
   }
+  /** Stop and release the device when the page is hidden or unloaded. */
+  handlePageHidden() {
+    if (this.playing) this.pause();
+    if (this.context?.state === 'running') void this.context.suspend().catch(() => undefined);
+  }
+  /** Suspend the audio device after a stretch of silence. A running Web Audio
+   * graph holds Safari's output (and the Bluetooth route) open indefinitely;
+   * play() resumes it. */
+  private scheduleIdleSuspend() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = undefined;
+      if (!this.playing && this.context?.state === 'running') void this.context.suspend().catch(() => undefined);
+    }, IDLE_SUSPEND_MS);
+  }
+  private idleTimer?: ReturnType<typeof setTimeout>;
   pause() {
     this.generation++;
     if (this.timer) clearInterval(this.timer);
@@ -654,6 +699,7 @@ export class PlaybackEngine {
     this.nodes.clear();
     this.source?.pause();
     this.playing = false;
+    this.scheduleIdleSuspend();
     this.emit();
   }
   seek(beat: number) {
@@ -677,10 +723,8 @@ export class PlaybackEngine {
   }
   dispose() {
     this.pause();
-    this.sourceNode?.disconnect();
-    for (const gain of this.partGains.values()) gain.disconnect();
-    this.partPanners.forEach((panner) => panner.disconnect());
-    void this.context?.close();
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.dropContext();
     this.listener = undefined;
   }
 }

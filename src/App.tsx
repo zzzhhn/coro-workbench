@@ -219,7 +219,16 @@ export default function App() {
     engine.current = player;
     player.subscribe(setPlayingState);
     player.onOutputProblem = (message) => notify(message, true);
+    // Do not keep the browser's audio device busy from a hidden tab, and close
+    // it on unload: a lingering Web Audio output is what Safari has to hand
+    // over on a Bluetooth route change.
+    const hidden = () => { if (document.visibilityState === 'hidden') player.handlePageHidden(); };
+    const unload = () => player.dispose();
+    document.addEventListener('visibilitychange', hidden);
+    window.addEventListener('pagehide', unload);
     return () => {
+      document.removeEventListener('visibilitychange', hidden);
+      window.removeEventListener('pagehide', unload);
       player.dispose();
       engine.current = null;
     };
