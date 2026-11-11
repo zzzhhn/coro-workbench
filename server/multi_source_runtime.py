@@ -12,7 +12,7 @@ from . import config
 from .storage import Cancelled, atomic_json, read_json
 from .multi_sources import VERSION, fuse_sources, harmonic_source_evidence, piano_finger_durations
 
-RUNTIME_VERSION = 'multiscore-sources-8'
+RUNTIME_VERSION = 'multiscore-sources-9'
 
 
 def _check_vocal_disagreements(models, native, vocal, waveform, status):
@@ -176,6 +176,12 @@ def build_source_proposal(directory: Path, native: dict, paths: dict[str, Path],
                 result['sourceRefinement']['pianoLowOctave'] = octave_audit
         except (OSError, ValueError, KeyError):
             logging.exception('Piano low-octave audit unavailable; events unchanged')
+    # Recognition layer: native drum events need song-level drum-kit evidence
+    # in the separated drum source. Withheld events stay in the audit and in
+    # candidateEvents; multi-events.json is never rewritten.
+    from .drum_kit import gate_drum_events
+    result['events'], drum_audit = gate_drum_events(result['events'], paths.get('drums'), mixture_path)
+    result['sourceRefinement']['drumKit'] = drum_audit
     result['sourceRefinement']['outputEvents'] = len(result['events'])
     result['sourceRefinement']['fingerDurationProposals'] = finger
     result['sourceRefinement']['engines'] = engines
