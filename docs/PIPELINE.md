@@ -8,7 +8,7 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
-## 2026-11-11 evening: listening feedback round 2 (in progress)
+## 2026-11-11 evening: listening feedback round 2
 
 Bobby listened in Chrome (Safari's media process was wedged, see below).
 Section quality against the hand score, formal job `24b80117…`, evaluation only:
@@ -39,11 +39,30 @@ flowchart LR
   M --> M1[Audio hygiene so Coro cannot wedge Safari audio]
 ```
 
+Outcome of the three dedicated sessions. Each rule was written before its numbers were seen and run once on Kong Er:
+
+| Session | Change | Layer | Result | Decision |
+|---|---|---|---|---|
+| Piano | Arpeggio line drawn on its own chord in beamed, up-stem groups (`alignEngravingArpeggios`, app/PDF/video) | layout | detached lines 2 → 0; arpeggio count 51 → 51; notes unchanged | merged (PR #15) |
+| Piano | Regroup the bar-10 spread chord | notation inference | still fails "80% long" (A4/C#4 releases recognised short); removed correct rolls at bars 65–66 | rejected |
+| Piano | Lengthen A4/C#4 releases from both ByteDance views | recognition | premise not met: no A4 attack in the stem view; views disagree on C#4 | not implemented |
+| Vocal & harmony | Consonance tie-break between acoustic pitch candidates | recognition (pitch choice) | agreement with an independent pYIN contour 52 → 47 of 76 | rejected |
+| Vocal & harmony | Use FCPE pitch when it is stable and disagrees with GAME | recognition (pitch choice) | 6 notes changed, 3 match pYIN (gate 60%) | rejected |
+| Strings | Source-evidence gate for string notes | recognition | bars 21–43 exact 37 → 24 | rejected |
+| Strings | Three single lines (violin/viola/cello) by register | notation inference | lower F in 21–43; lost real violin notes in a synthetic check | rejected |
+
+What was learned:
+
+- **Piano after the interlude:** wrong-pitch and octave errors grow once the strings enter. Octave errors go from 18 to 38–40 per section. They are not leaks from the vocal or string reference lines; YourMT3+ recognition is limited in a denser mix.
+- **Harmony:** the formal score has one line. Only about two thirds of its notes agree with the pitch the backing stem sings. About half of the second voice after bar 47 is not transcribed, and bars 56–59 come out as parallel octaves. A consonance prior made the line look more consonant on paper but moved it away from the sung pitch, so it is not a pitch estimator.
+- **Strings:** in Kong Er the strings often double the piano or the voice in unison. Stem-energy rules therefore cannot tell a leak from a real doubling: 11 of the 37 matched notes are piano- or vocal-dominant in the stems.
+- **Next step:** all three remaining problems need better recognition, for example a multi-voice singing model on the backing stem, or syllable evidence from a corrected LRC. More rules in the notation layers will not fix them.
+
 Consonance prior (Bobby's idea): 50 of 78 backing-line notes are outside the piano's sounding
 pitch classes; 44 of 78 are non-chord tones of Coro's own chord symbols, against 143/340 for the lead.
 The prior may only decide between candidates that already have acoustic support (GAME pitch vs
 FCPE contour, octave or neighbouring semitone). It never invents or deletes notes, and must not
-use chord symbols inferred from the same uncertain notes.
+use chord symbols inferred from the same uncertain notes. It was tested once and rejected (see the table above).
 
 Safari: after an AirPods route change, `com.apple.WebKit.GPU` (running for 26 days) failed to
 acquire the CoreAudio assertion (RBS error 4099) and `_StartIO` failed until Safari was quit.
@@ -298,7 +317,7 @@ string ensemble and its bassoon/clarinet stay separate. Low-evidence guitar,
 bass, synth lead and synth pad in Kong Er have no same-channel host and no
 unison cover; they are kept unchanged and listed as pending in the audit.
 
-## Production pipeline (main `f014bcc`, 2026-11-11)
+## Production pipeline (main, 2026-11-11 evening)
 
 ```mermaid
 flowchart TD
@@ -343,7 +362,8 @@ flowchart TD
   SR --> PRJ
   LOW --> PRJ
   DR --> PRJ
-  PRJ --> AUD[Playback/MIDI from project notes; pedal resonance]
+  PRJ --> ENG[Engraving: arpeggio lines aligned to their own chord · layout]
+  PRJ --> AUD[Playback: opening samples first, idle device released; pedal resonance]
   PRJ --> MAN[pipeline-manifest.json: stages, versions, fingerprint]
   PRJ --> EV["score_eval (eval only)"]
 ```
