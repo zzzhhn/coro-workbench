@@ -8,6 +8,52 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-11: drum-kit evidence gate (`drum-kit-evidence-1`, recognition layer)
+
+Kong Er has no percussion, yet YourMT3+ emitted 25 GM drum events (program 128)
+that reached the score as a 打击乐候选 part. Diagnosis on the formal upload, with
+measurements only and no listening by the assistant:
+
+- Seven instants (bars ~26, 29.75, 41, 54.9, 61, 63) carry a real burst in the
+  Demucs drum stem: a ~43-58 Hz decaying sine, sliding downward, about 6 dB above
+  the song's mixture RMS, with no energy above 2 kHz and the bass/piano low notes
+  sounding together. These are low impacts (sub-bass thumps on bar downbeats),
+  heard by YourMT3+ as kick plus toms. They have no snare, hi-hat or cymbal transient.
+- The other ten instants have no drum-stem energy (-44 to -60 dB). They fall on
+  piano chord attacks, short string articulations and vocal sibilance/breaths. The
+  closed hi-hats at bars 60.6-60.9 and 62.75 match >5 kHz rises only in the vocal stem.
+
+YourMT3+ and Demucs agree on the low thumps, so a per-event energy check
+would keep exactly the wrong events. The gate instead judges the whole song: a
+drum kit produces steep 3-12 kHz onsets that the drum source owns. Rule
+registered before any measurement: count drum-stem onsets rising ≥12 dB within
+100 ms and no more than 10 dB below the mixture in that band. With ≥32 onsets every native
+drum event is kept; otherwise all are withheld from the default score. They
+remain in `candidateEvents` and in `sourceRefinement.drumKit.withheldEvents`.
+`multi-events.json` is never rewritten. Without a drum stem the gate keeps the events.
+
+```mermaid
+flowchart LR
+  subgraph before[Before]
+    A1[YourMT3+ multi-events.json<br/>isDrum events] --> B1[build_source_proposal<br/>fuse / piano / strings / vocal]
+    B1 --> C1[parts_from_multi_events] --> D1[打击乐候选 part]
+  end
+  subgraph after[After]
+    A2[YourMT3+ multi-events.json<br/>unchanged] --> B2[build_source_proposal]
+    S[Demucs stem-drums.wav<br/>+ analysis.wav] --> G{drum-kit-evidence-1<br/>3-12 kHz kit onsets ≥ 32?}
+    B2 --> G
+    G -- yes --> C2[parts_from_multi_events<br/>all drum events kept]
+    G -- no --> W[withheldEvents audit<br/>+ candidateEvents]
+    G -- no --> C3[parts_from_multi_events<br/>no percussion part]
+  end
+```
+
+One run per song, no retuning. Kong Er: 0 kit onsets, 25/25 withheld, every
+other part's note count is unchanged. Out of Time: 741 kit onsets, 786/786
+drums kept. Hurt (NewJeans): YourMT3+ emitted no drum events, so the
+gate had nothing to decide; it is not evidence about preserving real drums. The source
+cache advances to `multiscore-sources-9`.
+
 ## 2026-11-10 afternoon: piano option B (finger gates + printed pedal)
 
 Bobby chose option B: write what the fingers hold, and show the resonance as
