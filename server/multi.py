@@ -29,6 +29,12 @@ def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, 
                             pedals: list[dict] | None = None,
                             chord_starts: list[float] | None = None) -> tuple[list[dict], dict]:
     """Preserve decoded classes and attacks, with bounded or editorial rhythm."""
+    sections = None
+    if readable:
+        # Attribution layer for the readable score only: one written form for
+        # bowed strings per song, low-evidence isolated classes folded or marked.
+        from .instrument_sections import consolidate_instruments
+        events, sections = consolidate_instruments(events)
     grouped = {}
     source_labels = {}
     monophonic_lead_counts = {}
@@ -68,6 +74,8 @@ def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, 
             clef = 'bass'
         elif program == 41:
             clef = 'alto'
+        elif readable and program in (44, 45, 48, 49) and not drum and rows:
+            clef = 'treble' if sorted(r[2] for r in rows)[len(rows) // 2] >= 60 else 'bass'
         monophonic_lead = readable and monophonic_lead_counts.get((program, drum, identity)) == len(rows)
         if monophonic_lead:
             from .vocal_score import quantize_vocal_rhythm
@@ -87,6 +95,8 @@ def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, 
                 'roleSource': 'model', 'clef': clef, 'program': playback_program,
                 'color': palette[index % len(palette)], 'notes': notes,
                 'muted': False, 'solo': False, 'volume': .8, 'pan': 0}
+        if readable and not drum and program in (40, 41, 42, 43, 44, 45, 48, 49):
+            part['staves'] = [{'number': 1, 'clef': clef}]
         if identity:
             part['sourceId'] = identity
             same_class_sources = sum(p == program and d == drum for p, d, _ in grouped)
@@ -110,7 +120,8 @@ def parts_from_multi_events(events: list[dict], grid: dict, duration: float, *, 
             for note in notes:
                 note.setdefault('staff', 1 if note['midi'] >= 60 else 2)
         parts.append(part)
-    return parts, {'instrumentVocabulary': 'MT3_FULL_PLUS', 'parts': audits,
+    conversion_extra = {'instrumentSections': sections} if sections is not None else {}
+    return parts, {**conversion_extra, 'instrumentVocabulary': 'MT3_FULL_PLUS', 'parts': audits,
                    'inputEvents': len(events), 'outputNotes': sum(len(p['notes']) for p in parts),
                    'claimsIndividualPerformerIdentity': False, 'confidenceAvailable': False}
 

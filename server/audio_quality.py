@@ -255,6 +255,16 @@ def _improve_multi_project(directory: Path, project: dict, model: dict, grid: di
                     'verificationMode': request.get('verification', 'full'),
                     'groundTruthAvailable': False, 'verificationStatus': 'not_applicable'},
     }
+    sections = conversion.get('instrumentSections') or {}
+    string_mode = (sections.get('strings') or {}).get('mode')
+    project['source']['analysis']['quality'].update(
+        instrumentSectionsVersion=sections.get('version'), stringWriting=string_mode,
+        isolatedClassesFolded=sum(d['action'] == 'fold' for d in sections.get('isolatedClasses', [])))
+    if string_mode in ('ensemble', 'sections'):
+        transforms.append('拉弦乐器整首歌只取一种写法：' + ('一个弦乐合奏声部' if string_mode == 'ensemble' else '小提琴、中提琴、大提琴最多三个声部')
+                          + '；每种提琴一个谱表，同时发声写成和弦或双音。模型原类别逐音另存。')
+    if any(d['action'] == 'fold' for d in sections.get('isolatedClasses', [])):
+        transforms.append('音数极少的孤立乐器类别并入同一解码通道或同音覆盖的声部，未删除音符；原类别逐音另存。')
     if project['key'] != key_evidence.get('audioEstimate', project['key']):
         transforms.append(f"根据已识别基频音符复核调号为 {project['key']}，未改变任何音高；整曲色度估计另存。")
     if refinement:
@@ -305,8 +315,10 @@ def _improve_multi_project(directory: Path, project: dict, model: dict, grid: di
             for edit in strings.get('decisions', []):
                 if edit['action'] != 'sustain':continue
                 note=edit['after']
+                from .instrument_sections import written_program
+                target=written_program(note['program'],conversion.get('instrumentSections'))
                 for part in project['parts']:
-                    if part['program']==note['program'] and not part.get('sourceId'):
+                    if (part['program']==target or target is None and part['program'] in (40,41,42)) and not part.get('sourceId'):
                         project['source']['analysis']['uncertaintyIntervals'].append(dict(
                             partId=part['id'],startSeconds=note['start'],endSeconds=note['end'],
                             reason='持续声源交叉核对补回，演奏时值与具体弦乐器身份仍需校对。'))
