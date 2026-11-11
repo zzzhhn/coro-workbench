@@ -218,6 +218,7 @@ export default function App() {
     const player = new PlaybackEngine();
     engine.current = player;
     player.subscribe(setPlayingState);
+    player.onOutputProblem = (message) => notify(message, true);
     return () => {
       player.dispose();
       engine.current = null;
@@ -276,6 +277,13 @@ export default function App() {
   useEffect(() => {
     engine.current?.updateMixer(project.parts);
   }, [project.parts]);
+  useEffect(() => {
+    // Decode this score's instrument samples in the background, so pressing
+    // play (also after jumping to a bar) does not wait for a full decode.
+    const timer = setTimeout(() => engine.current?.prime(project), 400);
+    return () => clearTimeout(timer);
+    // Re-warm when another score or part set is opened, not on every note edit.
+  }, [project.id, project.parts.length]);
   useEffect(() => {
     engine.current?.setMetronome(metronome);
   }, [metronome]);
