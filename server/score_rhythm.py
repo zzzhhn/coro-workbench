@@ -10,7 +10,9 @@ from bisect import bisect_left
 import math
 import statistics
 
-VERSION = 'multiscore-rhythm-7'
+VERSION = 'multiscore-rhythm-8'
+# Bowed strings (solo and ensemble classes): one staff, at most two voices.
+BOWED_PROGRAMS = (40, 41, 42, 43, 44, 45, 48, 49)
 TICKS = 960
 
 
@@ -206,6 +208,58 @@ def _voice_assignment(notes: list[dict], *, preserve_timing: bool = False) -> No
             for note in layer:
                 note['voice'] = str(index + 1)
 
+
+
+def bowed_section_voices(notes: list[dict], changes: list[dict]) -> int:
+    """Write one bowed-string part on one staff with at most two voices.
+
+    Voice 1 carries the moving line and its chords/double stops; voice 2 holds
+    a long note across later attacks when it is free. Attacks never move and
+    pitches never change. A same-pitch duplicate at the same written attack is
+    one written note. Returns the number of merged duplicates.
+    """
+    merged = 0
+    keep = {}
+    for index, note in enumerate(notes):
+        key = (round(note['start'] * TICKS), note['midi'])
+        if key in keep:
+            other = keep[key]
+            notes[other]['duration'] = max(notes[other]['duration'], note['duration'])
+            changes[other]['sourceEndSeconds'] = max(changes[other]['sourceEndSeconds'], changes[index]['sourceEndSeconds'])
+            changes[other].setdefault('mergedDuplicates', []).append(changes[index]['sourceStartSeconds'])
+            merged += 1
+        else:
+            keep[key] = index
+    survivors = sorted(keep.values())
+    notes[:] = [notes[i] for i in survivors]
+    changes[:] = [changes[i] for i in survivors]
+    by_attack = defaultdict(list)
+    for note in notes:
+        by_attack[round(note['start'] * TICKS)].append(note)
+    attacks = sorted(by_attack)
+    held_until = -1
+    for position, tick in enumerate(attacks):
+        group = by_attack[tick]
+        following = attacks[position + 1] if position + 1 < len(attacks) else None
+        end_of = lambda n: round((n['start'] + n['duration']) * TICKS)
+        long_notes = [n for n in group if following is not None and n['duration'] >= 1 - 1e-9
+                      and end_of(n) > following] if held_until <= tick else []
+        if long_notes:
+            length = max(n['duration'] for n in long_notes)
+            for n in long_notes:
+                n.update(duration=length, voice='2', staff=1)
+            held_until = tick + round(length * TICKS)
+        else:
+            long_notes = []
+        moving = [n for n in group if n not in long_notes]
+        if not moving:
+            continue
+        length = max(n['duration'] for n in moving)
+        if following is not None:
+            length = min(length, (following - tick) / TICKS)
+        for n in moving:
+            n.update(duration=round(length, 9), voice='1', staff=1)
+    return merged
 
 # Written hand allocation. A hand comfortably covers about an octave and five
 # fingers; the split between hands moves gradually with the music instead of
@@ -787,7 +841,10 @@ def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
     rapid = [n for n in notes if n['duration'] <= .25]
     sustained = [n for n in notes if n['duration'] >= .75]
     finger_gates = 0
-    if program in (0, 2) and not percussion:
+    bowed_duplicates = 0
+    if program in BOWED_PROGRAMS and not percussion:
+        bowed_duplicates = bowed_section_voices(notes, changes)
+    elif program in (0, 2) and not percussion:
         assign_keyboard_staves(notes)
         finger_gates = _finger_gates_under_pedal(notes, changes, spb, offset, pedals)
         keyboard_voices(notes, changes, spb, offset, pedals)
@@ -853,5 +910,5 @@ def infer_part_rhythm(events: list, grid: dict, duration: float, part_id: str,
                    'detachedPattern': detached_pattern, 'noAttackDeduplication': True,
                    'maximumOnsetShiftSeconds': max((abs(c['scoreStartSeconds'] - c['sourceStartSeconds']) for c in changes), default=0),
                    'maximumOffsetShiftSeconds': max((abs(c['scoreEndSeconds'] - c['sourceEndSeconds']) for c in changes), default=0),
-                   'fingerGatesUnderPedal': finger_gates,
+                   'fingerGatesUnderPedal': finger_gates, 'bowedDuplicatesMerged': bowed_duplicates,
                    'boundaryChanges': changes}

@@ -188,6 +188,60 @@ remaining piano inner/bass differences are still open. Keep the accepted
 candidate and prior score separately. See `docs/WORK_COMPUTER_HANDOFF.md` for
 the user's acceptance scope, private-asset requirements and new research link.
 
+## 2026-11-11 string sections and instrument attribution (`instrument-sections-1`, `multiscore-rhythm-8`)
+
+Feedback: the Kong Er strings were split too finely (violin, viola, cello and
+ensemble all at once, each on 2–5 staves), and a harp appeared that is not in
+the original backing.
+
+Where the splitting came from:
+
+| Layer | Before | After |
+|---|---|---|
+| Recognition (YourMT3+ mc13) | All string classes share decoder channel 5; one bowed texture is labelled 40/41/42/48 at the same instants. Harp (46) is 4 notes on the same channel | Unchanged; `multi-events.json` and `multi-source-events.json` are never rewritten |
+| Source check | Exact same-time duplicate labels merged to 48 (30 events) | Unchanged |
+| Attribution (new, readable score only) | One part per decoded program | One written form per song: either one string ensemble or at most violin/viola/cello. Sections only if solo classes are >= 50% of bowed notes and violin > viola > cello by median pitch. Classes with < max(12, 1%) notes fold into the same-decoder-channel part or a part covering >= 75% of them at unison/octave; otherwise unchanged. Every relabel is in `scoreConversion.instrumentSections` |
+| Notation (`score_rhythm`) | Bowed parts used the generic run/held/low layers; `low` layer went to staff 2 | Bowed parts: one staff, voice 1 moving line with chords/double stops, voice 2 a long note across later attacks; same-attack same-pitch duplicates merged |
+| Presentation (`engraving.ts`) | > 2 lanes per staff added auxiliary staves ("· 3", "· 4") | Unchanged code; a bowed part now arrives with one declared staff and <= 2 voices, so no auxiliary staff is created |
+
+```mermaid
+flowchart LR
+  subgraph Before
+    M1[YourMT3+ events · recognition] --> S1[Source check · recognition]
+    S1 --> P1[One part per program: 40/41/42/46/48 · attribution]
+    P1 --> R1[run/held/low layers, low → staff 2 · notation]
+    R1 --> E1[>2 lanes → auxiliary staves · presentation]
+  end
+  subgraph After
+    M2[YourMT3+ events · recognition] --> S2[Source check · recognition]
+    S2 --> W2{Whole-song string writing · attribution}
+    W2 -->|ensemble| EN[One 弦乐合奏 part]
+    W2 -->|sections| SE[<= 3: violin / viola / cello]
+    S2 --> F2[Low-evidence class: same channel or unison/octave cover → fold, else keep · attribution]
+    EN --> B2[One staff, <= 2 voices, chords · notation]
+    SE --> B2
+    B2 --> E2[No auxiliary staff · presentation]
+  end
+```
+
+Kong Er (cached events, development song, not blind; reference used only for acceptance):
+
+| bars 1–70, strings | current | attribution only | attribution + notation |
+|---|---:|---:|---:|
+| string parts / staves | 5 parts / 13 staves (+ harp) | 1 / 3 | 1 / 1 |
+| notes | 573 | 572 (1 harp unison absorbed) | 556 (16 same-attack duplicates) |
+| exact / 212 ref | 77 | 76 | 76 |
+| F | .196 | .194 | .198 |
+| duration agree | 46 | 46 | 45 |
+
+Regression on cached events (recognition unchanged): Fragile keeps all
+high-evidence parts (2 clean-guitar notes fold into acoustic guitar, same
+channel); a synthetic flute/violin/cello excerpt keeps violin and cello as two
+parts and the flute unchanged; Sugar Plum Fairy (ensemble-dominated) becomes one
+string ensemble and its bassoon/clarinet stay separate. Low-evidence guitar,
+bass, synth lead and synth pad in Kong Er have no same-channel host and no
+unison cover; they are kept unchanged and listed as pending in the audit.
+
 ## Production and in-progress branches
 
 ```mermaid

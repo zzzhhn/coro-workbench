@@ -73,8 +73,11 @@ def test_analysis_cutoff_clips_offsets_and_audits_outside_events():
 
 
 def events():
-    return [{'start': .011, 'end': .041, 'midi': 60, 'program': program, 'isDrum': False}
-            for program in (0, 2, 40, 41, 42)]
+    # Violin, viola and cello in their own registers: the readable score keeps
+    # them as three sections (a unison across all three would be one ensemble).
+    pitches = {0: 60, 2: 62, 40: 76, 41: 64, 42: 48}
+    return [{'start': .011, 'end': .041, 'midi': pitch, 'program': program, 'isDrum': False}
+            for program, pitch in pitches.items()]
 
 
 def test_decoded_classes_stay_separate_without_fabricated_confidence_or_stems():
