@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encodeWav, metronomeGrid, normalizedLoop, sampleBankFor, waveformPeaks } from '../src/lib/audio';
+import { encodeWav, metronomeGrid, normalizedLoop, sampleBankFor, sampleRequests, waveformPeaks } from '../src/lib/audio';
 import { createBlankProject, createDemoProject } from '../src/lib/demo';
 
 describe('playback timing and audio export contracts', () => {
@@ -34,6 +34,22 @@ describe('playback timing and audio export contracts', () => {
       'acoustic_guitar_nylon',
     ]);
     expect(sampleBankFor({ ...project.parts[0], program: 52, instrument: 'choir_aahs' })).toBe('choir_aahs');
+  });
+  it('starts playback after decoding only the samples near the start beat', () => {
+    const project = createDemoProject();
+    const all = sampleRequests(project);
+    const piano = project.parts.find((part) => sampleBankFor(part) === 'acoustic_grand_piano')!;
+    // A late jump needs far fewer samples than the whole score.
+    const late = project.measures * 4 - 4;
+    const near = sampleRequests(project, { from: late, to: late + 2 });
+    expect(near.length).toBeLessThan(all.length);
+    for (const [bank, midi] of near)
+      expect(all.some(([b, m]) => b === bank && m === midi)).toBe(true);
+    // Notes already sounding at the start beat are included; notes that ended before it are not.
+    const held = { ...piano, notes: [{ id: 'held', midi: 30, start: 0, duration: 100, velocity: 0.7 },
+      { id: 'gone', midi: 31, start: 0, duration: 1, velocity: 0.7 }] };
+    const only = sampleRequests({ ...project, parts: [held] }, { from: 50, to: 52 });
+    expect(only).toEqual([['acoustic_grand_piano', 30]]);
   });
   it('writes stereo 16-bit PCM RIFF and clips safely', () => {
     const left = new Float32Array([0, 1, -1, 2]);

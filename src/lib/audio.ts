@@ -24,6 +24,8 @@ export interface PlaybackOptions {
 }
 
 const bankPromises = new Map<string, Promise<Bank>>();
+/** Seconds of music that must have decoded samples before score playback starts. */
+export const PLAYBACK_READY_SECONDS = 2.5;
 const sampleBuffers = new Map<string, AudioBuffer>();
 const flatNames = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 const nameForMidi = (midi: number) => `${flatNames[midi % 12]}${Math.floor(midi / 12) - 1}`;
@@ -116,25 +118,46 @@ async function decodeSample(context: Context, bank: string, midi: number): Promi
   return decoded;
 }
 
-export async function prepareSamples(context: Context, project: ScoreProject): Promise<void> {
-  const requests = new Map<string, [string, number]>();
+/** Distinct (bank, pitch) samples a project needs. With ``window`` only notes
+ * sounding inside [from, to) beats are returned, in the order they first sound. */
+export function sampleRequests(
+  project: ScoreProject,
+  window?: { from: number; to: number },
+): Array<[string, number]> {
+  const requests = new Map<string, { at: number; value: [string, number] }>();
   for (const part of project.parts) {
     if (part.role === 'percussion') continue;
+    const bank = bankFor(part);
     for (const note of part.notes) {
       if (note.midi === null) continue;
-      const bank = bankFor(part);
-      requests.set(`${bank}:${note.midi}`, [bank, note.midi]);
+      if (window && (note.start >= window.to || note.start + note.duration <= window.from)) continue;
+      const key = `${bank}:${note.midi}`;
+      const at = Math.max(note.start, window?.from ?? 0);
+      const known = requests.get(key);
+      if (!known || at < known.at) requests.set(key, { at, value: [bank, note.midi] });
     }
   }
-  const queue = [...requests.values()];
+  return [...requests.values()].sort((a, b) => a.at - b.at).map((entry) => entry.value);
+}
+
+async function decodeAll(context: Context, queue: Array<[string, number]>, workers = 8): Promise<void> {
+  const pending = [...queue];
   await Promise.all(
-    Array.from({ length: Math.min(8, queue.length) }, async () => {
-      while (queue.length) {
-        const [bank, midi] = queue.pop()!;
+    Array.from({ length: Math.min(workers, pending.length) }, async () => {
+      while (pending.length) {
+        const [bank, midi] = pending.shift()!;
         await decodeSample(context, bank, midi);
       }
     }),
   );
+}
+
+export async function prepareSamples(context: Context, project: ScoreProject): Promise<void> {
+  await decodeAll(context, sampleRequests(project));
+}
+
+export function samplesReady(context: Context, project: ScoreProject): boolean {
+  return sampleRequests(project).every(([bank, midi]) => sampleBuffers.has(`${context.sampleRate}:${bank}:${midi}`));
 }
 
 const noiseBuffers = new WeakMap<Context, AudioBuffer>();
@@ -320,22 +343,68 @@ export class PlaybackEngine {
     this.listener?.({ playing: this.playing, beat: this.beat, mode: this.options?.mode ?? 'score', peak });
   }
   private async ready() {
-    if (!this.context) {
-      this.context = new AudioContext();
-      this.master = this.context.createGain();
-      this.master.gain.value = 0.64;
-      const compressor = this.context.createDynamicsCompressor();
-      compressor.threshold.value = -14;
-      compressor.knee.value = 14;
-      compressor.ratio.value = 5;
-      this.analyser = this.context.createAnalyser();
-      this.analyser.fftSize = 512;
-      this.master.connect(compressor);
-      compressor.connect(this.analyser);
-      this.analyser.connect(this.context.destination);
+    // Safari can leave a context 'interrupted' (or closed) after an audio route
+    // change, e.g. switching to AirPods; resume() then never produces sound.
+    const state = this.context?.state as string | undefined;
+    if (this.context && (state === 'closed' || state === 'interrupted')) {
+      this.dropContext();
     }
-    if (this.context.state === 'suspended') await this.context.resume();
-    return this.context;
+    const context = this.context ?? this.createContext();
+    if (context.state === 'suspended') await context.resume();
+    return context;
+  }
+  private createContext(): AudioContext {
+    const context = new AudioContext();
+    this.context = context;
+    this.master = context.createGain();
+    this.master.gain.value = 0.64;
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -14;
+    compressor.knee.value = 14;
+    compressor.ratio.value = 5;
+    this.analyser = context.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.master.connect(compressor);
+    compressor.connect(this.analyser);
+    this.analyser.connect(context.destination);
+    return context;
+  }
+  private dropContext() {
+    this.sourceNode?.disconnect();
+    this.sourceNode = undefined;
+    for (const gain of this.partGains.values()) gain.disconnect();
+    this.partGains.clear();
+    this.partPanners.forEach((panner) => panner.disconnect());
+    this.partPanners = [];
+    void this.context?.close().catch(() => undefined);
+    this.context = undefined;
+    this.master = undefined;
+    this.analyser = undefined;
+  }
+  /** Decode every sample of a project in the background (opening a score, or
+   * after playback has started), so a later play or jump does not wait. */
+  async warm(project: ScoreProject): Promise<void> {
+    if (!this.context || this.context.state === 'closed') return;
+    const context = this.context;
+    if (samplesReady(context, project)) return;
+    try {
+      await decodeAll(context, sampleRequests(project, { from: this.beat, to: Infinity }), 4);
+      await decodeAll(context, sampleRequests(project), 4);
+    } catch {
+      /* A missing bank surfaces as a play error; warming is best effort. */
+    }
+  }
+  /** Create the audio context ahead of the first press (needs a user gesture
+   * in Safari before it can run, but decoding works while suspended). */
+  prime(project: ScoreProject) {
+    if (!this.context) {
+      try {
+        this.createContext();
+      } catch {
+        return;
+      }
+    }
+    void this.warm(project);
   }
   private track(nodes: AudioScheduledSourceNode[]) {
     for (const node of nodes) {
@@ -387,8 +456,14 @@ export class PlaybackEngine {
         return;
       }
     } else {
-      await prepareSamples(context, project);
+      // Only the opening seconds must be ready before the first note sounds.
+      // Everything else keeps decoding while playback runs; the scheduler looks
+      // 160 ms ahead, and a sample that is still decoding is skipped once rather
+      // than delaying the whole start.
+      const lead = (PLAYBACK_READY_SECONDS * project.tempo) / 60;
+      await decodeAll(context, sampleRequests(project, { from: this.beat, to: this.beat + lead }));
       if (generation !== this.generation) return;
+      void this.warm(project);
       for (const gain of this.partGains.values()) gain.disconnect();
       this.partPanners.forEach((panner) => panner.disconnect());
       this.partPanners = [];
@@ -419,7 +494,35 @@ export class PlaybackEngine {
     this.playing = true;
     this.timer = setInterval(() => this.tick(), 25);
     this.tick();
+    if (options.mode === 'score') void this.checkOutputClock(project, options, generation);
   }
+  /** If the audio clock does not move after starting, the browser's audio
+   * output is stuck (seen in Safari after a Bluetooth route change). Rebuild
+   * the context once and restart from the same beat; report if that fails. */
+  private async checkOutputClock(project: ScoreProject, options: PlaybackOptions, generation: number) {
+    const context = this.context;
+    if (!context) return;
+    const before = context.currentTime;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    if (generation !== this.generation || !this.playing || context !== this.context) return;
+    if (context.currentTime - before > 0.05) {
+      this.restartedForClock = false;
+      return;
+    }
+    const beat = this.beat;
+    this.pause();
+    this.dropContext();
+    if (this.restartedForClock) {
+      this.restartedForClock = false;
+      this.onOutputProblem?.('浏览器的音频输出没有在走，可能是耳机切换后浏览器音频卡住了。请刷新页面；若仍无声，重启浏览器。');
+      return;
+    }
+    this.restartedForClock = true;
+    await this.play(project, { ...options, startBeat: beat, countIn: false });
+  }
+  private restartedForClock = false;
+  /** Called with a user-facing message when audio output cannot be recovered. */
+  onOutputProblem?: (message: string) => void;
   private resetIndex() {
     this.index = this.events.findIndex(
       (event) => event.note.start + event.note.duration > this.anchorBeat + 1e-6,
