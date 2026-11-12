@@ -328,7 +328,7 @@ flowchart TD
   subgraph Vocal["Lead vocal · syllable-phrasing-5"]
     SEP --> GE[GAME 1.0.3 Medium, 8 steps · recognition]
     SEP --> FC[FCPE f0 evidence · recognition]
-    LRC[Optional user LRC] --> SOFA[SOFA word boundaries · recognition]
+    LRC[Optional LRC · official line-timed lyrics when available] --> SOFA[SOFA word boundaries · recognition]
     GE --> SS[singing_score: approaches, song-level vocal phase, rhythm · notation inference]
     FC --> SS
     SOFA --> SS
