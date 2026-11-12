@@ -8,7 +8,7 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
-## 2026-11-12: official LRC baseline and backing second layer (candidate)
+## 2026-11-12: official LRC baseline and backing second layer (rejected by ear)
 
 - **LRC input (production, no code change).** The 《空耳》 lyric input is the
   official NetEase line-timed LRC. The text matches two other sources. Line times
@@ -29,7 +29,8 @@ Legend: solid = runs in production; dashed = in progress on a branch;
     - The 78 existing notes and every other part are identical.
   - **Coverage.** The line now covers more of the backing time that is voiced at a pitch distinct from the lead, in bars 47-64: 46 % -> 54 %.
   - **Judgement.** The added layer is pointillistic: 45/51 are sixteenths. Bars 56-59 gain 7 notes.
-  - **Next step.** It awaits Bobby's listening before any production change.
+  - **Bobby's listening (11-12): rejected, too fragmented.** The formal lead + one-line harmony sounds better. Production keeps the 78-note line unchanged.
+  - **Next step.** SepACap or UNMIXX multi-singer separation on bars 56-59 (recognition layer, rules fixed first), in the vocal & harmony session.
 
 ```mermaid
 flowchart LR
@@ -37,9 +38,9 @@ flowchart LR
   BG --> V1[Harmony voice 1 · 78 notes · production]
   K -.-> CU[Cuesta Late/Deep multi-F0 · recognition · candidate]
   LP[Lead pYIN + existing line +-12] -.exclude.-> CU
-  CU -.-> V2[Harmony voice 2 · 51 notes · same staff · candidate]
-  V1 --> H[One 「和声」 staff]
-  V2 -.listening gate.-> H
+  CU -.-> V2[Harmony voice 2 · 51 notes · rejected by ear: too fragmented]
+  V1 --> H[One 「和声」 staff · production]
+  K -.next.-> SEPA[SepACap / UNMIXX multi-singer separation, bars 56-59 · recognition · next]
 ```
 
 ## 2026-11-11 evening: listening feedback round 2
@@ -372,8 +373,8 @@ flowchart TD
     SEP --> K[KARA2 lead/backing split · recognition]
     K --> BG[GAME Medium on backing + FCPE · recognition]
     BG --> BS[singing_score, no lyrics · notation inference]
-    K -.-> CU[Cuesta multi-F0 voice 2 · candidate, listening gate]
-    CU -.-> BS
+    K -.-> CU[Cuesta multi-F0 voice 2 · rejected by ear]
+    K -.-> SEPA[SepACap / UNMIXX multi-singer separation · next experiment]
   end
 
   subgraph Sources["Source review · multiscore-sources-9"]
