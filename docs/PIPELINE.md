@@ -8,6 +8,40 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-12: official LRC baseline and backing second layer (candidate)
+
+- **LRC input (production, no code change).** The 《空耳》 lyric input is the
+  official NetEase line-timed LRC. The text matches two other sources. Line times
+  move to a clean lead-stem onset only within 0.7 s.
+  Formal upload `73ec215e…` on main `23a5bcd` reproduces the offline baseline
+  note for note. Lead 1-70 exact 239 -> 245, re-attacks 67 -> 76, S2 8 -> 7,
+  extra 46 -> 39, but bars 55-70 41 -> 39. Every other part is identical.
+  This upload is now the baseline for A/B.
+- **Rejected (vocal session, one run each).**
+  - `syllable-scoop-grace-1`: 245 -> 249, but bars 13-24 -2 and re-attacks -2.
+  - `word-onset-written-1`: S2 7 -> 6, below the <= 4 gate.
+- **Backing second layer `cuesta-second-voice-1`** (recognition layer, candidate, not merged):
+  - **What it does.** Cuesta Late/Deep multi-F0 (MIT) runs on the same KARA2 backing stem. It adds a voice 2 to the single 「和声」 staff. It excludes the lead pitch, the existing line, and that line's octave.
+  - **Gates.** All seven pre-registered gates passed on one run:
+    - 46/51 added notes are supported by pYIN or Basic Pitch.
+    - 2/51 are unison with the lead.
+    - Control sections get 0 added notes.
+    - The 78 existing notes and every other part are identical.
+  - **Coverage.** The line now covers more of the backing time that is voiced at a pitch distinct from the lead, in bars 47-64: 46 % -> 54 %.
+  - **Judgement.** The added layer is pointillistic: 45/51 are sixteenths. Bars 56-59 gain 7 notes.
+  - **Next step.** It awaits Bobby's listening before any production change.
+
+```mermaid
+flowchart LR
+  K[KARA2 backing stem · recognition] --> BG[GAME Medium + FCPE · recognition]
+  BG --> V1[Harmony voice 1 · 78 notes · production]
+  K -.-> CU[Cuesta Late/Deep multi-F0 · recognition · candidate]
+  LP[Lead pYIN + existing line +-12] -.exclude.-> CU
+  CU -.-> V2[Harmony voice 2 · 51 notes · same staff · candidate]
+  V1 --> H[One 「和声」 staff]
+  V2 -.listening gate.-> H
+```
+
 ## 2026-11-11 evening: listening feedback round 2
 
 Bobby listened in Chrome (Safari's media process was wedged, see below).
@@ -317,7 +351,7 @@ string ensemble and its bassoon/clarinet stay separate. Low-evidence guitar,
 bass, synth lead and synth pad in Kong Er have no same-channel host and no
 unison cover; they are kept unchanged and listed as pending in the audit.
 
-## Production pipeline (main, 2026-11-11 evening)
+## Production pipeline (main, 2026-11-12)
 
 ```mermaid
 flowchart TD
@@ -338,6 +372,8 @@ flowchart TD
     SEP --> K[KARA2 lead/backing split · recognition]
     K --> BG[GAME Medium on backing + FCPE · recognition]
     BG --> BS[singing_score, no lyrics · notation inference]
+    K -.-> CU[Cuesta multi-F0 voice 2 · candidate, listening gate]
+    CU -.-> BS
   end
 
   subgraph Sources["Source review · multiscore-sources-9"]
