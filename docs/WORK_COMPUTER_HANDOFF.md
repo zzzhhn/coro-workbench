@@ -31,6 +31,19 @@
   经 GAME 后得到 13 音，其中 9 个是十六分或更短，不比 Cuesta 连贯。UNMIXX 未跑。正式版和声线不变。
   试听在桌面 `空耳-试听对比/伴唱-多人声分离-56到59小节/`（含 SepACap 7 路原始输出）；
   记录在私有 `work/harmony-multivoice-20261112/REVIEW.md`，模型来源与哈希见 `models/sepacap/SOURCE.md`（不入库）。
+- **两轮实验的复现信息**（「主唱 & 和声」session；都不入库，也不进正式流程）：
+  - 模型：`models/multif0-cuesta/`（Cuesta Late/Deep，TF2 移植版 `MirjamVisscher/multif0-estimation-polyvocals-tf2@720e8e4`，MIT）；
+    `models/sepacap/`（HF `Tino3141/sepacap@15aa140`，MIT 只写在 HF 模型卡上，GitHub 代码 `ETH-DISCO/SepACap@bb96b6c` 没有 LICENSE 文件）。
+    每个目录都有 `SOURCE.md`，写了哈希和加载检查（SepACap：缺失键 0、多余键 0）。
+  - 运行环境：不进共享 `.venv`，分别在 `~/Coro-local-assets/multif0-venv`（TF 2.21）
+    和 `~/Coro-local-assets/sepacap-venv`（torch CPU），代码副本在同目录的 `multif0-cuesta/`、`sepacap-src/`。
+  - 脚本（私有 `work/harmony-multivoice-20261112/`）：第一轮 `cuesta_salience.py` → `build_candidate.py` → `accept.py`；
+    第二轮 `sepacap_run.py` → `sepacap_accept_sep.py` → `sepacap_transcribe.py` → `sepacap_accept_c.py`，
+    试听由 `sepacap_pack.py`、`sepacap_render.mjs` 导出。重模型都在 `server.analysis_lock` 下串行；
+    SepACap 用 4 秒窗、2 秒跳，CPU 上每窗约 10 秒。
+  - 尺子的已知偏差：分离输出上的 pYIN 把不少噪声帧算成有声，标在 C6 上限（MIDI 83.2）。
+    「近单声部」这一门因此偏乐观；以后用 pYIN 评分离轨，要先排除贴着上限的帧。
+  - 还没试：UNMIXX（许可不明，只能本地研究），以及改用 Demucs 人声做输入。
 
 ## 2026-11-11 晚间更新（第二轮试听）
 
