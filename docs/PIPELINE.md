@@ -8,7 +8,7 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
-## 2026-11-12: official LRC baseline and backing second layer (rejected by ear)
+## 2026-11-12: official LRC baseline; backing second layer and multi-singer separation rejected
 
 - **LRC input (production, no code change).** The 《空耳》 lyric input is the
   official NetEase line-timed LRC. The text matches two other sources. Line times
@@ -30,7 +30,16 @@ Legend: solid = runs in production; dashed = in progress on a branch;
   - **Coverage.** The line now covers more of the backing time that is voiced at a pitch distinct from the lead, in bars 47-64: 46 % -> 54 %.
   - **Judgement.** The added layer is pointillistic: 45/51 are sixteenths. Bars 56-59 gain 7 notes.
   - **Bobby's listening (11-12): rejected, too fragmented.** The formal lead + one-line harmony sounds better. Production keeps the 78-note line unchanged.
-  - **Next step.** SepACap or UNMIXX multi-singer separation on bars 56-59 (recognition layer, rules fixed first), in the vocal & harmony session.
+- **SepACap multi-singer separation, bars 56-59** (recognition layer, vocal & harmony session): **abandoned on pre-registered gates**, one run, no retuning.
+  - **Input.** The KARA2 backing stem. Controls: bars 13-16 (no backing) and 47-50 (single harmony).
+  - **Low layer separates.** The bass and tenor outputs follow the formal octave-below line on about 70 % of voiced frames.
+  - **Upper (female) layer does not.** The selected upper output fails three gates:
+    - 23 % of its frames are unison with the lead (gate <= 20 %).
+    - It is only 12 dB quieter in the no-backing control (gate >= 20 dB).
+    - Only 21 % of it lands on the single harmony line in bars 47-50 (gate >= 50 %).
+  - **Through GAME.** 13 notes; 9 are a sixteenth or shorter; mean 0.31 beat. Only 3/13 are supported; 4/13 are unison with the lead. This is no more continuous than Cuesta.
+  - **Likely cause (not verified).** A domain gap: clean jaCappella multitracks versus a -30 dB KARA2 residual with lead bleed. UNMIXX was not run.
+  - **Production.** It keeps the one-line, 78-note harmony, which Bobby preferred by ear.
 
 ```mermaid
 flowchart LR
@@ -40,7 +49,7 @@ flowchart LR
   LP[Lead pYIN + existing line +-12] -.exclude.-> CU
   CU -.-> V2[Harmony voice 2 · 51 notes · rejected by ear: too fragmented]
   V1 --> H[One 「和声」 staff · production]
-  K -.next.-> SEPA[SepACap / UNMIXX multi-singer separation, bars 56-59 · recognition · next]
+  K -.-> SEPA[SepACap multi-singer separation, bars 56-59 · rejected on gates: upper output is lead bleed]
 ```
 
 ## 2026-11-11 evening: listening feedback round 2
@@ -374,7 +383,7 @@ flowchart TD
     K --> BG[GAME Medium on backing + FCPE · recognition]
     BG --> BS[singing_score, no lyrics · notation inference]
     K -.-> CU[Cuesta multi-F0 voice 2 · rejected by ear]
-    K -.-> SEPA[SepACap / UNMIXX multi-singer separation · next experiment]
+    K -.-> SEPA[SepACap multi-singer separation · rejected on gates]
   end
 
   subgraph Sources["Source review · multiscore-sources-9"]
