@@ -112,7 +112,11 @@ transcription or feature parity with a professional notation publisher.
 SATB, SSAA and TTBB are editable proposals. Melody register adaptation, range
 constraints, non-crossing harmony and breath timing are implemented; actual
 tessitura, pronunciation, fatigue and musical phrasing are not guaranteed.
-Accompaniment texture can still be mechanical. Choir samples provide pitches,
+Accompaniment texture is mechanical: on a correct reference score the current arranger
+moves the lead an octave up into Soprano, repeats one rhythm in all inner voices for the whole
+song and uses a fixed VP pattern (2026-11-13 baseline). Arranger v2 is being planned; see
+[PRODUCT_DIRECTION.md](PRODUCT_DIRECTION.md). MIDI files exported with a ~95% note gate import
+with shortened durations and fragment into 64th notes on MusicXML export; prefer MusicXML. Choir samples provide pitches,
 not original lyrics or a cloned singer. Vocal percussion playback uses a drum
 reference, not a human beatbox performance.
 

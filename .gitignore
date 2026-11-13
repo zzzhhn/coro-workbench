@@ -34,6 +34,7 @@ work/
 !/docs/VOCAL_REBUILD_API.md
 !/docs/MELBAND_SETUP.md
 !/docs/PRODUCT_DECISIONS.md
+!/docs/PRODUCT_DIRECTION.md
 !/docs/MVP_STATUS.md
 !/docs/PIPELINE.md
 *.coro

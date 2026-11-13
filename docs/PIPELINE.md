@@ -1,12 +1,45 @@
 # Coro pipeline (v5)
 
-Status 2026-11-10. Each node names its layer. A change touches one layer at a
+Status 2026-11-13 (product pivot, see below; audio sections describe the draft-input path). Each node names its layer. A change touches one layer at a
 time and must keep raw model output, the previous notation and the current
 candidate for comparison. Passing tests or a connected model is not musical
 acceptance. Bobby's ear and the human reference score are.
 
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
+
+## 2026-11-13: product pivot — score → a cappella arrangement becomes the core
+
+Decision (Bobby, 2026-11-13): the core path is now a reliable score turned into a
+singable a cappella arrangement. Audio-to-full-score becomes a draft input. Full
+evidence and the new pipeline diagram are in [PRODUCT_DIRECTION.md](PRODUCT_DIRECTION.md).
+
+- **Evidence.** No published system reaches ~85% for full multi-instrument songs.
+  - Vendor self-benchmarks give score-level means of .61–.67: rock band .36, orchestra .22.
+  - Independent and academic pop results are lower (MulTTiPop onset F1 about 38).
+- **Same song, same reference.** Kong Er bars 1–70, exact pitch on the same sixteenth:
+
+  | Route | Lead | Piano | Strings | All |
+  |---|---:|---:|---:|---:|
+  | Audio, formal job `73ec215e…` | .749 | .611 | .198 | .548 |
+  | Local Audiveris reading the printed PDF of the same hand score | .967 | .870 | .807 | .880 |
+
+  The PDF is a clean vector export, the best case for OMR. Scans, photos and jianpu were not tested.
+- **The arranger, not the input, is the bottleneck.** Given the 100%-correct hand
+  score, the current `arrangeForVoices` output is mechanical:
+  - It moves the lead an octave up into Soprano.
+  - A/T/B repeat one rhythm in all 70 bars, with only oo/dm.
+  - VP is a fixed pattern throughout.
+  - Its own report flags only octave folds, inferred chords and three large leaps; nothing flags the uniform texture.
+- **Input bug found.** Some notation-software MIDI exports gate notes at about 95%
+  (0.475 beat for 0.5). `fromMidi` keeps that, so MusicXML export shows 64th-note
+  fragments and quintuplets. MusicXML input does not have the problem.
+- **Maintenance mode.** Note-level piano inner voices, strings and drums from audio
+  get bug fixes only. Lead and harmony recognition stays with the vocal & harmony
+  session, because it feeds the arranger.
+- **Arranger v2 research.** Running in a With (Claude Fable 5.2 High) session.
+  - Brief and plan are private: `work/research-20261114-arranger/`.
+  - No arranger code changes until Bobby approves the plan.
 
 ## 2026-11-12: official LRC baseline; backing second layer and multi-singer separation rejected
 
