@@ -1,0 +1,1469 @@
+{
+ "version": 1,
+ "engine": "homr",
+ "pages": [
+  {
+   "page": 0,
+   "width": 2000,
+   "height": 2830,
+   "firstMeasure": 1,
+   "measureCount": 18
+  }
+ ],
+ "staves": [
+  {
+   "page": 0,
+   "system": 0,
+   "partIndex": 0,
+   "box": [
+    42,
+    210,
+    1948,
+    280
+   ],
+   "grand": false
+  },
+  {
+   "page": 0,
+   "system": 2,
+   "partIndex": 0,
+   "box": [
+    42,
+    622,
+    1948,
+    692
+   ],
+   "grand": false
+  },
+  {
+   "page": 0,
+   "system": 1,
+   "partIndex": 0,
+   "box": [
+    42,
+    413,
+    1948,
+    486
+   ],
+   "grand": false
+  }
+ ],
+ "measures": [
+  {
+   "partIndex": 0,
+   "measure": 1,
+   "page": 0,
+   "system": 0,
+   "box": [
+    42,
+    210,
+    293,
+    280
+   ],
+   "edges": [
+    "estimated",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 2,
+   "page": 0,
+   "system": 0,
+   "box": [
+    293,
+    210,
+    616,
+    280
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 3,
+   "page": 0,
+   "system": 0,
+   "box": [
+    616,
+    210,
+    917,
+    280
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 4,
+   "page": 0,
+   "system": 0,
+   "box": [
+    917,
+    210,
+    1241,
+    280
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 5,
+   "page": 0,
+   "system": 0,
+   "box": [
+    1241,
+    210,
+    1606,
+    280
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 6,
+   "page": 0,
+   "system": 0,
+   "box": [
+    1606,
+    210,
+    1948,
+    280
+   ],
+   "edges": [
+    "barline",
+    "estimated"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 7,
+   "page": 0,
+   "system": 1,
+   "box": [
+    42,
+    413,
+    453,
+    486
+   ],
+   "edges": [
+    "estimated",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 8,
+   "page": 0,
+   "system": 1,
+   "box": [
+    453,
+    413,
+    789,
+    486
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 9,
+   "page": 0,
+   "system": 1,
+   "box": [
+    789,
+    413,
+    1084,
+    486
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 10,
+   "page": 0,
+   "system": 1,
+   "box": [
+    1084,
+    413,
+    1288,
+    486
+   ],
+   "edges": [
+    "barline",
+    "estimated"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 11,
+   "page": 0,
+   "system": 1,
+   "box": [
+    1288,
+    413,
+    1656,
+    486
+   ],
+   "edges": [
+    "estimated",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 12,
+   "page": 0,
+   "system": 1,
+   "box": [
+    1656,
+    413,
+    1948,
+    486
+   ],
+   "edges": [
+    "barline",
+    "estimated"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 13,
+   "page": 0,
+   "system": 2,
+   "box": [
+    42,
+    622,
+    450,
+    692
+   ],
+   "edges": [
+    "estimated",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 14,
+   "page": 0,
+   "system": 2,
+   "box": [
+    450,
+    622,
+    744,
+    692
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 15,
+   "page": 0,
+   "system": 2,
+   "box": [
+    744,
+    622,
+    1055,
+    692
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 16,
+   "page": 0,
+   "system": 2,
+   "box": [
+    1055,
+    622,
+    1349,
+    692
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 17,
+   "page": 0,
+   "system": 2,
+   "box": [
+    1349,
+    622,
+    1661,
+    692
+   ],
+   "edges": [
+    "barline",
+    "barline"
+   ]
+  },
+  {
+   "partIndex": 0,
+   "measure": 18,
+   "page": 0,
+   "system": 2,
+   "box": [
+    1661,
+    622,
+    1948,
+    692
+   ],
+   "edges": [
+    "barline",
+    "estimated"
+   ]
+  }
+ ],
+ "notes": [
+  {
+   "ref": "omr-0-0",
+   "partIndex": 0,
+   "measure": 1,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    217,
+    236
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-1",
+   "partIndex": 0,
+   "measure": 1,
+   "onsetBeats": 0.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    256,
+    265
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-2",
+   "partIndex": 0,
+   "measure": 2,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    324,
+    244
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-3",
+   "partIndex": 0,
+   "measure": 2,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    390,
+    248
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-4",
+   "partIndex": 0,
+   "measure": 2,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    449,
+    250
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-5",
+   "partIndex": 0,
+   "measure": 2,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    537,
+    244
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-6",
+   "partIndex": 0,
+   "measure": 2,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    578,
+    266
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-7",
+   "partIndex": 0,
+   "measure": 3,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    644,
+    234
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-8",
+   "partIndex": 0,
+   "measure": 3,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    711,
+    246
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-9",
+   "partIndex": 0,
+   "measure": 3,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    777,
+    246
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-10",
+   "partIndex": 0,
+   "measure": 3,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    839,
+    194
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-11",
+   "partIndex": 0,
+   "measure": 4,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    948,
+    234
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-12",
+   "partIndex": 0,
+   "measure": 4,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1009,
+    248
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-13",
+   "partIndex": 0,
+   "measure": 4,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1080,
+    246
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-14",
+   "partIndex": 0,
+   "measure": 4,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1156,
+    246
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-15",
+   "partIndex": 0,
+   "measure": 4,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1204,
+    269
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-16",
+   "partIndex": 0,
+   "measure": 5,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1278,
+    240
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-17",
+   "partIndex": 0,
+   "measure": 5,
+   "onsetBeats": 0.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1314,
+    260
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-18",
+   "partIndex": 0,
+   "measure": 5,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1359,
+    243
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-19",
+   "partIndex": 0,
+   "measure": 5,
+   "onsetBeats": 1.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1398,
+    231
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-20",
+   "partIndex": 0,
+   "measure": 5,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1454,
+    234
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-21",
+   "partIndex": 0,
+   "measure": 5,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1521,
+    260
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-22",
+   "partIndex": 0,
+   "measure": 5,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1575,
+    241
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-23",
+   "partIndex": 0,
+   "measure": 6,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1620,
+    227
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-24",
+   "partIndex": 0,
+   "measure": 6,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1695,
+    242
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-25",
+   "partIndex": 0,
+   "measure": 6,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1774,
+    218
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-26",
+   "partIndex": 0,
+   "measure": 6,
+   "onsetBeats": 2.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1810,
+    233
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-27",
+   "partIndex": 0,
+   "measure": 6,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1872,
+    236
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-28",
+   "partIndex": 0,
+   "measure": 6,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1912,
+    256
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-29",
+   "partIndex": 0,
+   "measure": 7,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    165,
+    452
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-30",
+   "partIndex": 0,
+   "measure": 7,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    240,
+    446
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-31",
+   "partIndex": 0,
+   "measure": 7,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    295,
+    405
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-32",
+   "partIndex": 0,
+   "measure": 7,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    342,
+    407
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-33",
+   "partIndex": 0,
+   "measure": 7,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    414,
+    407
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-34",
+   "partIndex": 0,
+   "measure": 8,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    479,
+    396
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-35",
+   "partIndex": 0,
+   "measure": 8,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    530,
+    410
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-36",
+   "partIndex": 0,
+   "measure": 8,
+   "onsetBeats": 1.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    568,
+    429
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-37",
+   "partIndex": 0,
+   "measure": 8,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    629,
+    414
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-38",
+   "partIndex": 0,
+   "measure": 8,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    678,
+    408
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-39",
+   "partIndex": 0,
+   "measure": 8,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    748,
+    430
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-40",
+   "partIndex": 0,
+   "measure": 9,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    811,
+    435
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-41",
+   "partIndex": 0,
+   "measure": 9,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    885,
+    453
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-42",
+   "partIndex": 0,
+   "measure": 9,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    937,
+    458
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-43",
+   "partIndex": 0,
+   "measure": 10,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1153,
+    455
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-44",
+   "partIndex": 0,
+   "measure": 10,
+   "onsetBeats": 0.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1211,
+    437
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-45",
+   "partIndex": 0,
+   "measure": 11,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1364,
+    444
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-46",
+   "partIndex": 0,
+   "measure": 11,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1451,
+    456
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-47",
+   "partIndex": 0,
+   "measure": 11,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1511,
+    413
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-48",
+   "partIndex": 0,
+   "measure": 11,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1577,
+    431
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-49",
+   "partIndex": 0,
+   "measure": 12,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1667,
+    433
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-50",
+   "partIndex": 0,
+   "measure": 12,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1747,
+    440
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-51",
+   "partIndex": 0,
+   "measure": 12,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1816,
+    433
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-52",
+   "partIndex": 0,
+   "measure": 12,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1877,
+    422
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-53",
+   "partIndex": 0,
+   "measure": 13,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    169,
+    643
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-54",
+   "partIndex": 0,
+   "measure": 13,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    223,
+    654
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-55",
+   "partIndex": 0,
+   "measure": 13,
+   "onsetBeats": 1.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    267,
+    657
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-56",
+   "partIndex": 0,
+   "measure": 13,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    314,
+    619
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-57",
+   "partIndex": 0,
+   "measure": 13,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    313,
+    612
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-58",
+   "partIndex": 0,
+   "measure": 13,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    412,
+    613
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-59",
+   "partIndex": 0,
+   "measure": 14,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    471,
+    601
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-60",
+   "partIndex": 0,
+   "measure": 14,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    539,
+    650
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-61",
+   "partIndex": 0,
+   "measure": 14,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    598,
+    654
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-62",
+   "partIndex": 0,
+   "measure": 14,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    660,
+    677
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-63",
+   "partIndex": 0,
+   "measure": 14,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    711,
+    658
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-64",
+   "partIndex": 0,
+   "measure": 15,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    780,
+    649
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-65",
+   "partIndex": 0,
+   "measure": 15,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    833,
+    654
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-66",
+   "partIndex": 0,
+   "measure": 15,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    900,
+    627
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-67",
+   "partIndex": 0,
+   "measure": 15,
+   "onsetBeats": 2.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    934,
+    659
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-68",
+   "partIndex": 0,
+   "measure": 15,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    983,
+    658
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-69",
+   "partIndex": 0,
+   "measure": 15,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1019,
+    678
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-70",
+   "partIndex": 0,
+   "measure": 16,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1083,
+    649
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-71",
+   "partIndex": 0,
+   "measure": 16,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1149,
+    654
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-72",
+   "partIndex": 0,
+   "measure": 16,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1205,
+    620
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-73",
+   "partIndex": 0,
+   "measure": 16,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1196,
+    613
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-74",
+   "partIndex": 0,
+   "measure": 16,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1308,
+    604
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-75",
+   "partIndex": 0,
+   "measure": 17,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1378,
+    590
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-76",
+   "partIndex": 0,
+   "measure": 17,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1419,
+    609
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-77",
+   "partIndex": 0,
+   "measure": 17,
+   "onsetBeats": 1.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1445,
+    632
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-78",
+   "partIndex": 0,
+   "measure": 17,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1519,
+    619
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-79",
+   "partIndex": 0,
+   "measure": 17,
+   "onsetBeats": 3.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1496,
+    618
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-80",
+   "partIndex": 0,
+   "measure": 17,
+   "onsetBeats": 3.5,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1627,
+    635
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-81",
+   "partIndex": 0,
+   "measure": 18,
+   "onsetBeats": 0.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1680,
+    634
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-82",
+   "partIndex": 0,
+   "measure": 18,
+   "onsetBeats": 1.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1745,
+    665
+   ],
+   "precision": "approximate"
+  },
+  {
+   "ref": "omr-0-83",
+   "partIndex": 0,
+   "measure": 18,
+   "onsetBeats": 2.0,
+   "staff": 1,
+   "page": 0,
+   "point": [
+    1801,
+    662
+   ],
+   "precision": "approximate"
+  }
+ ],
+ "issues": [
+  {
+   "kind": "measure-underfull",
+   "severity": "check",
+   "page": 0,
+   "partIndex": 0,
+   "measure": 1,
+   "message": "第 1 小节读出 1 拍，拍号要求 4 拍；可能是弱起或反复处的分割小节，也可能漏读了音符或休止。"
+  },
+  {
+   "kind": "measure-underfull",
+   "severity": "check",
+   "page": 0,
+   "partIndex": 0,
+   "measure": 9,
+   "message": "第 9 小节读出 3 拍，拍号要求 4 拍；可能是弱起或反复处的分割小节，也可能漏读了音符或休止。"
+  },
+  {
+   "kind": "measure-underfull",
+   "severity": "check",
+   "page": 0,
+   "partIndex": 0,
+   "measure": 10,
+   "message": "第 10 小节读出 1 拍，拍号要求 4 拍；可能是弱起或反复处的分割小节，也可能漏读了音符或休止。"
+  },
+  {
+   "kind": "measure-underfull",
+   "severity": "check",
+   "page": 0,
+   "partIndex": 0,
+   "measure": 18,
+   "message": "第 18 小节读出 3 拍，拍号要求 4 拍；可能是弱起或反复处的分割小节，也可能漏读了音符或休止。"
+  }
+ ]
+}
