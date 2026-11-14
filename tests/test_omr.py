@@ -374,12 +374,13 @@ def test_homr_text_layer_notices_do_not_repeat_audiveris_ocr_advice():
     assert not any("未启用文字层" in notice for notice in with_text)
 
 
-def test_text_layer_is_off_unless_requested(client):
+def test_text_layer_is_on_by_default_and_can_be_turned_off(client):
+    # Default on since confirmation test C4 (2026-11-15) passed every gate.
     transport, manager, _ = client
     created = transport.post("/api/omr", files={"file": ("score.png", image_bytes())}).json()
     import json as _json
     request = _json.loads((manager.directory / created["id"] / "request.json").read_text())
-    assert request["text_layer"] is False
-    created = transport.post("/api/omr", data={"text_layer": "true"}, files={"file": ("score.png", image_bytes())}).json()
-    request = _json.loads((manager.directory / created["id"] / "request.json").read_text())
     assert request["text_layer"] is True
+    created = transport.post("/api/omr", data={"text_layer": "false"}, files={"file": ("score.png", image_bytes())}).json()
+    request = _json.loads((manager.directory / created["id"] / "request.json").read_text())
+    assert request["text_layer"] is False
