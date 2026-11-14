@@ -118,6 +118,32 @@ One layer changed: which recognizer reads PDF/images. Raw output of every engine
 - **Known gaps of homr.** No lyrics, chord symbols or part names (0 in every output); about 0.7 of the reference's ties; parts named Voice/Piano. Audiveris remains the choice when you want it to try lyrics.
 - Test pass and these scores are not musical acceptance. Compare against the source page before rehearsal.
 
+## 2026-11-15: score input and editor status
+
+```mermaid
+flowchart LR
+  PDF[PDF / image] --> HOMR[homr notes, Audiveris fallback]
+  HOMR --> TXT[Text layer v8, off by default]
+  HOMR --> REV[Review data: page boxes, bar boxes, note anchors, issues]
+  REV --> UI[Source-image review panel and unified review queue]
+  TXT --> UI
+  UI --> ED[Keyboard and mouse editor: pitch, duration, tuplets, voices, ranges, bars]
+  ED --> SCORE[Reviewed editable score]
+```
+
+- **Production:** homr OMR; experimental text layer v8 (off by default); per-note
+  `sourceRef` and `source.omrReview`; source-image review panel with two-way
+  jumps; one review queue filtered by reason.
+- **Editor layers merged:** keyboard proof-reading (#27), source review (#31),
+  range select/copy/paste and voices 1-4 (#33), tuplets and onset repair (#34),
+  mouse note entry (#36), insert/delete bars (#37).
+- **Verified:** a formal homr upload of Kong Er pages 1-6 mapped 604/604 notes to
+  the page; clicking a score note opened the matching page region, and `]`
+  moved to the next review item.
+- **Open:** bar edges at the start and end of each line are estimated. The text
+  layer failed its confirmation tests on instrumental scan pages (performance
+  terms read as lyrics). Real phone photos remain untested.
+
 ## 2026-11-14: work-computer priority moves to score input and editing
 
 Bobby's listening review: none of the first Solo + SATB drafts is yet a
