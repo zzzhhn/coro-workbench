@@ -7,6 +7,7 @@
 import type { ChordEvent, NoteEvent, ScoreProject } from './types';
 import { beatsPerBar } from './music';
 import { editId } from './editor';
+import { shiftLayout } from './layout';
 
 const EPS = 1e-6;
 const round = (beat: number) => Math.round(beat * 960) / 960;
@@ -69,10 +70,11 @@ export function insertMeasures(project: ScoreProject, bar: number, count = 1): M
   });
   next.measures += count;
   next.updatedAt = new Date().toISOString();
+  const shifted = shiftLayout(next, { at: bar, inserted: count });
   const warnings: string[] = [];
   if (split) warnings.push(`${split} 个跨插入点的长音被分成两段，新小节为空。`);
   audioWarning(project, warnings);
-  return { project: next, warnings };
+  return { project: shifted, warnings };
 }
 
 /**
@@ -131,10 +133,11 @@ export function deleteMeasures(project: ScoreProject, startBar: number, endBar =
   });
   next.measures -= count;
   next.updatedAt = new Date().toISOString();
+  const shifted = shiftLayout(next, { from: startBar, to: endBar });
   const warnings: string[] = [];
   if (removed) warnings.push(`删除了 ${removed} 个音符/休止。`);
   if (ringing) warnings.push(`其中 ${ringing} 个从被删小节延续到后面的长音一并删除。`);
   if (cut) warnings.push(`${cut} 个延入被删小节的长音在删除处截短。`);
   audioWarning(project, warnings);
-  return { project: next, warnings };
+  return { project: shifted, warnings };
 }

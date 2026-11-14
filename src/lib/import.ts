@@ -30,9 +30,21 @@ export function projectFromOmr(job: OmrJob): ScoreProject {
   if (job.review) {
     const problems = validateOmrReview(job.review);
     const pageCount = project.source.pages?.length ?? 0;
-    if (!problems.length && job.review.pages.every((page) => page.page < pageCount))
+    if (!problems.length && job.review.pages.every((page) => page.page < pageCount)) {
       project.source.omrReview = structuredClone(job.review);
-    else project.source.warnings.push('识谱原图对照数据无效，已忽略；音符与原谱页不受影响。');
+      // Page starts of the original: merged multi-page MusicXML does not always say new-page.
+      const pageBreaks = job.review.pages
+        .map((page) => page.firstMeasure)
+        .filter((bar) => bar >= 2 && bar <= project.measures);
+      if (pageBreaks.length) {
+        const layout = project.layout ?? { systemBreaks: [], pageBreaks: [], repeat: { clef: 'every', key: 'every', labels: 'every' } };
+        project.layout = {
+          ...layout,
+          systemBreaks: layout.systemBreaks.filter((bar) => !pageBreaks.includes(bar)),
+          pageBreaks: [...new Set([...layout.pageBreaks, ...pageBreaks])].sort((a, b) => a - b),
+        };
+      }
+    } else project.source.warnings.push('识谱原图对照数据无效，已忽略；音符与原谱页不受影响。');
   }
   return project;
 }

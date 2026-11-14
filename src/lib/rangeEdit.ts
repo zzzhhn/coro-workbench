@@ -7,6 +7,7 @@
 import type { ChordEvent, NoteEvent, ScorePart, ScoreProject } from './types';
 import { beatsPerBar } from './music';
 import { editId, type Selection } from './editor';
+import { shiftLayout } from './layout';
 
 const EPS = 1e-6;
 const round = (beat: number) => Math.round(beat * 960) / 960;
@@ -272,7 +273,7 @@ export function pasteClip(
   if (next.measures > 2048) throw new Error('工程最多支持 2048 小节。');
   next.updatedAt = new Date().toISOString();
   return {
-    project: next,
+    project: mode === 'insert' ? shiftLayout(next, { at: bar, inserted: clip.bars }) : next,
     range: { partIds: targets.map((part) => part.id), startBar: bar, endBar: bar + clip.bars - 1 },
     warnings,
   };

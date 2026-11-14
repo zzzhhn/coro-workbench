@@ -1,5 +1,6 @@
 import type { NoteEvent, ScorePart, ScoreProject } from './types';
 import { beatsPerBar, transposeChordSymbol, transposeKey } from './music';
+import { shiftLayout } from './layout';
 
 export interface Selection {
   partId: string;
@@ -151,7 +152,7 @@ export function duplicateMeasure(project: ScoreProject, measure: number): ScoreP
       '插入小节后，乐谱时间线与原音频不再逐拍对应；原音频保持不变。',
     ];
   next.updatedAt = new Date().toISOString();
-  return next;
+  return shiftLayout(next, { at: measure + 1, inserted: 1 });
 }
 
 export function changePart(project: ScoreProject, partId: string, patch: Partial<ScorePart>): ScoreProject {

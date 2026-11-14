@@ -112,7 +112,9 @@ export async function renderScorePdf(project: ScoreProject, partIds?: string[]):
         renderWidth = (width * 250) / height;
         height = 250;
       }
-      if (y + height > 278) {
+      // A forced page break starts a new page even if the system would still fit.
+      const forced = index > 0 && (notationResult.pageStarts ?? []).includes(index);
+      if (forced || y + height > 278) {
         pdf.addPage();
         y = 15;
       }
