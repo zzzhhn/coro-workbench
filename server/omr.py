@@ -535,7 +535,7 @@ def _homr_text_layer(directory: Path, work: Path, inputs: list[Path], page_xml: 
             continue
         with Image.open(image) as page:
             size = page.size
-        boxes = [TextBox(b["text"], tuple(b["box"]), b.get("conf", 1.0), data["source"]) for b in data["boxes"]]
+        boxes = [TextBox(b["text"], tuple(b["box"]), b.get("conf", 1.0), data["source"], b.get("chars")) for b in data["boxes"]]
         new, page_evidence = apply_text_layer(raw, staves.read_text(), size, boxes, crop=tuple(data["crop"]))
         if note_signature(raw) != note_signature(new):
             # The layer may only add text. Never ship a page whose notes moved.

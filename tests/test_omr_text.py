@@ -82,3 +82,29 @@ def test_harmony_parsing_slash_and_minor_seventh():
     assert element.findtext("root/root-step") == "F" and element.findtext("kind") == "minor-seventh"
     assert element.findtext("bass/bass-step") == "C" and element.findtext("bass/bass-alter") == "1"
     assert harmony_element("N.C.").findtext("kind") == "none"
+
+
+def test_keyboard_grand_staff_never_takes_lyrics():
+    grand = "1 0.5 0.13 0.8 0.06\n"  # one grand staff box y 100..160
+    new, evidence = apply_text_layer(XML, grand, (1000, 1000), [TextBox("la la", (190, 165, 310, 173))])
+    assert lyrics(new) == []
+    assert any(b.get("reason", "").startswith("below a grand staff") for b in evidence["boxes"])
+
+
+def test_caption_spanning_many_notes_is_not_sung():
+    # Eight onsets under a 2-word caption: a heading, not a lyric line.
+    wide = score([note(s, x) for s, x in zip("CDEFGABC", range(150, 950, 100))])
+    new, evidence = apply_text_layer(wide, STAFF, (1000, 1000), [TextBox("Ankunft", (150, 125, 450, 133)), TextBox("Extrapost", (500, 125, 900, 133))])
+    assert lyrics(new) == []
+    assert any("does not follow" in b.get("reason", "") for b in evidence["boxes"])
+
+
+def test_footnote_numbers_and_lone_letters_are_not_sung():
+    boxes = [TextBox("1.275 1.60 8m", (190, 125, 410, 132)), TextBox("Q", (590, 125, 605, 132))]
+    new, evidence = apply_text_layer(XML, STAFF, (1000, 1000), boxes)
+    assert lyrics(new) == []
+
+
+def test_run_together_words_split_at_capitals_under_notes():
+    new, _ = apply_text_layer(XML, STAFF, (1000, 1000), [TextBox("DurchFeld", (170, 125, 330, 133))])
+    assert [t for *_, t in lyrics(new)] == ["Durch", "Feld"]

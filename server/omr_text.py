@@ -39,6 +39,7 @@ class TextBox:
     box: tuple[float, float, float, float]
     conf: float = 1.0
     source: str = "ocr"
+    chars: list | None = None  # per-character [x0, x1], aligned with text, when the OCR gives them
 
     @property
     def cx(self) -> float:
@@ -214,6 +215,9 @@ def classify(boxes: list[TextBox], groups: list[Group], space: float) -> list[di
             kind, group = "part-name", pick("left")
         elif "above" in kinds and (chordish or sectionish):
             kind, group = ("chord" if chordish else "section"), pick("above")
+        elif "below" in kinds and pick("below").staff.grand:
+            result.append({**item, "kind": "discarded", "reason": "below a grand staff (keyboard), not a vocal line"})
+            continue
         elif "below" in kinds:
             if re.fullmatch(r"[-–—_]+", text):
                 kind, group = "lyric", pick("below")
@@ -312,6 +316,81 @@ def lines_of(items: list[dict], space: float) -> list[list[dict]]:
 
 
 
+
+def split_at_notes(box: TextBox, note_xs: list[float], space: float) -> list[TextBox]:
+    """Cut a box whose text runs several sung words together into one box per note.
+
+    Only when the box already holds fewer syllables (by spaces and hyphens) than notes
+    under it. Each cut goes to a character boundary near the midpoint between two
+    notes, only before a capital letter or after punctuation ("DurchFeld",
+    "wild,mein"). Character positions are proportional unless the OCR gave them.
+    """
+    text = normalize(box.text)
+    if CJK.search(text) or not text:
+        return [box]
+    chars = box.chars if box.chars and len(box.chars) == len(text) else [
+        [box.box[0] + (box.box[2] - box.box[0]) * k / len(text), box.box[0] + (box.box[2] - box.box[0]) * (k + 1) / len(text)] for k in range(len(text))
+    ]
+    inside = [x for x in note_xs if box.box[0] - 0.5 * space <= x <= box.box[2] + 0.5 * space]
+    if len(inside) < 2 or len(syllables_of(box)) >= len(inside):
+        return [box]
+    boundaries = [chars[i][1] for i in range(len(text) - 1)]
+    cuts = set()
+    for left, right in zip(inside, inside[1:]):
+        middle, reach = (left + right) / 2, (right - left) / 2
+        options = [i for i in range(len(boundaries)) if abs(boundaries[i] - middle) < reach]
+        if not options:
+            continue
+        natural = [i for i in options if text[i + 1].isupper() or text[i] in ",.;:!?'-"]
+        # Cutting anywhere else split real syllables on D2 (0.776 -> 0.665).
+        pool = natural
+        if not pool:
+            continue
+        cuts.add(min(pool, key=lambda i: abs(boundaries[i] - middle)) + 1)
+    if not cuts:
+        return [box]
+    pieces, start = [], 0
+    for cut in sorted(cuts) + [len(text)]:
+        piece = text[start:cut]
+        if piece.strip(" -,.;:"):
+            pieces.append(TextBox(piece.strip(), (chars[start][0], box.box[1], chars[cut - 1][1], box.box[3]), box.conf, box.source, chars[start:cut]))
+        start = cut
+    return pieces or [box]
+
+
+def follows_notes(syllables: list, notes: list, space: float) -> tuple[bool, float]:
+    """A sung line lines up with note onsets; pedal marks, copyright and footers do not."""
+    if not syllables or not notes:
+        return False, 0.0
+    xs = [n[0] for n in notes]
+    # homr's note positions are attention estimates, a few spaces off is normal.
+    near = sum(1 for _, x, *_ in syllables if min(abs(x - n) for n in xs) <= 3.0 * space)
+    share = near / len(syllables)
+    if len(syllables) == 1:
+        # A lone syllable must sit right under a note (a dropped-down word, a short line),
+        # and a lone single character is more often a misread mark (Q, b, M.) than a word,
+        # unless it is a common one-letter sung word.
+        text = syllables[0][0]
+        if len(text) == 1 and text not in "IaAoOeEiyY" and not CJK.match(text):
+            return False, share
+        return min(abs(syllables[0][1] - n) for n in xs) <= 2.0 * space, share
+    # Sung text gives (almost) every note under it a syllable; a caption or footnote
+    # spans many notes with a few words ("Ankunft einer Dienstpost" over 11 notes).
+    # Span of the printed words themselves (box edges), not just syllable centres.
+    boxes = [s[3]["_box"].box for s in syllables if len(s) > 3 and isinstance(s[3], dict) and "_box" in s[3]]
+    left = (min(b[0] for b in boxes) if boxes else min(x for _, x, *_ in syllables)) - 0.5 * space
+    right = (max(b[2] for b in boxes) if boxes else max(x for _, x, *_ in syllables)) + 0.5 * space
+    # Count onsets, not note heads: homr lists chord tones and inner voices separately.
+    onsets: list[float] = []
+    for n in sorted(x for x in xs if left <= x <= right):
+        if not onsets or n - onsets[-1] > 0.75 * space:
+            onsets.append(n)
+    under = len(onsets)
+    if under >= 4 and len(syllables) < 0.3 * under:
+        return False, share
+    return share >= 0.6 and near >= 2, share
+
+
 CHORD_KIND = [
     ("m7b5", "half-diminished"), ("ø", "half-diminished"), ("dim7", "diminished-seventh"), ("maj7", "major-seventh"),
     ("M7", "major-seventh"), ("min7", "minor-seventh"), ("m7", "minor-seventh"), ("m6", "minor-sixth"), ("dim", "diminished"),
@@ -395,7 +474,18 @@ def apply_text_layer(xml: str, staves_text: str, size: tuple[int, int], boxes: l
                 for item in row:
                     item["kind"], item["reason"] = "discarded", "performance terms, not sung text"
                 continue
-            syllables = [(text, x, syllabic, item) for item in row for text, x, syllabic in syllables_of(item["_box"])]
+            note_xs = [n[0] for n in notes]
+            syllables = [(text, x, syllabic, item) for item in row for piece in split_at_notes(item["_box"], note_xs, space) for text, x, syllabic in syllables_of(piece)]
+            letters = sum(1 for text, *_ in syllables if re.fullmatch(r"[^\W\d_]+", text))
+            if syllables and letters * 2 < len(syllables):
+                for item in row:
+                    item["kind"], item["reason"] = "discarded", "mostly numbers or symbols (footnote, fingering), not sung text"
+                continue
+            ok, share = follows_notes(syllables, notes, space)
+            if not ok:
+                for item in row:
+                    item["kind"], item["reason"] = "discarded", f"row does not follow the staff's notes ({share:.0%} of syllables near a note)"
+                continue
             xs = [x for _, x, _, _ in syllables]
             verse = next((v for v, taken in enumerate(verse_xs, 1) if all(abs(a - b) > 0.5 * space for a in xs for b in taken)), None)
             if verse is None:
