@@ -2581,6 +2581,35 @@
 .voice-button.voice-4.active-tool {
   background: #916326;
 }
+/* Click-to-place entry. */
+.notation-surface[data-placing='true'] {
+  cursor: crosshair;
+}
+.placement-ghost {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+}
+.placement-ghost i {
+  position: absolute;
+  width: 11px;
+  height: 8px;
+  margin: -4px 0 0 -5px;
+  border-radius: 50%;
+  background: rgba(174, 86, 54, 0.55);
+  transform: rotate(-20deg);
+}
+.placement-ghost span {
+  position: absolute;
+  left: 10px;
+  top: -24px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--action);
+  color: #fff;
+  font: 500 10px 'DM Mono', monospace;
+  white-space: nowrap;
+}
 @media (min-width: 1600px) {
   :root {
     --sidebar: 260px;
