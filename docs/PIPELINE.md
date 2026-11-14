@@ -8,6 +8,32 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-14 evening: OMR text layer — lyrics, chord symbols, part names (text layer, experimental, off by default)
+
+One layer added on top of homr; homr's notes are never edited (checked per page, before/after identical on every test page, otherwise that page's text is dropped).
+
+- **What it does.** Per page: homr's staff boxes (`--write-staff-positions`, mapped back through homr's own autocrop) and note positions (`imgpos`) define zones. Text boxes come from the PDF's own text layer when the page has one, otherwise from RapidOCR (PP-OCRv6, bundled with homr, offline). Below a staff → lyric syllables aligned to sung notes by x; above → chord symbols (strict regex) or section words; left margin → part name. Raw per-page homr MusicXML, the text-layer page and `text-evidence.json` (every box: attached where, or why discarded) are all kept.
+- **Evaluation (rules written first; private `work/omr-20261114/PROTOCOL-text.md`).** Public pages only: 30 public-domain OpenEWLD lead sheets rendered by Verovio (10 held out) and the 8 Sheetly benchmark pieces with lyrics, clean and simulated photo; reference = the source MusicXML. Strict match: same bar, onset within 1/16 beat, verse number, text.
+  - Pre-registered version (v4) on the held-out set: lyrics F clean .916 / photo .773, chords .904 / .606; Audiveris `read_text` .811 / .538 and .628 / .340. It failed the Kong Er check: 36 of 268 syllables were put in verse 2 because the engraver lowered single syllables under low notes.
+  - **Shipped version (v6) is a post-hoc fix**, so its held-out numbers are reference only: lyrics clean .916 / photo .789, chords .904 / .883; Sheetly 8 lyrics .738 / .621. Changes: verse numbers by x-overlap packing; staff boxes mapped back through homr's autocrop; staff groups chosen by homr's note positions (a piano-only intro system no longer breaks the page); performance terms (pizz., a tempo …) are not lyrics.
+  - Kong Er (private, reference = the PDF's own text): 268 syllables, all verse 1; OCR route agrees syllable by syllable .985 clean / .945 simulated photo; part names 人声 / 钢琴 / 弦乐合奏 on all 19 pages.
+  - Real phone photos (sheet-music-photos, CC0, one vocal page × 8 photos, relative to the same page's scan): verse-1 text sequence agreement .42–.98, two tilted/background photos below .5. On instrumental pages a few stray words (footer, "NOTE") are still read as lyrics.
+- **Confirmation test C1 (frozen code, new data, one run; rules written before the data was opened).**
+
+  | Gate | Result | |
+  |---|---|---|
+  | Notes unchanged on every page | 189 / 189 | pass |
+  | 30 new lead sheets, clean: lyrics, chords ≥ .85 and ≥ Audiveris | .878, .860 (Audiveris .729, .615) | pass |
+  | Same, simulated photo: ≥ .70 and ≥ Audiveris | .857, .855 (Audiveris .333, .285) | pass |
+  | 20 OpenScore Lieder pages (LilyPond engraving): lyric sequence F ≥ .75 | .353 (Audiveris .316) | **fail** |
+  | 109 real 1805–1929 scans: failure rate ≤ 15 %; instrumental pages ≥ 70 % with no false lyric, ≤ 3 per page | 0 failures; only 14 % clean, 9.8 false syllables per page (pedal marks, copyright lines, instrument names, ornaments read as CJK) | **fail** |
+  | Kong Er: 268 syllables in verse 1, OCR agrees ≥ .95, part names on all 19 pages | 268, .985, all 人声 / 钢琴 / 弦乐合奏 | pass |
+
+  New real phone photos were not available (the public set's 24 photos had been used), so real-photo accuracy is still unmeasured.
+- **Shipped as an experiment, off by default.** `text_layer=false` unless the import dialog's experimental box is ticked. When on, imported projects keep lyrics (verse 1), chord symbols and part names (also written as `part-abbreviation`, so later systems keep the name) through Coro's normal MusicXML import.
+- **Kong Er checks.** The PDF prints no chord symbols and no tempo (65 BPM exists only in the MIDI), so the missing chords and the default 100 BPM are not recognition losses; the later-system "P1" label was an import fallback and is fixed by the abbreviation.
+- **Not done.** A fresh untouched test set for a clean confirmation; Chinese jianpu; rehearsal marks/repeat words are written as `<words>` only and are not used downstream.
+
 ## 2026-11-14: score input — homr becomes the default OMR engine (recognition layer)
 
 One layer changed: which recognizer reads PDF/images. Raw output of every engine is kept; Audiveris stays installed and selectable.

@@ -77,7 +77,7 @@ export type OmrEngine = 'auto' | 'homr' | 'audiveris';
 
 export async function recognizeScore(
   file: File,
-  options: { firstPage: number; lastPage?: number; readText: boolean; engine?: OmrEngine },
+  options: { firstPage: number; lastPage?: number; readText: boolean; engine?: OmrEngine; textLayer?: boolean },
 ): Promise<OmrJob> {
   const data = new FormData();
   data.append('file', file);
@@ -85,6 +85,7 @@ export async function recognizeScore(
   if (options.lastPage) data.append('last_page', String(options.lastPage));
   data.append('read_text', String(options.readText));
   data.append('engine', options.engine ?? 'auto');
+  data.append('text_layer', String(options.textLayer ?? false));
   return jsonResponse(await fetch('/api/omr', { method: 'POST', body: data }));
 }
 export const getOmrJob = async (id: string): Promise<OmrJob> =>

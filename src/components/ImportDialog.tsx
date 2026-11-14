@@ -72,6 +72,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
   const [lastPage, setLastPage] = useState('');
   const [readText, setReadText] = useState(false);
   const [omrEngine, setOmrEngine] = useState<OmrEngine>('auto');
+  const [textLayer, setTextLayer] = useState(false);
   const jobKind = useRef<'audio' | 'omr'>('audio');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -224,6 +225,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
             lastPage: lastPage ? Number(lastPage) : undefined,
             readText: omrEngine === 'audiveris' ? readText : false,
             engine: omrEngine,
+            textLayer: omrEngine !== 'audiveris' && textLayer,
           })
         : await analyzeAudio(file, {
             mode,
@@ -538,7 +540,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
               >
                 <option value="auto">自动：homr 优先，失败时改用 Audiveris</option>
                 <option value="homr" disabled={!omrReady('homr')}>
-                  {omrReady('homr') ? 'homr：扫描 / 照片更稳，不读歌词和和弦' : 'homr · 未安装（scripts/setup-omr-homr.sh）'}
+                  {omrReady('homr') ? 'homr：扫描 / 照片更稳，可读歌词与和弦' : 'homr · 未安装（scripts/setup-omr-homr.sh）'}
                 </option>
                 <option value="audiveris" disabled={!omrReady('audiveris')}>
                   {omrReady('audiveris') ? 'Audiveris：干净矢量谱，可尝试读歌词' : 'Audiveris · 未安装（scripts/setup-omr.sh）'}
@@ -546,6 +548,15 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
               </select>
             </label>
           </div>
+          <label className="check-option">
+            <input
+              type="checkbox"
+              checked={textLayer && omrEngine !== 'audiveris'}
+              onChange={(event) => setTextLayer(event.target.checked)}
+              disabled={busy || omrEngine === 'audiveris'}
+            />
+            实验：读取歌词、和弦与声部名（确认测试未通过：钢琴踏板、版权行等会被误当歌词，需逐句校对）
+          </label>
           <label className="check-option">
             <input
               type="checkbox"
