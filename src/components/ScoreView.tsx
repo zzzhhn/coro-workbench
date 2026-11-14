@@ -18,7 +18,11 @@ interface Props {
   showConfidence: boolean;
   readingMode?: boolean;
   measureRange?: MeasureRange;
-  onSelect: (selection: Selection, beat?: number) => void;
+  onSelect: (selection: Selection, beat?: number, extend?: boolean) => void;
+  /** Note ids (part\0note) inside the active range, highlighted as a block. */
+  rangeKeys?: Set<string>;
+  /** Rubber-band selection: glyphs whose boxes intersect the dragged rectangle. */
+  onRubberBand?: (hits: Array<{ partId: string; start: number }>) => void;
 }
 
 export default function ScoreView({
@@ -32,11 +36,17 @@ export default function ScoreView({
   readingMode = false,
   measureRange,
   onSelect,
+  rangeKeys,
+  onRubberBand,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const tune = useRef<TuneObject | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  // abcjs' click callback does not expose modifier keys; track Shift ourselves.
+  const shiftDown = useRef(false);
+  const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number }>();
+  const bandStart = useRef<{ x: number; y: number; active: boolean }>(undefined);
   const [error, setError] = useState('');
   const [renderVersion, setRenderVersion] = useState(0);
   const lastScrolledSystem = useRef(-1);
@@ -133,10 +143,11 @@ export default function ScoreView({
           vocalfont: 'DM Sans 12',
           measurefont: 'DM Mono 9',
         },
-        clickListener: (element) => {
+        clickListener: (element, _tune, _classes, _analysis, _drag, mouseEvent?: MouseEvent) => {
           if (element.startChar === undefined) return;
           const mapped = abcResult.noteMap[element.startChar];
-          if (mapped) onSelectRef.current(mapped, abcResult.noteSegments?.[element.startChar]?.start);
+          const extend = Boolean(mouseEvent?.shiftKey ?? shiftDown.current);
+          if (mapped) onSelectRef.current(mapped, abcResult.noteSegments?.[element.startChar]?.start, extend);
         },
         ariaLabel: `${project.title}，可交互五线谱。点击音符编辑，键盘上下键改变音高。`,
       });
@@ -254,6 +265,64 @@ export default function ScoreView({
   }, [selection, renderVersion]);
 
   useEffect(() => {
+    container.current?.querySelectorAll<SVGElement>('[data-note-id]').forEach((node) => {
+      const ids: string[] = node.dataset.noteIds ? JSON.parse(node.dataset.noteIds) : [node.dataset.noteId];
+      node.classList.toggle(
+        'range-note',
+        Boolean(rangeKeys?.size && ids.some((id) => rangeKeys.has(`${node.dataset.partId}\0${id}`))),
+      );
+    });
+  }, [rangeKeys, renderVersion]);
+
+  useEffect(() => {
+    const down = (event: KeyboardEvent) => (shiftDown.current = event.shiftKey);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', down);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', down);
+    };
+  }, []);
+
+  // Rubber band: drag on empty paper (not on a note) to select whole bars of the staves crossed.
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    shiftDown.current = event.shiftKey;
+    if (!onRubberBand || event.button !== 0 || (event.target as Element).closest('[data-note-id]')) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    bandStart.current = { x: event.clientX - box.left, y: event.clientY - box.top, active: false };
+  };
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = bandStart.current;
+    if (!start) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - box.left;
+    const y = event.clientY - box.top;
+    if (!start.active && Math.hypot(x - start.x, y - start.y) < 6) return;
+    if (!start.active) event.currentTarget.setPointerCapture(event.pointerId);
+    start.active = true;
+    setBand({ x0: Math.min(start.x, x), y0: Math.min(start.y, y), x1: Math.max(start.x, x), y1: Math.max(start.y, y) });
+  };
+  const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = bandStart.current;
+    bandStart.current = undefined;
+    if (!start?.active || !band || !container.current) {
+      setBand(undefined);
+      return;
+    }
+    const origin = event.currentTarget.getBoundingClientRect();
+    const hits: Array<{ partId: string; start: number }> = [];
+    container.current.querySelectorAll<SVGElement>('[data-note-id]').forEach((node) => {
+      const r = node.getBoundingClientRect();
+      const left = r.left - origin.left;
+      const top = r.top - origin.top;
+      if (left < band.x1 && left + r.width > band.x0 && top < band.y1 && top + r.height > band.y0)
+        hits.push({ partId: node.dataset.partId!, start: Number(node.dataset.start) });
+    });
+    setBand(undefined);
+    onRubberBand?.(hits);
+  };
+
+  useEffect(() => {
     let live = true;
     void document.fonts.ready.then(() => {
       if (!live || !container.current) return;
@@ -333,7 +402,25 @@ export default function ScoreView({
           {error || renderData.error}
         </div>
       ) : null}
-      <div className="notation" ref={container} data-testid="score" />
+      <div
+        className="notation-surface"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => {
+          bandStart.current = undefined;
+          setBand(undefined);
+        }}
+      >
+        <div className="notation" ref={container} data-testid="score" />
+        {band && (
+          <div
+            className="rubber-band"
+            data-testid="rubber-band"
+            style={{ left: band.x0, top: band.y0, width: band.x1 - band.x0, height: band.y1 - band.y0 }}
+          />
+        )}
+      </div>
       <div className="paper-foot">
         <span>
           {project.arrangement

@@ -2509,6 +2509,78 @@
     max-height: 28vh;
   }
 }
+/* Range selection and explicit voices. */
+.notation-surface {
+  position: relative;
+  user-select: none;
+}
+.rubber-band {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: rgba(174, 86, 54, 0.08);
+  pointer-events: none;
+}
+.notation .range-note,
+.notation .range-note path {
+  fill: #2f6f8f;
+  stroke: #2f6f8f;
+}
+.range-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #eef4f7;
+  font-size: 11px;
+  color: var(--ink);
+  animation: source-panel-in 160ms ease-out;
+}
+.range-bar strong {
+  font-weight: 600;
+  color: #2f6f8f;
+}
+.range-bar span {
+  margin-right: auto;
+  color: var(--muted);
+}
+.range-bar button {
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--panel);
+  font-size: 11px;
+}
+.range-bar button:disabled {
+  opacity: 0.45;
+}
+.voice-tools {
+  gap: 2px;
+}
+.voice-button {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font: 600 10.5px 'DM Mono', monospace;
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+}
+.voice-button.active-tool {
+  border-color: transparent;
+  color: #fff;
+}
+.voice-button.voice-1.active-tool {
+  background: var(--action);
+}
+.voice-button.voice-2.active-tool {
+  background: #2f6f8f;
+}
+.voice-button.voice-3.active-tool {
+  background: #53715e;
+}
+.voice-button.voice-4.active-tool {
+  background: #916326;
+}
 @media (min-width: 1600px) {
   :root {
     --sidebar: 260px;
