@@ -36,6 +36,24 @@ import type { ArrangementOptions, NoteEvent, ScorePart, ScoreProject } from './l
 import type { Selection } from './lib/editor';
 import { beatsPerBar, pitchName, toMusicXml, fromMusicXml } from './lib/music';
 import { scoreWindow } from './lib/scoreWindow';
+import {
+  DURATION_KEYS,
+  appendNote,
+  applyAccidental,
+  commitLyric,
+  crossPartNote,
+  diatonicStep,
+  letterPitch,
+  neighbourNote,
+  nextIssue,
+  reviewIssues,
+  setNoteDuration,
+  setNotePitch,
+  toggleDot,
+  toggleTriplet,
+  type Accidental,
+  type DurationChange,
+} from './lib/noteInput';
 import { arrangeForVoices } from './lib/arrange';
 import { createBlankProject, createDemoProject } from './lib/demo';
 import {
@@ -571,13 +589,21 @@ export default function App() {
       setSelection(undefined);
     }
   };
-  const addNote = (midi: number | null = part.clef === 'bass' ? 48 : 60) => {
+  const addNote = (midi: number | null = part.clef === 'bass' ? 48 : 60, duration = entryDuration) => {
     const start =
       stepEntry && selectedNote
         ? selectedNote.start + selectedNote.duration
         : Math.round(playingState.beat * 4) / 4;
     try {
-      const result = insertNote(project, part.id, start, entryDuration, midi);
+      // Step entry continues in the selected note's staff/voice lane.
+      const result = appendNote(
+        project,
+        part.id,
+        start,
+        duration,
+        midi,
+        stepEntry && selectedNote ? { staff: selectedNote.staff, voice: selectedNote.voice } : undefined,
+      );
       updateProject(result.project);
       setSelection(result.selection);
       engine.current?.seek(start);
@@ -586,6 +612,42 @@ export default function App() {
     } catch (error) {
       notify(cleanError(error), true);
     }
+  };
+  const issues = useMemo(() => reviewIssues(project), [project]);
+  const verticalAnchor = useRef<(Selection & { beat: number }) | undefined>(undefined);
+  const visibleIds = tab === 'practice' ? undefined : visiblePart === 'all' ? undefined : [visiblePart];
+  const applyDuration = (change: DurationChange) => {
+    updateProject(change.project);
+    if (change.overlaps)
+      notify(`新时值覆盖了后面 ${change.overlaps} 个音符的起拍；后续音符未移动，已列入待校对。`, true);
+  };
+  const setPitch = (midi: number | null) => {
+    if (!selection) return;
+    try {
+      updateProject(setNotePitch(project, selection, midi));
+      if (midi !== null)
+        void engine.current?.audition(part, midi).catch((error) => notify(cleanError(error), true));
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
+  const goToIssue = (direction: 1 | -1) => {
+    const issue = nextIssue(project, issues, selection, playingState.beat, direction);
+    if (!issue) {
+      notify('没有待校对的重叠或低置信音符。');
+      return;
+    }
+    // A note outside the current 4/8-bar window needs the window to move first.
+    const note = project.parts.find((p) => p.id === issue.partId)?.notes.find((n) => n.id === issue.noteId);
+    if (visiblePart !== 'all' && visiblePart !== issue.partId) setVisiblePart('all');
+    selectNote({ partId: issue.partId, noteId: issue.noteId }, note?.start);
+    notify(`第 ${issue.measure} 小节：${issue.message}`);
+  };
+  const stepLyric = (text: string, direction: 1 | -1) => {
+    if (!selection) return;
+    const step = commitLyric(project, selection, text, direction);
+    if (step.project !== project) updateProject(step.project, true, false);
+    if (step.next) selectNote(step.next);
   };
   const transpose = (semitones: number) => {
     try {
@@ -839,14 +901,72 @@ export default function App() {
         setStepEntry((value) => !value);
         return;
       }
+      if (event.key === ']' || event.key === '[') {
+        event.preventDefault();
+        goToIssue(event.key === ']' ? 1 : -1);
+        return;
+      }
+      if (event.key.toLowerCase() === 'l' && !command && selectedNote) {
+        // Lyric entry: focus the field; Space/Tab/- advance there.
+        event.preventDefault();
+        openInspector('note');
+        requestAnimationFrame(() =>
+          document.querySelector<HTMLInputElement>('input[aria-label="音符歌词"]')?.focus(),
+        );
+        return;
+      }
+      const digit = /^Digit([1-7])$/.exec(event.code)?.[1];
+      if (digit && !command && !event.altKey) {
+        event.preventDefault();
+        const value = DURATION_KEYS[digit];
+        setEntryDuration(value);
+        if (event.shiftKey) {
+          // Shift+digit: rest of that value (Crescendo's rest tool shortcuts).
+          if (stepEntry || !selection) addNote(null, value);
+          else if (selection) {
+            try {
+              const change = setNoteDuration(setNotePitch(project, selection, null), selection, value);
+              applyDuration(change);
+            } catch (error) {
+              notify(cleanError(error), true);
+            }
+          }
+        } else if (selection && !stepEntry) {
+          try {
+            applyDuration(setNoteDuration(project, selection, value));
+          } catch (error) {
+            notify(cleanError(error), true);
+          }
+        }
+        return;
+      }
+      if (event.key === '.' && selection && !command) {
+        event.preventDefault();
+        applyDuration(toggleDot(project, selection));
+        return;
+      }
+      if (event.key.toLowerCase() === 't' && selection && !command) {
+        event.preventDefault();
+        applyDuration(toggleTriplet(project, selection));
+        return;
+      }
       if (event.key.toLowerCase() === 'r' && !command) {
         event.preventDefault();
-        if (selection) changeNote({ midi: selectedNote?.midi === null ? 60 : null });
+        if (selection) setPitch(selectedNote?.midi === null ? (part.clef === 'bass' ? 48 : 60) : null);
         else addNote(null);
         return;
       }
-      if (['1', '2', '3', '4', '5'].includes(event.key)) {
-        setEntryDuration([4, 2, 1, 0.5, 0.25][Number(event.key) - 1]);
+      const accidental: Accidental | undefined =
+        event.key === '=' || event.key === '+'
+          ? 'sharp'
+          : event.key === '-'
+            ? 'flat'
+            : event.key === '0'
+              ? 'natural'
+              : undefined;
+      if (accidental && selectedNote && selectedNote.midi !== null && !command) {
+        event.preventDefault();
+        setPitch(applyAccidental(selectedNote.midi, project.key, accidental));
         return;
       }
       if ((event.key === 'Backspace' || event.key === 'Delete') && selection) {
@@ -854,32 +974,49 @@ export default function App() {
         removeNote();
         return;
       }
+      if (selection && command && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault();
+        // Keep the original beat while moving vertically, so ⌘↓ ⌘↑ is a round trip.
+        const anchor =
+          verticalAnchor.current?.partId === selection.partId && verticalAnchor.current.noteId === selection.noteId
+            ? verticalAnchor.current.beat
+            : selectedNote?.start;
+        const target = crossPartNote(project, selection, event.key === 'ArrowUp' ? -1 : 1, visibleIds, anchor);
+        if (target) {
+          selectNote(target, anchor);
+          verticalAnchor.current = { ...target, beat: anchor ?? 0 };
+        }
+        return;
+      }
       if (selectedNote && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
         event.preventDefault();
-        changeNote({
-          midi: (selectedNote.midi ?? 60) + (event.key === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 12 : 1),
-        });
+        if (selectedNote.midi === null) return;
+        const direction = event.key === 'ArrowUp' ? 1 : -1;
+        // ↑↓ move one staff position in the key (the usual OMR line/space misread);
+        // ⌥ is chromatic, ⇧ an octave.
+        setPitch(
+          event.shiftKey
+            ? selectedNote.midi + direction * 12
+            : event.altKey
+              ? selectedNote.midi + direction
+              : diatonicStep(selectedNote.midi, project.key, direction),
+        );
         return;
       }
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         event.preventDefault();
         if (selection) {
-          const index = part.notes.findIndex((note) => note.id === selection.noteId);
-          const note = part.notes[index + (event.key === 'ArrowRight' ? 1 : -1)];
-          if (note) selectNote({ partId: part.id, noteId: note.id });
+          const note = neighbourNote(project, selection, event.key === 'ArrowRight' ? 1 : -1);
+          if (note) selectNote(note);
         } else seekBeat(playingState.beat + (event.key === 'ArrowRight' ? 1 : -1) * barLength);
         return;
       }
-      if (stepEntry && /^[a-g]$/i.test(event.key) && !command) {
+      if (/^[a-g]$/i.test(event.key) && !command && !event.altKey && (stepEntry || selectedNote)) {
         event.preventDefault();
-        const pc: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
-        const base =
-          selectedNote?.midi !== null && selectedNote?.midi !== undefined
-            ? Math.floor(selectedNote.midi / 12) * 12
-            : part.clef === 'bass'
-              ? 48
-              : 60;
-        addNote(base + pc[event.key.toLowerCase()]);
+        const reference = selectedNote?.midi ?? (part.clef === 'bass' ? 48 : 64);
+        const midi = letterPitch(event.key, project.key, reference);
+        if (stepEntry) addNote(midi);
+        else setPitch(midi);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -1302,6 +1439,15 @@ export default function App() {
               <span />
               待校对
             </button>
+            <button
+              className="text-tool"
+              aria-label="下一处待校对"
+              title="跳到下一处重叠或低置信音符 ( ] )；[ 返回上一处"
+              disabled={!issues.length}
+              onClick={() => goToIssue(1)}
+            >
+              下一处 <span className="issue-count">{issues.length}</span>
+            </button>
             <span className="tool-divider" />
             <div className="tool-group zoom-tools">
               <button
@@ -1476,7 +1622,9 @@ export default function App() {
                 ? '逐步输入模式'
                 : tab === 'practice'
                   ? '← → 切小节 · 空格播放'
-                  : '↑ ↓ 调音高 · ⌘ Z 撤销'}
+                  : selection
+                    ? '↑↓ 音级 · A–G 音名 · 1–7 时值 · L 歌词 · ] 下一处待校对'
+                    : '点选音符后用键盘校对 · ] 跳到下一处待校对'}
             </span>
           </div>
           <button className="score-review-link" onClick={() => openInspector('check')}>
@@ -1579,6 +1727,7 @@ export default function App() {
           void engine.current?.audition(part, midi).catch((error) => notify(cleanError(error), true));
         }}
         onSelect={selectNote}
+        onLyricStep={stepLyric}
       />
 
       <TransportBar
@@ -1957,17 +2106,23 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
           <div className="shortcut-list">
             {[
               ['空格', '播放 / 暂停'],
-              ['↑ / ↓', '选中音符升降半音'],
-              ['⇧ ↑ / ↓', '选中音符升降八度'],
-              ['← / →', '相邻音符 / 小节'],
+              ['← / →', '同一声部的上 / 下一个音符（无选中时切小节）'],
+              ['⌘ ↑ / ↓', '跳到上方 / 下方声部同一拍的音符'],
+              ['↑ / ↓', '按调内音级移动一格（线↔间）'],
+              ['⌥ ↑ / ↓ · ⇧ ↑ / ↓', '半音 / 八度'],
+              ['A–G', '改为该音名（按调号，取最近八度）；逐步模式下为追加'],
+              ['= · - · 0', '升号 / 降号 / 还原号'],
+              ['1–7', '全 / 二分 / 四分 / 八分 / 16 / 32 / 64 分（选中时直接改时值）'],
+              ['⇧ 1–7', '同等时值的休止符'],
+              ['.  ·  T', '附点 / 三连音（再按取消）'],
+              ['R', '音符 ↔ 休止符'],
+              ['L', '为选中音符输入歌词：空格 / Tab 下一音，- 连字符，⇧Tab 上一音'],
+              ['[ · ]', '上一处 / 下一处待校对（重叠或低置信）'],
               ['N', '切换逐步输入'],
-              ['A–G', '输入音符（逐步模式）'],
-              ['1–5', '全 / 二分 / 四分 / 八分 / 十六分'],
-              ['R', '输入 / 转换休止符'],
               ['Delete', '删除选中音符'],
               ['⌘ Z / ⌘ ⇧ Z', '撤销 / 重做'],
               ['⌘ S', '下载 Coro 工程'],
-              ['Esc', '停止 / 退出逐步输入'],
+              ['Esc', '取消选择 / 停止 / 退出逐步输入'],
             ].map(([key, label]) => (
               <div key={key}>
                 <kbd>{key}</kbd>

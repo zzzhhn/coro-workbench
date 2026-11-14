@@ -37,6 +37,7 @@ work/
 !/docs/PRODUCT_DIRECTION.md
 !/docs/MVP_STATUS.md
 !/docs/PIPELINE.md
+!/docs/CRESCENDO_INTERACTION_MAP.md
 *.coro
 *.coro.json
 *.wav
