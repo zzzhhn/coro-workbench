@@ -8,6 +8,25 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-15: OMR text layer v8 — chord fix on D3, third confirmation test C3 (still off by default)
+
+Text layer only; notes still never edited. v8 (`5152bdf`) was developed on a new dev set D3 and frozen by file hash; C3 is fresh public data with the C2 gates unchanged, written before any C3 item was opened, run once. C2 was not used for tuning.
+
+- **D3 (development only).** 40 further OpenEWLD lead sheets (crc32 positions 91–130), clean and simulated photo. Changes kept: wider chord spellings (Maj7, MA7, -7, 7+, 7#5, 7(b9), 7sus, m9, °7 …, mapped to MusicXML kinds); chords printed glued together ("D7/F#A7/E") are split and placed by character position; the whole gap between two systems is also the lower system's chord zone; the OCR extractor no longer crashes on RapidOCR's empty placeholder lines. D3 chords .858 → .876 clean, .855 → .876 photo; lyrics unchanged. Not tuned: Verovio draws ♭/♯ inside chord names in its music font, which OCR misses; printed lead sheets mostly use text b/#.
+- **C3 result.**
+
+  | Gate | Result | |
+  |---|---|---|
+  | Notes unchanged | 117 / 117 pages | pass |
+  | 40 new lead sheets, clean: lyrics, chords ≥ .85 and ≥ Audiveris | .894, .860 (Audiveris .791, .680) | pass |
+  | Same, simulated photo: ≥ .70 and ≥ Audiveris | .771, .825 (Audiveris .433, .324) | pass |
+  | 25 OpenScore Lieder (train split) re-rendered: verse-1 sequence F ≥ .75 and ≥ Audiveris | .922 (Audiveris .696) | pass |
+  | 12 new SLUB scans: failure ≤ 15 %; instrumental pages ≥ 80 % with no false lyric, ≤ 2 per page | 0 / 12 failed; 4 / 6 instrumental pages clean (.667), 0.5 per page | **fail** |
+  | Vocal scan pages with no lyrics ≤ 20 % | 0 / 6 | pass |
+  | Kong Er: 268 syllables in verse 1, OCR agrees ≥ .95, part names on all pages | 268, .992, all 人声 / 钢琴 / 弦乐合奏 | pass |
+
+  The three false lyrics were performance marks printed under keyboard staves of two sonata scans: "Poc" and "P" (poco, p) and "dol" (dolce). Two oversize scans were shrunk to Coro's 3500-pixel upload limit before recognition, the same rule the upload path applies; this is recorded in the protocol.
+- **Decision.** One gate failed, so the layer stays an off-by-default experiment, with chord symbols now passing on fresh data. C3 is not used for tuning. Real phone photos remain unmeasured until Bobby takes them.
 ## 2026-11-15: OMR review data for the side-by-side editor (review layer)
 
 Implements the interface decision of 2026-11-15. The score itself is unchanged; this layer only describes where it sits on the pages.
@@ -17,6 +36,7 @@ Implements the interface decision of 2026-11-15. The score itself is unchanged; 
 - **Issues (no confidence scores).** `measure-overfull` / `measure-underfull` (beats read vs. meter, with a note that pick-ups and repeat halves are legitimate), `no-anchor`, `page-part-mismatch`, and, when the text layer runs, `text-discarded` (check) and `text-attached` (info) from its evidence.
 - **Measured.** Two public pages (tests/fixtures/omr-review): 112/112 notes anchored, 42 of 52 edges on barlines, the 10 estimated ones are system ends, four real underfull bars (pick-up, repeat halves, last bar). Kong Er pages 1–6 (private, local check only): 604/604 notes anchored; 66 of 72 inner edges on barlines, all 72 system-end edges estimated; one underfull bar.
 - Anchors are attention centres, often half to two staff spaces off the note head; the editor must say so.
+
 
 ## 2026-11-15: OMR text layer v7 — second confirmation test C2 (still off by default)
 

@@ -55,7 +55,20 @@ def pdf_boxes(pdf_path: str, page_number: int, size: tuple[int, int]) -> list[di
     return boxes
 
 
+def _box(points) -> list[float] | None:
+    try:
+        xs, ys = [float(p[0]) for p in points], [float(p[1]) for p in points]
+    except (TypeError, ValueError, IndexError):
+        return None
+    return [min(xs), min(ys), max(xs), max(ys)] if xs and ys else None
+
+
 def ocr_boxes(image_path: str) -> list[dict]:
+    """Word boxes from RapidOCR; a line without usable word boxes falls back to its line box.
+
+    RapidOCR sometimes returns an empty word list for a detected line (seen on a real
+    SLUB scan, 2026-11-15); that used to crash the whole page.
+    """
     import numpy as np
     from PIL import Image
     from rapidocr import RapidOCR
@@ -63,15 +76,30 @@ def ocr_boxes(image_path: str) -> list[dict]:
     # Keep RapidOCR's default max_side_len: 4000 crashed on some pages (2026-11-14).
     engine = RapidOCR(params={"Global.log_level": "error"})
     result = engine(np.asarray(Image.open(image_path).convert("RGB")), return_word_box=True)
+    return parse_ocr_result(result.boxes, result.txts, result.scores, getattr(result, "word_results", None))
+
+
+def parse_ocr_result(line_boxes, line_texts, line_scores, word_results) -> list[dict]:
+    """Pure parser for RapidOCR output (testable without the model)."""
+    lines = list(zip(line_boxes, line_texts or (), line_scores or ())) if line_boxes is not None else []
+    words = list(word_results or [])
     boxes = []
-    for line in getattr(result, "word_results", None) or []:
-        for text, score, points in line:
-            xs, ys = [p[0] for p in points], [p[1] for p in points]
-            boxes.append({"text": text, "box": [float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys))], "conf": float(score)})
-    if not boxes and result.boxes is not None:
-        for points, text, score in zip(result.boxes, result.txts, result.scores):
-            xs, ys = [p[0] for p in points], [p[1] for p in points]
-            boxes.append({"text": text, "box": [float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys))], "conf": float(score)})
+    for index, (points, text, score) in enumerate(lines):
+        line_words = words[index] if index < len(words) else ()
+        added = 0
+        for word in line_words or ():
+            if not isinstance(word, (list, tuple)) or len(word) != 3:
+                continue
+            word_text, word_score, word_points = word
+            box = _box(word_points)
+            if box is None or not str(word_text).strip():
+                continue
+            boxes.append({"text": str(word_text), "box": box, "conf": float(word_score)})
+            added += 1
+        if not added:
+            box = _box(points)
+            if box is not None and str(text).strip():
+                boxes.append({"text": str(text), "box": box, "conf": float(score)})
     return boxes
 
 

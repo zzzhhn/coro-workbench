@@ -128,9 +128,10 @@ homr held up far better than Audiveris (2026-11-14 A/B in PIPELINE.md); real
 photos, real scans, handwriting and jianpu are not yet measured. homr does not
 read lyrics, chord symbols or part names by itself; an experimental text layer
 (off by default) adds them from the PDF's own text or local OCR (RapidOCR). Its
-second confirmation test (2026-11-15) still failed on chord symbols of clean lead
-sheets (.837 against a .85 gate) and on real scans of instrumental pages, where
-prose paragraphs, hymn titles and "a 2" marks were read as lyrics. Photos and
+third confirmation test (2026-11-15, v8) passed lyrics and chord symbols on fresh
+lead sheets (.894 / .860), but still failed on real scans of instrumental pages:
+two of six pages got performance marks under keyboard staves ("poco", "p",
+"dolce") as lyrics. Real phone photos are not yet measured. Photos and
 scans can misread words, shift a syllable or take a performance term for a lyric,
 and only the first verse is imported. homr reads fewer ties than printed.
 Either engine can introduce wrong accidentals, ties, meter, voice assignments

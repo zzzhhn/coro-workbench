@@ -26,7 +26,11 @@ TERMS = re.compile(
     re.I,
 )
 CHORD = re.compile(
-    r"^(N\.?C\.?|[A-G][#b]?(m|min|maj|M|dim|aug|sus2|sus4|sus|°|ø|\+)?\d{0,2}(\(?[#b]?\d{1,2}\)?)*(/[A-G][#b]?)?)$"
+    r"^(N\.?C\.?|[A-G][#b]?"
+    r"(Maj|maj|MA|Ma|M|min|mi|m|-|dim|°|aug|\+|△|ø|sus2|sus4|sus)?"
+    r"\d{0,2}(sus[24]?)?"
+    r"(\(?[#b+-]?\d{1,2}\)?)*\+?"
+    r"(/[A-G][#b]?)?)$"
 )
 SECTION = re.compile(r"^(Intro|Verse|Chorus|Bridge|Outro|Pre-?Chorus|Interlude|Coda|Fine|D\.C\.|D\.S\.|前奏|主歌|副歌|间奏|尾奏|桥段)", re.I)
 CJK = re.compile(r"[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]")
@@ -184,14 +188,40 @@ def _zones(groups: list[Group], space: float) -> list[tuple[str, Group, tuple[fl
                 below_bottom = st.y1 + 8 * space
             zones.append(("below", group, (left, st.y1, right, below_bottom)))
             if i == 0:
-                above_top = st.y0 - 6 * space
-                if previous_bottom is not None:
-                    above_top = max(above_top, previous_bottom)
+                # First system: 6 spaces above (title text lives higher). Later systems:
+                # the whole gap, shared with the previous system's lyrics (chords win).
+                above_top = st.y0 - 6 * space if previous_bottom is None else previous_bottom
             else:
                 above_top = ordered[i - 1].staff.y1
             zones.append(("above", group, (left, above_top, right, st.y0)))
             zones.append(("left", group, (0, st.y0 - space, st.x0, st.y1 + space)))
     return zones
+
+
+CHORD_TOKEN = re.compile(
+    r"[A-G][#b]?(?:Maj|maj|MA|Ma|M|min|mi|m|-|dim|°|aug|\+|△|ø|sus2|sus4|sus)?\d{0,2}(?:sus[24]?)?(?:\(?[#b+-]?\d{1,2}\)?)*\+?(?:/[A-G][#b]?)?"
+)
+
+
+def split_glued_chords(box: TextBox) -> list[TextBox] | None:
+    """'D7/F#A7/E' printed close together and read as one word -> one box per chord.
+
+    Only when the whole text is exactly two or more chord tokens; x positions are
+    proportional to character offsets in the box.
+    """
+    text = chord_text(box.text)
+    tokens = [m for m in CHORD_TOKEN.finditer(text)]
+    if len(tokens) < 2 or "".join(m.group(0) for m in tokens) != text or not all(CHORD.match(m.group(0)) for m in tokens):
+        return None
+    if all(len(m.group(0)) == 1 for m in tokens):
+        return None  # "AB" is more likely a rehearsal letter or a misread than two bare chords
+    x0, x1 = box.box[0], box.box[2]
+    out = []
+    for m in tokens:
+        a = x0 + (x1 - x0) * m.start() / len(text)
+        b = x0 + (x1 - x0) * m.end() / len(text)
+        out.append(TextBox(m.group(0), (a, box.box[1], b, box.box[3]), box.conf, box.source))
+    return out
 
 
 def classify(boxes: list[TextBox], groups: list[Group], space: float) -> list[dict]:
@@ -212,10 +242,17 @@ def classify(boxes: list[TextBox], groups: list[Group], space: float) -> list[di
         ]
         kinds = {kind for kind, _ in candidates}
         chordish = bool(CHORD.match(chord_text(text)))
+        glued = None if chordish else split_glued_chords(box)
         sectionish = bool(SECTION.match(text))
         pick = lambda wanted: next(g for k, g in candidates if k == wanted)  # noqa: E731
         if "left" in kinds:
             kind, group = "part-name", pick("left")
+        elif "above" in kinds and glued:
+            group = pick("above")
+            for part in glued:
+                result.append({"text": part.text, "box": [round(v, 1) for v in part.box], "conf": item["conf"], "source": item["source"],
+                               "kind": "chord", "_group": group, "_box": part, "splitFrom": text})
+            continue
         elif "above" in kinds and (chordish or sectionish):
             kind, group = ("chord" if chordish else "section"), pick("above")
         elif "below" in kinds and pick("below").staff.grand:
@@ -395,11 +432,18 @@ def follows_notes(syllables: list, notes: list, space: float) -> tuple[bool, flo
 
 
 CHORD_KIND = [
-    ("m7b5", "half-diminished"), ("ø", "half-diminished"), ("dim7", "diminished-seventh"), ("maj7", "major-seventh"),
-    ("M7", "major-seventh"), ("min7", "minor-seventh"), ("m7", "minor-seventh"), ("m6", "minor-sixth"), ("dim", "diminished"),
-    ("°", "diminished"), ("aug", "augmented"), ("+", "augmented"), ("sus2", "suspended-second"), ("sus4", "suspended-fourth"),
-    ("sus", "suspended-fourth"), ("min", "minor"), ("maj", "major"), ("m", "minor"), ("9", "dominant-ninth"), ("7", "dominant"),
-    ("6", "major-sixth"),
+    # Longest, most specific spellings first. "7+" / "7#5" / "+7" are augmented sevenths.
+    ("m7b5", "half-diminished"), ("-7b5", "half-diminished"), ("ø", "half-diminished"), ("dim7", "diminished-seventh"), ("°7", "diminished-seventh"),
+    ("Maj9", "major-ninth"), ("maj9", "major-ninth"), ("Maj7", "major-seventh"), ("maj7", "major-seventh"), ("MA7", "major-seventh"), ("Ma7", "major-seventh"),
+    ("M7", "major-seventh"), ("△", "major-seventh"),
+    ("aug7", "augmented-seventh"), ("+7", "augmented-seventh"), ("7#5", "augmented-seventh"), ("7+", "augmented-seventh"),
+    ("min9", "minor-ninth"), ("m9", "minor-ninth"), ("-9", "minor-ninth"),
+    ("min7", "minor-seventh"), ("mi7", "minor-seventh"), ("m7", "minor-seventh"), ("-7", "minor-seventh"),
+    ("min6", "minor-sixth"), ("m6", "minor-sixth"), ("-6", "minor-sixth"),
+    ("dim", "diminished"), ("°", "diminished"), ("aug", "augmented"), ("+", "augmented"),
+    ("7sus", "suspended-fourth"), ("sus2", "suspended-second"), ("sus4", "suspended-fourth"), ("sus", "suspended-fourth"),
+    ("min", "minor"), ("mi", "minor"), ("-", "minor"), ("Maj", "major"), ("maj", "major"), ("m", "minor"),
+    ("13", "dominant-13th"), ("11", "dominant-11th"), ("9", "dominant-ninth"), ("7", "dominant"), ("6", "major-sixth"), ("5", "power"),
 ]
 
 
@@ -417,7 +461,9 @@ def harmony_element(symbol: str) -> ET.Element | None:
     ET.SubElement(root, "root-step").text = step
     if accidental:
         ET.SubElement(root, "root-alter").text = "1" if accidental == "#" else "-1"
-    kind = next((name for prefix, name in CHORD_KIND if suffix.startswith(prefix)), "major")
+    # "7(#5)" and "7#5" are the same chord; parentheses only group alterations.
+    plain = suffix.replace("(", "").replace(")", "")
+    kind = next((name for prefix, name in CHORD_KIND if plain.startswith(prefix)), "major")
     ET.SubElement(harmony, "kind", text=suffix).text = kind
     if bass:
         bass_node = ET.SubElement(harmony, "bass")
