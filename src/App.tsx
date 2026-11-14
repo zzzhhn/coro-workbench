@@ -14,6 +14,7 @@ import {
   Copy,
   DotsThree,
   FilePlus,
+  Cursor,
   FileText,
   FolderOpen,
   Headphones,
@@ -93,6 +94,7 @@ import { getHealth } from './lib/api';
 import ScoreView from './components/ScoreView';
 import SourceRegionPanel from './components/SourceRegionPanel';
 import { measureOfBeat } from './lib/sourceMap';
+import { placeNote } from './lib/mouseEntry';
 import {
   TUPLET_PRESETS,
   attacksBetween,
@@ -185,6 +187,9 @@ export default function App() {
   const [span, setSpan] = useState<{ anchor: Selection; last: Selection }>();
   const clipboard = useRef<Clip | undefined>(undefined);
   const [entryVoice, setEntryVoice] = useState<1 | 2 | 3 | 4>(1);
+  /** Click-to-place mode (Crescendo's note tool): clicks on staff space add a note there. */
+  const [placing, setPlacing] = useState(false);
+  const [placeRest, setPlaceRest] = useState(false);
   const [repairEntry, setRepairEntry] = useState<'staff' | 'beat'>('staff');
   const [pitchReviewSeconds, setPitchReviewSeconds] = useState(0);
   const [inspectorTab, setInspectorTab] = useState<'note' | 'check'>('note');
@@ -768,6 +773,27 @@ export default function App() {
       notify(cleanError(error), true);
     }
   };
+  const placeAt = (target: { partId: string; staffNumber: number; midi: number; beat: number }) => {
+    try {
+      const result = placeNote(project, {
+        ...target,
+        midi: placeRest ? null : target.midi,
+        duration: entryDuration,
+        voice: entryVoice,
+      });
+      if (result.kind !== 'existing') updateProject(result.project);
+      setRange(undefined);
+      setSelection(result.selection);
+      setSelectedPartId(result.selection.partId);
+      const placedPart = result.project.parts.find((item) => item.id === target.partId)!;
+      if (!placeRest) void engine.current?.audition(placedPart, target.midi).catch(() => undefined);
+      engine.current?.seek(target.beat);
+      if (result.kind === 'replaced-rest') notify('已替换该位置的休止符。');
+      else if (result.kind === 'chord') notify('与同一拍的音合成和弦（沿用其时值）。');
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
   const issues = useMemo(() => reviewIssues(project), [project]);
   const verticalAnchor = useRef<(Selection & { beat: number }) | undefined>(undefined);
   const applyDuration = (change: DurationChange) => {
@@ -1104,6 +1130,10 @@ export default function App() {
         return;
       }
       if (event.key === 'Escape') {
+        if (placing) {
+          setPlacing(false);
+          return;
+        }
         setSelection(undefined);
         setRange(undefined);
         setSpan(undefined);
@@ -1116,6 +1146,14 @@ export default function App() {
           event.preventDefault();
           seekBeat(playingState.beat + (event.key === 'ArrowRight' ? 1 : -1) * barLength);
         }
+        return;
+      }
+      if (event.code === 'KeyP' && !command && !event.altKey) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          setPlacing(true);
+          setPlaceRest((value) => !value);
+        } else setPlacing((value) => !value);
         return;
       }
       if (event.key.toLowerCase() === 'n' && !command) {
@@ -1147,7 +1185,11 @@ export default function App() {
         event.preventDefault();
         const value = DURATION_KEYS[digit];
         setEntryDuration(value);
-        if (event.shiftKey) {
+        if (placing && !event.shiftKey) setPlaceRest(false);
+        if (event.shiftKey && placing) {
+          // In click-to-place mode ⇧digit picks the rest tool of that value.
+          setPlaceRest(true);
+        } else if (event.shiftKey) {
           // Shift+digit: rest of that value (Crescendo's rest tool shortcuts).
           if (stepEntry || !selection) addNote(null, value);
           else if (selection) {
@@ -1158,7 +1200,7 @@ export default function App() {
               notify(cleanError(error), true);
             }
           }
-        } else if (selection && !stepEntry) {
+        } else if (selection && !stepEntry && !placing) {
           try {
             applyDuration(setNoteDuration(project, selection, value));
           } catch (error) {
@@ -1614,6 +1656,15 @@ export default function App() {
             <span className="tool-divider" />
             <div className="tool-group entry-tools">
               <button
+                className={`icon-button ${placing ? 'active-tool' : ''}`}
+                aria-label="鼠标放音"
+                title="鼠标放音 (P)：在谱表上点击放置当前时值的音符；⇧P 切换为放休止符；Esc 退出"
+                aria-pressed={placing}
+                onClick={() => setPlacing((value) => !value)}
+              >
+                <Cursor size={18} />
+              </button>
+              <button
                 className={`icon-button ${stepEntry ? 'active-tool' : ''}`}
                 aria-label="逐步输入音符"
                 title="逐步输入 (N)，再按 A–G"
@@ -1773,6 +1824,13 @@ export default function App() {
           </div>
         )}
 
+        {placing && tab === 'workbench' && (
+          <div className="step-entry-notice placement-notice" role="status" aria-label="鼠标放音">
+            <Cursor size={15} />
+            鼠标放音 · 点击谱表放置{placeRest ? '休止符' : '音符'}（{durationOptions.find((option) => option.value === entryDuration)?.label ?? `${entryDuration} 拍`}，声部 {entryVoice}）· 1–7 换时值 · ⇧P 音符/休止 · 点在已有音上为和弦 · Esc 退出
+            <button onClick={() => setPlacing(false)}>退出</button>
+          </div>
+        )}
         {stepEntry && (
           <div className="step-entry-notice">
             <NotePencil size={15} />
@@ -1930,6 +1988,7 @@ export default function App() {
             onSelect={selectNote}
             readingMode={tab === 'practice'}
             rangeKeys={tab === 'workbench' ? (spanKeys ?? rangeKeys) : undefined}
+            placement={tab === 'workbench' && placing ? { grid: Math.min(entryDuration, 1), onPlace: placeAt } : undefined}
             onRubberBand={
               tab === 'workbench'
                 ? (hits) => {
@@ -2483,6 +2542,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
               ['⌥ 1–4', '记谱声部 1–4：移入选中音符或范围，或设为输入声部'],
               ['⌥ 点击 · ⌥ ← →', '选同一声部的音符段（首音到末音）'],
               ['T · ⌥ T · ⌥ R', '音符段：做成 3:2 三连音 / 还原普通时值 / 首尾相接重排起拍'],
+              ['P · ⇧ P', '鼠标放音：点谱表按位置放音（按调号，吸附到拍点） / 改为放休止符'],
               ['N', '切换逐步输入'],
               ['Delete', '删除选中音符'],
               ['⌘ Z / ⌘ ⇧ Z', '撤销 / 重做'],
