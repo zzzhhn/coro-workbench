@@ -25,6 +25,28 @@ TERMS = re.compile(
     r"sempre|simile|div|unis|sffz|sfp|morendo|smorz|calando|string|stringendo|allarg|allargando|cresc|dim|rit|rall|accel)\.?$",
     re.I,
 )
+# D4 (2026-11-15): the abbreviated and OCR-mangled forms engravers and OCR produce
+# under keyboard staves ("Poc", "dol", "f'z", "PocP", "Volti."). A word is a mark
+# when, without dots and apostrophes, it is one of these, or a term glued to a
+# dynamic. Deliberately not here: words that are also sung ("con", "ten", "leg", "a").
+_MARK = (
+    r"poc|poco|dol|dolc|dolce|cresc|cres|decresc|dim|dimin|diminuendo|rit|riten|ritard|rall|rallent|accel|smorz|espr|espress|"
+    r"sost|ten|stacc|leg|ped|pedale|volti|vs|md|mg|ms|mf|mp|sf|sfz|sffz|sfp|fz|ffz|rf|rfz|fp|p{1,4}|f{1,4}|tr|"
+    r"pizz|arco|unis|div|simile|sempre|morendo|calando|perdendosi|cantabile|scherzando|marcato|marc|tranquillo|"
+    r"una ?corda|tre ?corde|a ?tempo|tempo|primo|l?istesso|loco|ottava|8va|8vb|8"
+)
+_DYN = r"p{1,4}|f{1,4}|mp|mf|sfz?|fz|rfz?|fp"
+MARK = re.compile(rf"^(({_MARK})|(poc|poco|dol|dolc|cresc|dim|rit|espr)({_DYN}))$", re.I)
+# Also sung words (German/Italian/English): on their own they stay lyrics.
+SUNG_TOO = {"ten", "leg", "tempo", "primo", "loco", "dolce", "poco", "sempre", "morendo", "calando", "div", "una corda", "a tempo"}
+
+
+def is_mark(word: str) -> bool:
+    """A performance mark (term, dynamic, abbreviation), including OCR spellings."""
+    bare = re.sub(r"[.'’`,;:!?()]", "", word).strip()
+    return bool(bare) and bool(MARK.match(bare))
+
+
 CHORD = re.compile(
     r"^(N\.?C\.?|[A-G][#b]?"
     r"(Maj|maj|MA|Ma|M|min|mi|m|-|dim|°|aug|\+|△|ø|sus2|sus4|sus)?"
@@ -265,6 +287,9 @@ def classify(boxes: list[TextBox], groups: list[Group], space: float) -> list[di
                 continue
             if DYNAMICS.match(text) or re.fullmatch(r"[\d\s.,:;()]+", text):
                 result.append({**item, "kind": "discarded", "reason": "dynamic or number below staff"})
+                continue
+            if is_mark(text) and not TERMS.match(text) and text.lower().strip(".") not in SUNG_TOO:
+                result.append({**item, "kind": "discarded", "reason": "performance mark or abbreviation below staff"})
                 continue
             if chordish:
                 result.append({**item, "kind": "discarded", "reason": "chord text below staff is not sung"})
@@ -519,7 +544,11 @@ def apply_text_layer(xml: str, staves_text: str, size: tuple[int, int], boxes: l
         verse_xs: list[list[float]] = []
         for row in lines_of(items, space):
             words = [w for item in row for w in re.split(r"\s+", item["text"]) if w and not re.fullmatch(r"[-–—_]+", w)]
-            if words and sum(bool(TERMS.match(w) or DYNAMICS.match(w)) for w in words) * 2 >= len(words):
+            old_rule = sum(bool(TERMS.match(w) or DYNAMICS.match(w)) for w in words) * 2 >= len(words)
+            marks = [is_mark(w) for w in words]
+            # The wider mark list only counts with one mark that is not also a sung word.
+            strong = any(m and re.sub(r"[.'’`]", "", w).lower() not in SUNG_TOO for m, w in zip(marks, words))
+            if words and (old_rule or (strong and sum(marks) * 2 >= len(words))):
                 for item in row:
                     item["kind"], item["reason"] = "discarded", "performance terms, not sung text"
                 continue
