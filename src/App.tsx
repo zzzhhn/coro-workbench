@@ -95,6 +95,7 @@ import ScoreView from './components/ScoreView';
 import SourceRegionPanel from './components/SourceRegionPanel';
 import { measureOfBeat } from './lib/sourceMap';
 import { placeNote } from './lib/mouseEntry';
+import { deleteMeasures, insertMeasures, type MeasureChange } from './lib/measures';
 import {
   TUPLET_PRESETS,
   attacksBetween,
@@ -794,6 +795,41 @@ export default function App() {
       notify(cleanError(error), true);
     }
   };
+  /** Bars the measure commands act on: the selected range, else the selected note's bar, else the playhead bar. */
+  const targetBars = (): [number, number] =>
+    range
+      ? [range.startBar, range.endBar]
+      : selectedNote
+        ? [measureOfBeat(project, selectedNote.start), measureOfBeat(project, selectedNote.start)]
+        : [currentBar, currentBar];
+  const applyMeasures = (change: MeasureChange, message: string, focusBar: number) => {
+    updateProject(change.project);
+    setSelection(undefined);
+    setRange(undefined);
+    goToMeasure(Math.min(focusBar, change.project.measures));
+    notify([message, ...change.warnings].join(' '), change.warnings.some((warning) => warning.includes('原音频')));
+  };
+  const insertBars = (after: boolean) => {
+    const [start, end] = targetBars();
+    const bar = after ? end + 1 : start;
+    try {
+      applyMeasures(insertMeasures(project, bar), `已在第 ${bar - (after ? 1 : 0)} 小节${after ? '后' : '前'}插入一个空小节。`, bar);
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
+  const deleteBars = () => {
+    const [start, end] = targetBars();
+    try {
+      applyMeasures(
+        deleteMeasures(project, start, end),
+        `已删除第 ${start}${end > start ? `–${end}` : ''} 小节（全部声部）。`,
+        start,
+      );
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
   const issues = useMemo(() => reviewIssues(project), [project]);
   const verticalAnchor = useRef<(Selection & { beat: number }) | undefined>(undefined);
   const applyDuration = (change: DurationChange) => {
@@ -1101,6 +1137,17 @@ export default function App() {
       if (event.altKey && !command && tab === 'workbench' && /^Digit[1-4]$/.test(event.code)) {
         event.preventDefault();
         applyVoice(Number(event.code.slice(5)) as 1 | 2 | 3 | 4);
+        return;
+      }
+      if (command && tab === 'workbench' && event.code === 'KeyB') {
+        // Crescendo uses ⌘B to append a measure; Coro inserts after the target bar (⇧ = before).
+        event.preventDefault();
+        insertBars(!event.shiftKey);
+        return;
+      }
+      if (command && tab === 'workbench' && (event.key === 'Backspace' || event.key === 'Delete')) {
+        event.preventDefault();
+        deleteBars();
         return;
       }
       if (command && event.key.toLowerCase() === 'z') {
@@ -1870,6 +1917,7 @@ export default function App() {
               插入粘贴 ⌘⇧V
             </button>
             <button onClick={deleteSelection}>清空</button>
+            <button onClick={deleteBars} title="连同小节一起删除，后面的小节前移（全部声部）">删除小节 ⌘⌫</button>
             <button className="range-close" aria-label="取消范围选择" onClick={() => setRange(undefined)}>
               Esc
             </button>
@@ -1951,11 +1999,20 @@ export default function App() {
           </select>
           <button
             className="icon-button measure-edit-action"
-            aria-label="添加空白小节"
-            title="末尾添加一个空白小节"
-            onClick={() => updateProject({ ...project, measures: project.measures + 1 })}
+            aria-label="在后面插入小节"
+            title="在当前小节后插入一个空小节 (⌘B；⇧⌘B 插在前面)"
+            onClick={() => insertBars(true)}
           >
             <Plus size={15} />
+          </button>
+          <button
+            className="icon-button measure-edit-action"
+            aria-label="删除小节"
+            title="删除当前小节或所选范围的小节（全部声部，⌘⌫）"
+            disabled={project.measures <= 1}
+            onClick={deleteBars}
+          >
+            <Minus size={15} />
           </button>
           <button
             className="icon-button duplicate-bar measure-edit-action"
@@ -2540,6 +2597,8 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
               ['⌘ C · ⌘ X · ⌘ A', '复制 / 剪切范围 · 全选'],
               ['⌘ V · ⌘ ⇧ V', '在选中音符所在小节覆盖粘贴 / 插入粘贴'],
               ['⌥ 1–4', '记谱声部 1–4：移入选中音符或范围，或设为输入声部'],
+              ['⌘ B · ⇧ ⌘ B', '在当前小节（或所选范围）后 / 前插入空小节'],
+              ['⌘ ⌫', '删除当前小节或所选范围的小节（全部声部）'],
               ['⌥ 点击 · ⌥ ← →', '选同一声部的音符段（首音到末音）'],
               ['T · ⌥ T · ⌥ R', '音符段：做成 3:2 三连音 / 还原普通时值 / 首尾相接重排起拍'],
               ['P · ⇧ P', '鼠标放音：点谱表按位置放音（按调号，吸附到拍点） / 改为放休止符'],
