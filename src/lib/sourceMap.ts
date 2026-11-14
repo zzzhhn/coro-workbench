@@ -31,16 +31,18 @@ export function omrMeasureOf(project: ScoreProject, partIndex: number, scoreMeas
   if (!review || !part) return scoreMeasure;
   const bar = beatsPerBar(project);
   const refs = new Map(review.notes.map((item) => [item.ref, item.measure]));
+  // Attacks first: a tied tail split off by an inserted bar shares its attack's ref
+  // but sits in a different Coro bar; only the earliest note of a ref is its attack.
+  const attacks = new Map<string, number>();
   for (const note of part.notes) {
     const ref = sourceRefOf(note);
-    if (ref && refs.has(ref) && measureOfBeat(project, note.start) === scoreMeasure) return refs.get(ref)!;
+    if (ref && refs.has(ref) && (!attacks.has(ref) || note.start < attacks.get(ref)!)) attacks.set(ref, note.start);
   }
+  for (const [ref, start] of attacks) if (measureOfBeat(project, start) === scoreMeasure) return refs.get(ref)!;
   // No referenced note in this bar: offset from the nearest referenced bar.
   let best: { distance: number; delta: number } | undefined;
-  for (const note of part.notes) {
-    const ref = sourceRefOf(note);
-    if (!ref || !refs.has(ref)) continue;
-    const here = Math.floor(note.start / bar + 1e-6) + 1;
+  for (const [ref, start] of attacks) {
+    const here = Math.floor(start / bar + 1e-6) + 1;
     const distance = Math.abs(here - scoreMeasure);
     if (!best || distance < best.distance) best = { distance, delta: refs.get(ref)! - here };
   }
