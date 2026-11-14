@@ -300,7 +300,7 @@ def test_homr_result_keeps_engine_label_and_no_text_notice(tmp_path, monkeypatch
     result.write_text(MINIMAL_XML)
     monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True})
     monkeypatch.setattr(omr, "homr_manifest", lambda: {"version": "0.7.1"})
-    monkeypatch.setattr(omr, "_homr_attempt", lambda directory, pages, status: (result, ["各页识别出的声部数不一致"], {"engineExit": 0, "partsPerPage": [1]}))
+    monkeypatch.setattr(omr, "_homr_attempt", lambda directory, pages, status, *extra: (result, ["各页识别出的声部数不一致"], {"engineExit": 0, "partsPerPage": [1]}))
     monkeypatch.setattr(omr, "_audiveris_attempt", lambda *args: pytest.fail("no fallback when homr succeeded"))
     recognize(tmp_path, request)
     state = OmrStatus(tmp_path).read()
@@ -317,7 +317,7 @@ def test_auto_falls_back_to_audiveris_only_when_homr_produced_nothing(tmp_path, 
     monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True})
     monkeypatch.setattr(omr, "homr_manifest", lambda: {"version": "0.7.1"})
     monkeypatch.setattr(omr, "audiveris_ready", lambda: True)
-    monkeypatch.setattr(omr, "_homr_attempt", lambda directory, pages, status: (None, [], {"engineExit": 1, "pagesMissing": [1]}))
+    monkeypatch.setattr(omr, "_homr_attempt", lambda directory, pages, status, *extra: (None, [], {"engineExit": 1, "pagesMissing": [1]}))
     monkeypatch.setattr(omr, "_audiveris_attempt", lambda directory, pages, read_text, status, notices: (result, "", 0, []))
     recognize(tmp_path, request)
     state = OmrStatus(tmp_path).read()
@@ -330,7 +330,7 @@ def test_explicit_homr_failure_does_not_silently_switch_engine(tmp_path, monkeyp
     monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True})
     monkeypatch.setattr(omr, "homr_manifest", lambda: {"version": "0.7.1"})
     monkeypatch.setattr(omr, "audiveris_ready", lambda: True)
-    monkeypatch.setattr(omr, "_homr_attempt", lambda directory, pages, status: (None, [], {"engineExit": 1, "pagesMissing": [1]}))
+    monkeypatch.setattr(omr, "_homr_attempt", lambda directory, pages, status, *extra: (None, [], {"engineExit": 1, "pagesMissing": [1]}))
     monkeypatch.setattr(omr, "_audiveris_attempt", lambda *args: pytest.fail("explicit engine must not fall back"))
     with pytest.raises(ValueError, match="homr 未能识别"):
         recognize(tmp_path, request)
@@ -364,3 +364,11 @@ def test_homr_page_part_mismatch_is_reported_not_hidden(tmp_path, monkeypatch):
     assert any("第 1 页 1 个" in notice and "第 2 页 2 个" in notice for notice in notices)
     # Raw per-page output stays next to the merged result.
     assert (tmp_path / "recognized-homr" / "page-002.musicxml").is_file()
+
+
+def test_homr_text_layer_notices_do_not_repeat_audiveris_ocr_advice():
+    _, with_text = summarize_musicxml(MINIMAL_XML, 1, "", False, "homr", True)
+    _, without_text = summarize_musicxml(MINIMAL_XML, 1, "", False, "homr", False)
+    assert not any("歌词/标题 OCR" in notice for notice in with_text + without_text)
+    assert any("未启用文字层" in notice for notice in without_text)
+    assert not any("未启用文字层" in notice for notice in with_text)

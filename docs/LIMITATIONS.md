@@ -126,7 +126,10 @@ PDF and image imports use homr by default and Audiveris as a selectable or
 automatic fallback engine. On simulated scans and phone photos of printed pages
 homr held up far better than Audiveris (2026-11-14 A/B in PIPELINE.md); real
 photos, real scans, handwriting and jianpu are not yet measured. homr does not
-read lyrics, chord symbols or part names, and reads fewer ties than printed.
+read lyrics, chord symbols or part names by itself; Coro's text layer adds them
+from the PDF's own text or local OCR (RapidOCR), aligned by position. Photos and
+scans can misread words, shift a syllable or take a performance term for a lyric,
+and only the first verse is imported. homr reads fewer ties than printed.
 Either engine can introduce wrong accidentals, ties, meter, voice assignments
 and extra/missing notes.
 

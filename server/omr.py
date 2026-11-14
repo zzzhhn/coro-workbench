@@ -342,7 +342,7 @@ def read_musicxml(path: Path) -> str:
     return xml
 
 
-def summarize_musicxml(xml: str, pages: int, logs: str, read_text: bool, engine: str = "audiveris") -> tuple[dict, list[str]]:
+def summarize_musicxml(xml: str, pages: int, logs: str, read_text: bool, engine: str = "audiveris", text_layer: bool = False) -> tuple[dict, list[str]]:
     root = ET.fromstring(xml)
     pitched = len(root.findall(".//note/pitch"))
     percussion = len(root.findall(".//note/unpitched"))
@@ -352,7 +352,8 @@ def summarize_musicxml(xml: str, pages: int, logs: str, read_text: bool, engine:
         "图片只提供印刷记号；识谱模型没有提供校准准确率，不能把成功导入当成识别无误。",
     ]
     if engine == "homr":
-        notices.append("homr 不读取歌词、和弦符号和声部名称文字；这些需要手动补填。")
+        if not text_layer:
+            notices.append("未启用文字层：homr 本身不读取歌词、和弦符号和声部名称，这些需要手动补填。")
     elif not read_text:
         notices.append("为避免文字误识别造成声部串接，默认不启用歌词/标题 OCR；声部名称和歌词可能需要手动填写。")
     else:
@@ -448,8 +449,12 @@ def _run_logged(command: list[str], cwd: Path, env: dict, log_path: Path, deadli
         return process.returncode
 
 
-def _homr_attempt(directory: Path, pages: list[Path], status: OmrStatus) -> tuple[Path | None, list[str], dict]:
-    """Run homr once over the normalized pages; keep every page's raw MusicXML."""
+def _homr_attempt(directory: Path, pages: list[Path], status: OmrStatus, text_source: Path | None = None, text_layer: bool = False) -> tuple[Path | None, list[str], dict]:
+    """Run homr once over the normalized pages; keep every page's raw MusicXML.
+
+    With text_layer, each page also gets lyrics, chord symbols and part names
+    (server/omr_text.py) in a separate *.text.musicxml; raw pages stay as homr wrote them.
+    """
     source = homr_home() / "src"
     work = directory / "recognized-homr"
     work.mkdir(exist_ok=True)
@@ -470,7 +475,7 @@ def _homr_attempt(directory: Path, pages: list[Path], status: OmrStatus) -> tupl
 
     # A directory run loads the models once and writes one MusicXML per page;
     # pages are merged afterwards so the per-page raw output stays inspectable.
-    code = _run_logged([str(source / ".venv" / "bin" / "homr"), "--no-title", str(work)], source, _homr_env(local_home), log_path, deadline, status, progress)
+    code = _run_logged([str(source / ".venv" / "bin" / "homr"), "--no-title", "--write-staff-positions", str(work)], source, _homr_env(local_home), log_path, deadline, status, progress)
     page_xml = [work / (page.stem + ".musicxml") for page in inputs]
     missing = [index + 1 for index, path in enumerate(page_xml) if not path.is_file()]
     stats = {"engineExit": code, "pagesMissing": missing}
@@ -487,6 +492,11 @@ def _homr_attempt(directory: Path, pages: list[Path], status: OmrStatus) -> tupl
         # misplace music, so name the pages instead of merging silently.
         detail = "、".join(f"第 {index + 1} 页 {value} 个" for index, value in enumerate(counts))
         notices.append(f"各页识别出的声部数不一致（{detail}）。跨页合并按声部顺序对应，多出或缺少的声部可能错位或丢失；请逐页核对，必要时分页导入。")
+    if text_layer:
+        status.update(85, "reading-text", "读取歌词、和弦符号与声部名，并按音符位置对齐。", pages=count)
+        page_xml, text_stats, text_notices = _homr_text_layer(directory, work, inputs, page_xml, text_source, status)
+        stats["text"] = text_stats
+        notices.extend(text_notices)
     if len(page_xml) == 1:
         return page_xml[0], notices, stats
     merged = work / "merged.musicxml"
@@ -494,6 +504,62 @@ def _homr_attempt(directory: Path, pages: list[Path], status: OmrStatus) -> tupl
     _run_logged([str(source / ".venv" / "bin" / "python"), "-c", HOMR_MERGE, str(merged), *map(str, page_xml)], source, _homr_env(local_home), log_path, time.monotonic() + 120, status)
     return (merged if merged.is_file() else None), notices, stats
 
+
+def _homr_text_layer(directory: Path, work: Path, inputs: list[Path], page_xml: list[Path], text_source: Path | None, status: OmrStatus) -> tuple[list[Path], dict, list[str]]:
+    """Add the text layer page by page. A page that fails keeps its raw homr notes."""
+    from PIL import Image
+
+    from .omr_text import TextBox, apply_text_layer, note_signature
+
+    source = homr_home() / "src"
+    extractor = Path(__file__).with_name("omr_text_extract.py")
+    out_paths, evidence, notices = [], [], []
+    totals = {"lyrics": 0, "chords": 0, "sections": 0, "pagesSkipped": [], "sources": []}
+    for index, (image, raw_path) in enumerate(zip(inputs, page_xml), 1):
+        status.check_cancelled()
+        staves = image.with_suffix(".txt")
+        args = [str(source / ".venv" / "bin" / "python"), str(extractor), str(image)]
+        page_number = int(re.search(r"(\d+)$", image.stem).group(1)) if re.search(r"(\d+)$", image.stem) else index
+        if text_source is not None and text_source.suffix.lower() == ".pdf":
+            args += [str(text_source), str(page_number)]
+        result = subprocess.run(args, cwd=source, env=_homr_env(directory / "runtime-home"), capture_output=True, text=True, timeout=180)
+        try:
+            data = json.loads(result.stdout) if result.returncode == 0 else None
+        except ValueError:
+            data = None
+        raw = raw_path.read_text(encoding="utf-8")
+        if data is None or not staves.is_file():
+            totals["pagesSkipped"].append(index)
+            evidence.append({"page": index, "skipped": "文字提取失败" if data is None else "缺少谱表坐标"})
+            out_paths.append(raw_path)
+            continue
+        with Image.open(image) as page:
+            size = page.size
+        boxes = [TextBox(b["text"], tuple(b["box"]), b.get("conf", 1.0), data["source"]) for b in data["boxes"]]
+        new, page_evidence = apply_text_layer(raw, staves.read_text(), size, boxes, crop=tuple(data["crop"]))
+        if note_signature(raw) != note_signature(new):
+            # The layer may only add text. Never ship a page whose notes moved.
+            page_evidence = {"skipped": "文字层改变了音符，已丢弃该页文字"}
+            new = raw
+        target = raw_path.with_suffix(".text.musicxml")
+        target.write_text(new, encoding="utf-8")
+        out_paths.append(target)
+        page_evidence["page"] = index
+        page_evidence["textSource"] = data["source"]
+        evidence.append(page_evidence)
+        if page_evidence.get("skipped"):
+            totals["pagesSkipped"].append(index)
+        for key in ("lyrics", "chords", "sections"):
+            totals[key] += page_evidence.get(key, 0)
+        totals["sources"].append(data["source"])
+    atomic_json(directory / "text-evidence.json", {"rules": "PROTOCOL-text v6", "pages": evidence})
+    totals["sources"] = sorted(set(totals["sources"]))
+    if totals["lyrics"] or totals["chords"]:
+        origin = "PDF 自带文字" if totals["sources"] == ["pdf-text"] else "本机文字识别（RapidOCR）"
+        notices.append(f"已从{origin}按音符位置贴回 {totals['lyrics']} 个歌词音节、{totals['chords']} 个和弦符号。拍照/扫描的歌词可能读错字、错位或把演奏术语当成歌词，请逐句校对；原始 homr 音符没有被改动。")
+    if totals["pagesSkipped"]:
+        notices.append(f"第 {'、'.join(map(str, totals['pagesSkipped']))} 页未能贴回文字（版面无法对应到谱表），这些页只有音符。")
+    return out_paths, totals, notices
 
 def _audiveris_attempt(directory: Path, pages: list[Path], read_text: bool, status: OmrStatus, notices: list[str]) -> tuple[Path, str, int, list]:
     output = directory / "recognized"
@@ -538,7 +604,8 @@ def recognize(directory: Path, request: dict) -> None:
     resampling, logs, code, engine_stats = [], "", 0, {}
     result_path = None
     if engine == "homr":
-        result_path, homr_notices, engine_stats = _homr_attempt(directory, pages, status)
+        text_layer = bool(request.get("text_layer", False))
+        result_path, homr_notices, engine_stats = _homr_attempt(directory, pages, status, directory / request["input"], text_layer)
         logs = (directory / "omr-homr.log").read_text(encoding="utf-8", errors="replace") if (directory / "omr-homr.log").exists() else ""
         code = engine_stats.get("engineExit", 0)
         if result_path is None and requested == "auto" and audiveris_ready():
@@ -553,9 +620,12 @@ def recognize(directory: Path, request: dict) -> None:
     if engine == "audiveris":
         result_path, logs, code, resampling = _audiveris_attempt(directory, pages, read_text, status, notices)
     xml = read_musicxml(result_path)
-    stats, recognition_notices = summarize_musicxml(xml, len(pages), logs, read_text, engine)
+    stats, recognition_notices = summarize_musicxml(xml, len(pages), logs, read_text, engine, engine == "homr" and bool(request.get("text_layer", False)))
     if engine == "homr" and engine_stats.get("partsPerPage"):
         stats["partsPerPage"] = "/".join(map(str, engine_stats["partsPerPage"]))
+    if engine == "homr" and engine_stats.get("text"):
+        stats["textLyrics"] = engine_stats["text"]["lyrics"]
+        stats["textChords"] = engine_stats["text"]["chords"]
     notices.extend(recognition_notices)
     if code != 0:
         notices.append("引擎部分处理步骤报错，但生成了可解析音符；当前结果为部分识别，请重点检查缺失页面和声部。")
@@ -683,7 +753,7 @@ def create_omr_router(data_dir: Path | None = None) -> APIRouter:
         return path
 
     @router.post("", status_code=202)
-    async def upload(file: UploadFile = File(...), first_page: int = Form(1), last_page: int | None = Form(None), read_text: bool = Form(False), engine: str = Form("auto")):
+    async def upload(file: UploadFile = File(...), first_page: int = Form(1), last_page: int | None = Form(None), read_text: bool = Form(False), engine: str = Form("auto"), text_layer: bool = Form(True)):
         if engine not in ENGINES:
             raise HTTPException(422, "未知识谱引擎。")
         if first_page < 1 or first_page > MAX_INPUT_PAGES or last_page is not None and (last_page < first_page or last_page > MAX_INPUT_PAGES or last_page - first_page + 1 > MAX_PAGES):
@@ -718,7 +788,7 @@ def create_omr_router(data_dir: Path | None = None) -> APIRouter:
                     handle.write(chunk)
             if size < 32:
                 raise HTTPException(422, "谱页文件为空或过短。")
-            request = {"id": job_id, "filename": name, "input": source.name, "first_page": first_page, "last_page": last_page, "read_text": read_text, "engine": engine}
+            request = {"id": job_id, "filename": name, "input": source.name, "first_page": first_page, "last_page": last_page, "read_text": read_text, "engine": engine, "text_layer": text_layer}
             result = {"id": job_id, "status": "queued", "progress": 0, "stage": "queued", "message": "等待本地光学识谱。", "createdAt": utc_now(), "updatedAt": utc_now()}
             atomic_json(path / "request.json", request)
             atomic_json(path / "status.json", result)
