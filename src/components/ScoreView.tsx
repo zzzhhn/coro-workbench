@@ -18,7 +18,7 @@ interface Props {
   showConfidence: boolean;
   readingMode?: boolean;
   measureRange?: MeasureRange;
-  onSelect: (selection: Selection, beat?: number, extend?: boolean) => void;
+  onSelect: (selection: Selection, beat?: number, extend?: boolean, span?: boolean) => void;
   /** Note ids (part\0note) inside the active range, highlighted as a block. */
   rangeKeys?: Set<string>;
   /** Rubber-band selection: glyphs whose boxes intersect the dragged rectangle. */
@@ -45,6 +45,7 @@ export default function ScoreView({
   onSelectRef.current = onSelect;
   // abcjs' click callback does not expose modifier keys; track Shift ourselves.
   const shiftDown = useRef(false);
+  const altDown = useRef(false);
   const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number }>();
   const bandStart = useRef<{ x: number; y: number; active: boolean }>(undefined);
   const [error, setError] = useState('');
@@ -147,7 +148,8 @@ export default function ScoreView({
           if (element.startChar === undefined) return;
           const mapped = abcResult.noteMap[element.startChar];
           const extend = Boolean(mouseEvent?.shiftKey ?? shiftDown.current);
-          if (mapped) onSelectRef.current(mapped, abcResult.noteSegments?.[element.startChar]?.start, extend);
+          const span = Boolean(mouseEvent?.altKey ?? altDown.current);
+          if (mapped) onSelectRef.current(mapped, abcResult.noteSegments?.[element.startChar]?.start, extend, span);
         },
         ariaLabel: `${project.title}，可交互五线谱。点击音符编辑，键盘上下键改变音高。`,
       });
@@ -275,7 +277,10 @@ export default function ScoreView({
   }, [rangeKeys, renderVersion]);
 
   useEffect(() => {
-    const down = (event: KeyboardEvent) => (shiftDown.current = event.shiftKey);
+    const down = (event: KeyboardEvent) => {
+      shiftDown.current = event.shiftKey;
+      altDown.current = event.altKey;
+    };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', down);
     return () => {
@@ -287,6 +292,7 @@ export default function ScoreView({
   // Rubber band: drag on empty paper (not on a note) to select whole bars of the staves crossed.
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     shiftDown.current = event.shiftKey;
+    altDown.current = event.altKey;
     if (!onRubberBand || event.button !== 0 || (event.target as Element).closest('[data-note-id]')) return;
     const box = event.currentTarget.getBoundingClientRect();
     bandStart.current = { x: event.clientX - box.left, y: event.clientY - box.top, active: false };

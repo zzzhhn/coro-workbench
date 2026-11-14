@@ -94,6 +94,15 @@ import ScoreView from './components/ScoreView';
 import SourceRegionPanel from './components/SourceRegionPanel';
 import { measureOfBeat } from './lib/sourceMap';
 import {
+  TUPLET_PRESETS,
+  attacksBetween,
+  makeTuplet,
+  reflowOnsets,
+  removeTuplet,
+  type RhythmChange,
+  type TupletSpec,
+} from './lib/tuplets';
+import {
   clearRange,
   copyRange,
   extendRange,
@@ -172,6 +181,8 @@ export default function App() {
   const [sourceOpen, setSourceOpen] = useState(false);
   const [sourceRegionOpen, setSourceRegionOpen] = useState(false);
   const [range, setRange] = useState<RangeSelection>();
+  /** First/last notes of a rhythm span in one lane (⌥-click), for tuplets and re-onset. */
+  const [span, setSpan] = useState<{ anchor: Selection; last: Selection }>();
   const clipboard = useRef<Clip | undefined>(undefined);
   const [entryVoice, setEntryVoice] = useState<1 | 2 | 3 | 4>(1);
   const [repairEntry, setRepairEntry] = useState<'staff' | 'beat'>('staff');
@@ -580,7 +591,7 @@ export default function App() {
     setHistoryVersion((value) => value + 1);
   };
   const visibleIds = tab === 'practice' ? undefined : visiblePart === 'all' ? undefined : [visiblePart];
-  const selectNote = (next: Selection, beat?: number, extend = false) => {
+  const selectNote = (next: Selection, beat?: number, extend = false, spanClick = false) => {
     const note = project.parts
       .find((part) => part.id === next.partId)
       ?.notes.find((note) => note.id === next.noteId);
@@ -588,6 +599,13 @@ export default function App() {
       if (note) seekBeat(beat ?? note.start);
       return;
     }
+    // ⌥-click: a note span in the anchor's lane (Crescendo's tuplet tool picks first and last note).
+    if (spanClick && selection && selection.partId === next.partId) {
+      setRange(undefined);
+      setSpan({ anchor: span?.anchor ?? selection, last: next });
+      return;
+    }
+    setSpan(undefined);
     // Shift-click: whole bars from the anchor note to this one, across the parts between.
     if (extend && selection) {
       const spanned = rangeBetween(project, selection, next, visibleIds);
@@ -708,6 +726,46 @@ export default function App() {
     if (next !== project) {
       updateProject(next);
       notify(`${targets.length} 个音符移到声部 ${voice}；音高与节奏不变。`);
+    }
+  };
+  const spanTargets = useMemo(
+    () => (span ? attacksBetween(project, span.anchor, span.last) : undefined),
+    [project, span],
+  );
+  const spanKeys = useMemo(
+    () => {
+      if (!spanTargets) return undefined;
+      const part = project.parts.find((item) => item.id === spanTargets[0]?.partId);
+      const starts = new Set(
+        spanTargets.map((target) => part?.notes.find((note) => note.id === target.noteId)?.start),
+      );
+      // Highlight chord tones too, since they move with their attack.
+      return new Set(
+        (part?.notes ?? []).filter((note) => starts.has(note.start)).map((note) => `${part!.id}\0${note.id}`),
+      );
+    },
+    [project, spanTargets],
+  );
+  const applyRhythm = (change: RhythmChange, what: string) => {
+    if (!change.changed) {
+      notify(`${what}：没有需要改动的音符。`);
+      return;
+    }
+    updateProject(change.project);
+    notify([`${what}：${change.attacks} 个起音，${change.changed} 个音符已调整。`, ...change.warnings].join(' '), change.warnings.length > 0);
+  };
+  const tupletAction = (spec: TupletSpec | 'remove' | 'reflow') => {
+    const targets = spanTargets ?? (selection ? [selection] : []);
+    if (targets.length < 2) {
+      notify('先点选第一个音符，再按住 ⌥ 点选最后一个音符（同一声部）。', true);
+      return;
+    }
+    try {
+      if (spec === 'remove') applyRhythm(removeTuplet(project, targets), '还原普通时值');
+      else if (spec === 'reflow') applyRhythm(reflowOnsets(project, targets), '重排起拍');
+      else applyRhythm(makeTuplet(project, targets, spec), `${spec.actual}:${spec.normal} 连音`);
+    } catch (error) {
+      notify(cleanError(error), true);
     }
   };
   const issues = useMemo(() => reviewIssues(project), [project]);
@@ -1048,6 +1106,7 @@ export default function App() {
       if (event.key === 'Escape') {
         setSelection(undefined);
         setRange(undefined);
+        setSpan(undefined);
         setStepEntry(false);
         engine.current?.pause();
         return;
@@ -1111,6 +1170,24 @@ export default function App() {
       if (event.key === '.' && selection && !command) {
         event.preventDefault();
         applyDuration(toggleDot(project, selection));
+        return;
+      }
+      if (spanTargets && !command && event.code === 'KeyT') {
+        event.preventDefault();
+        tupletAction(event.altKey ? 'remove' : { actual: 3, normal: 2 });
+        return;
+      }
+      if (spanTargets && !command && event.altKey && event.code === 'KeyR') {
+        event.preventDefault();
+        tupletAction('reflow');
+        return;
+      }
+      if (event.altKey && !command && selection && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        // ⌥←→ grows the note span by one attack in the same lane.
+        event.preventDefault();
+        const from = span?.last ?? selection;
+        const target = neighbourNote(project, from, event.key === 'ArrowRight' ? 1 : -1);
+        if (target) setSpan({ anchor: span?.anchor ?? selection, last: target });
         return;
       }
       if (event.key.toLowerCase() === 't' && selection && !command) {
@@ -1703,6 +1780,25 @@ export default function App() {
             <button onClick={() => setStepEntry(false)}>退出</button>
           </div>
         )}
+        {spanTargets && tab === 'workbench' && (
+          <div className="range-bar span-bar" role="status" aria-label="已选音符段">
+            <strong>
+              {project.parts.find((item) => item.id === spanTargets[0]?.partId)?.shortName} · {spanTargets.length} 个起音
+            </strong>
+            <span>⌥ 点击或 ⌥←→ 调整末尾</span>
+            {TUPLET_PRESETS.map((preset) => (
+              <button key={preset.label} onClick={() => tupletAction(preset)}>
+                {preset.label}
+                {preset.actual === 3 && preset.normal === 2 ? ' T' : ''}
+              </button>
+            ))}
+            <button onClick={() => tupletAction('remove')}>还原 ⌥T</button>
+            <button onClick={() => tupletAction('reflow')}>重排起拍 ⌥R</button>
+            <button className="range-close" aria-label="取消音符段" onClick={() => setSpan(undefined)}>
+              Esc
+            </button>
+          </div>
+        )}
         {range && tab === 'workbench' && (
           <div className="range-bar" role="status" aria-label="已选范围">
             <strong>{describeRange(range)}</strong>
@@ -1833,7 +1929,7 @@ export default function App() {
             measureRange={printing ? undefined : measureRange}
             onSelect={selectNote}
             readingMode={tab === 'practice'}
-            rangeKeys={tab === 'workbench' ? rangeKeys : undefined}
+            rangeKeys={tab === 'workbench' ? (spanKeys ?? rangeKeys) : undefined}
             onRubberBand={
               tab === 'workbench'
                 ? (hits) => {
@@ -2385,6 +2481,8 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
               ['⌘ C · ⌘ X · ⌘ A', '复制 / 剪切范围 · 全选'],
               ['⌘ V · ⌘ ⇧ V', '在选中音符所在小节覆盖粘贴 / 插入粘贴'],
               ['⌥ 1–4', '记谱声部 1–4：移入选中音符或范围，或设为输入声部'],
+              ['⌥ 点击 · ⌥ ← →', '选同一声部的音符段（首音到末音）'],
+              ['T · ⌥ T · ⌥ R', '音符段：做成 3:2 三连音 / 还原普通时值 / 首尾相接重排起拍'],
               ['N', '切换逐步输入'],
               ['Delete', '删除选中音符'],
               ['⌘ Z / ⌘ ⇧ Z', '撤销 / 重做'],
