@@ -86,6 +86,10 @@ def homr_crop(image_path: str) -> list[int]:
 def main() -> None:
     from PIL import Image
 
+    if sys.argv[1] == "--crops":
+        # homr's own autocrop for each page; its staff files are relative to it.
+        print(json.dumps([homr_crop(path) for path in sys.argv[2:]]))
+        return
     image = sys.argv[1]
     with Image.open(image) as page:
         size = page.size

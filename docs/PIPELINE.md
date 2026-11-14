@@ -8,6 +8,16 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-15: OMR review data for the side-by-side editor (review layer)
+
+Implements the interface decision of 2026-11-15. The score itself is unchanged; this layer only describes where it sits on the pages.
+
+- **What the server writes.** Each recognized `<note>` gets `id="omr-{page}-{k}"` (on a copy; homr's raw page MusicXML stays as written). `OmrJob.review` carries page sizes, staff boxes, measure boxes, approximate note anchors and review issues; it is also saved as `review.json` in the job folder.
+- **Measure boxes.** Boundaries start halfway between neighbouring measures' note anchors and snap to an ink column that crosses the staff lines of most staves of the system (a barline, not a stem). Edges that found one are `barline`; the first and last edge of every system stay `estimated`.
+- **Issues (no confidence scores).** `measure-overfull` / `measure-underfull` (beats read vs. meter, with a note that pick-ups and repeat halves are legitimate), `no-anchor`, `page-part-mismatch`, and, when the text layer runs, `text-discarded` (check) and `text-attached` (info) from its evidence.
+- **Measured.** Two public pages (tests/fixtures/omr-review): 112/112 notes anchored, 42 of 52 edges on barlines, the 10 estimated ones are system ends, four real underfull bars (pick-up, repeat halves, last bar). Kong Er pages 1–6 (private, local check only): 604/604 notes anchored; 66 of 72 inner edges on barlines, all 72 system-end edges estimated; one underfull bar.
+- Anchors are attention centres, often half to two staff spaces off the note head; the editor must say so.
+
 ## 2026-11-15: OMR text layer v7 — second confirmation test C2 (still off by default)
 
 Text layer only; notes still never edited. v7 (PR #28, `03cd055`) was developed on a new dev set D2 and frozen; C2 is fresh public data, rules written before any of it was opened, run once.
