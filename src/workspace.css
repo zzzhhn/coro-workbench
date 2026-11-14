@@ -2297,6 +2297,218 @@
   display: none;
 }
 
+/* Source-image proof-reading: score and original page side by side. */
+.score-split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.score-split > .score-scroll {
+  min-width: 0;
+}
+.source-region-panel {
+  width: clamp(300px, 38%, 520px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  overflow-y: auto;
+  animation: source-panel-in 180ms ease-out;
+}
+@keyframes source-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+.source-region-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px 6px 14px;
+}
+.source-region-panel > header strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.source-region-panel > header span {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.source-region-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 8px 10px;
+  font: 10px 'DM Mono', monospace;
+  color: var(--muted);
+}
+.source-region-tools .text-tool {
+  margin-left: auto;
+}
+.source-region-frame {
+  padding: 0 12px;
+  flex: none;
+}
+.source-region-viewport {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #fff;
+  cursor: crosshair;
+  max-height: 36vh;
+}
+.source-region-viewport img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  user-select: none;
+  transform-origin: 0 0;
+}
+.source-region-plain {
+  width: 100%;
+  border: 1px solid var(--line);
+}
+.source-box {
+  position: absolute;
+  border: 1px solid rgba(48, 52, 59, 0.16);
+  pointer-events: none;
+}
+.source-box i {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  font: 600 9px 'DM Mono', monospace;
+  font-style: normal;
+  color: rgba(48, 52, 59, 0.5);
+}
+.source-box.flagged {
+  border-color: rgba(145, 99, 38, 0.65);
+  background: rgba(251, 244, 232, 0.28);
+}
+.source-box.current {
+  border: 2px solid var(--accent);
+  background: rgba(174, 86, 54, 0.06);
+}
+.source-box.current i {
+  color: var(--accent);
+}
+.source-box.part-band {
+  border: 2px solid var(--accent);
+  background: rgba(174, 86, 54, 0.1);
+}
+.source-box.part-band.estimated {
+  border-style: dashed;
+}
+.source-anchor {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 2px dashed var(--accent);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.source-approximate {
+  margin: 7px 12px 0;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.source-issues {
+  display: flex;
+  flex-direction: column;
+  min-height: 190px;
+  flex: 1;
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.source-issue-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 9px 12px;
+}
+.source-issue-filters button {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--muted);
+  background: var(--panel);
+}
+.source-issue-filters button b {
+  margin-left: 3px;
+  font: 500 10px 'DM Mono', monospace;
+}
+.source-issue-filters button[aria-pressed='true'] {
+  border-color: var(--action);
+  background: var(--action);
+  color: #fff;
+}
+.source-issues ol {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 0 8px;
+  list-style: none;
+}
+.source-issues li > button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 11px;
+  color: var(--ink);
+}
+.source-issues li > button:hover {
+  background: var(--soft);
+}
+.source-issues li > button.current {
+  background: var(--accent-soft);
+}
+.source-issues li > button.info {
+  color: var(--muted);
+}
+.source-issues li > button em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--warning);
+  justify-self: end;
+}
+.source-issues li > button small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.source-issues > p {
+  margin: 6px 12px 10px;
+}
+@media (max-width: 1120px) {
+  .score-split.with-source {
+    flex-direction: column;
+  }
+  .score-split.with-source > .score-scroll {
+    flex: 1 1 50%;
+  }
+  .source-region-panel {
+    width: auto;
+    max-height: 50%;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .source-region-viewport {
+    max-height: 28vh;
+  }
+}
 @media (min-width: 1600px) {
   :root {
     --sidebar: 260px;
