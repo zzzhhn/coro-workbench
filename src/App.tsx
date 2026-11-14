@@ -93,6 +93,21 @@ import { getHealth } from './lib/api';
 import ScoreView from './components/ScoreView';
 import SourceRegionPanel from './components/SourceRegionPanel';
 import { measureOfBeat } from './lib/sourceMap';
+import {
+  clearRange,
+  copyRange,
+  extendRange,
+  notesInRange,
+  pasteClip,
+  rangeBetween,
+  rangeFromHits,
+  setVoice,
+  voiceLane,
+  voiceNumber,
+  type Clip,
+  type PasteMode,
+  type RangeSelection,
+} from './lib/rangeEdit';
 import Inspector, { durationGlyphs, durationOptions } from './components/Inspector';
 import EnsemblePanel from './components/EnsemblePanel';
 import PracticePanel from './components/PracticePanel';
@@ -156,6 +171,9 @@ export default function App() {
   const [practicePartId, setPracticePartId] = useState('all');
   const [sourceOpen, setSourceOpen] = useState(false);
   const [sourceRegionOpen, setSourceRegionOpen] = useState(false);
+  const [range, setRange] = useState<RangeSelection>();
+  const clipboard = useRef<Clip | undefined>(undefined);
+  const [entryVoice, setEntryVoice] = useState<1 | 2 | 3 | 4>(1);
   const [repairEntry, setRepairEntry] = useState<'staff' | 'beat'>('staff');
   const [pitchReviewSeconds, setPitchReviewSeconds] = useState(0);
   const [inspectorTab, setInspectorTab] = useState<'note' | 'check'>('note');
@@ -561,7 +579,8 @@ export default function App() {
     setSelection(undefined);
     setHistoryVersion((value) => value + 1);
   };
-  const selectNote = (next: Selection, beat?: number) => {
+  const visibleIds = tab === 'practice' ? undefined : visiblePart === 'all' ? undefined : [visiblePart];
+  const selectNote = (next: Selection, beat?: number, extend = false) => {
     const note = project.parts
       .find((part) => part.id === next.partId)
       ?.notes.find((note) => note.id === next.noteId);
@@ -569,6 +588,17 @@ export default function App() {
       if (note) seekBeat(beat ?? note.start);
       return;
     }
+    // Shift-click: whole bars from the anchor note to this one, across the parts between.
+    if (extend && selection) {
+      const spanned = rangeBetween(project, selection, next, visibleIds);
+      if (spanned) {
+        setRange(spanned);
+        return;
+      }
+    }
+    setRange(undefined);
+    const noteVoice = note ? voiceNumber(note) : undefined;
+    if (noteVoice) setEntryVoice(noteVoice as 1 | 2 | 3 | 4);
     setSelection(next);
     setSelectedPartId(next.partId);
     setVisitedIssue((value) => (value?.noteId === next.noteId ? value : undefined));
@@ -611,7 +641,11 @@ export default function App() {
         start,
         duration,
         midi,
-        stepEntry && selectedNote ? { staff: selectedNote.staff, voice: selectedNote.voice } : undefined,
+        stepEntry && selectedNote
+          ? voiceLane(part, selectedNote.staff, entryVoice)
+          : entryVoice !== 1
+            ? voiceLane(part, undefined, entryVoice)
+            : undefined,
       );
       updateProject(result.project);
       setSelection(result.selection);
@@ -622,9 +656,62 @@ export default function App() {
       notify(cleanError(error), true);
     }
   };
+  const rangeKeys = useMemo(
+    () => (range ? new Set(notesInRange(project, range).map((item) => `${item.partId}\0${item.noteId}`)) : undefined),
+    [project, range],
+  );
+  const describeRange = (value: RangeSelection) =>
+    `第 ${value.startBar}${value.endBar > value.startBar ? `–${value.endBar}` : ''} 小节 · ${value.partIds.length} 个声部`;
+  const copySelection = (cut = false) => {
+    if (!range) return;
+    clipboard.current = copyRange(project, range);
+    if (cut) updateProject(clearRange(project, range));
+    notify(`已${cut ? '剪切' : '复制'}${describeRange(range)}。点选目标小节的音符后按 ⌘V 覆盖，⌘⇧V 插入。`);
+  };
+  const pasteSelection = (mode: PasteMode) => {
+    const clip = clipboard.current;
+    if (!clip) {
+      notify('剪贴板是空的：先框选或 ⇧ 点击选择小节，再按 ⌘C。', true);
+      return;
+    }
+    // Paste point: the bar of the selected note, else the first bar of the range, else the playhead bar.
+    const partId = selection?.partId ?? range?.partIds[0] ?? selectedPartId;
+    const bar = selectedNote
+      ? measureOfBeat(project, selectedNote.start)
+      : (range?.startBar ?? currentBar);
+    try {
+      const result = pasteClip(project, clip, partId, bar, mode, visibleIds);
+      updateProject(result.project);
+      setSelection(undefined);
+      setRange(result.range);
+      notify(
+        [`已${mode === 'insert' ? '插入' : '覆盖粘贴'}到${describeRange(result.range)}。`, ...result.warnings].join(' '),
+        result.warnings.length > 0,
+      );
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
+  const deleteSelection = () => {
+    if (!range) return;
+    updateProject(clearRange(project, range));
+    notify(`已清空${describeRange(range)}的音符；小节保留。`);
+  };
+  const applyVoice = (voice: 1 | 2 | 3 | 4) => {
+    setEntryVoice(voice);
+    const targets = range ? notesInRange(project, range) : selection ? [selection] : [];
+    if (!targets.length) {
+      notify(`之后输入的音符写入声部 ${voice}。`);
+      return;
+    }
+    const next = setVoice(project, targets, voice);
+    if (next !== project) {
+      updateProject(next);
+      notify(`${targets.length} 个音符移到声部 ${voice}；音高与节奏不变。`);
+    }
+  };
   const issues = useMemo(() => reviewIssues(project), [project]);
   const verticalAnchor = useRef<(Selection & { beat: number }) | undefined>(undefined);
-  const visibleIds = tab === 'practice' ? undefined : visiblePart === 'all' ? undefined : [visiblePart];
   const applyDuration = (change: DurationChange) => {
     updateProject(change.project);
     if (change.overlaps)
@@ -904,6 +991,34 @@ export default function App() {
         setDialog('import');
         return;
       }
+      if (command && tab === 'workbench' && ['c', 'x', 'v', 'a'].includes(event.key.toLowerCase())) {
+        const key = event.key.toLowerCase();
+        if (key === 'a') {
+          event.preventDefault();
+          setSelection(undefined);
+          setRange({
+            partIds: project.parts.filter((item) => !visibleIds || visibleIds.includes(item.id)).map((item) => item.id),
+            startBar: 1,
+            endBar: project.measures,
+          });
+          return;
+        }
+        if ((key === 'c' || key === 'x') && range) {
+          event.preventDefault();
+          copySelection(key === 'x');
+          return;
+        }
+        if (key === 'v' && (clipboard.current || range || selection)) {
+          event.preventDefault();
+          pasteSelection(event.shiftKey ? 'insert' : 'overwrite');
+          return;
+        }
+      }
+      if (event.altKey && !command && tab === 'workbench' && /^Digit[1-4]$/.test(event.code)) {
+        event.preventDefault();
+        applyVoice(Number(event.code.slice(5)) as 1 | 2 | 3 | 4);
+        return;
+      }
       if (command && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         if (tab === 'practice') return;
@@ -932,6 +1047,7 @@ export default function App() {
       }
       if (event.key === 'Escape') {
         setSelection(undefined);
+        setRange(undefined);
         setStepEntry(false);
         engine.current?.pause();
         return;
@@ -1019,6 +1135,22 @@ export default function App() {
       if (accidental && selectedNote && selectedNote.midi !== null && !command) {
         event.preventDefault();
         setPitch(applyAccidental(selectedNote.midi, project.key, accidental));
+        return;
+      }
+      if ((event.key === 'Backspace' || event.key === 'Delete') && range) {
+        event.preventDefault();
+        deleteSelection();
+        return;
+      }
+      if (event.shiftKey && !command && (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && (range || selection)) {
+        // ⇧←→ grows or shrinks the bar range from the anchor note's bar.
+        event.preventDefault();
+        const base =
+          range ??
+          (selectedNote && selection
+            ? { partIds: [selection.partId], startBar: measureOfBeat(project, selectedNote.start), endBar: measureOfBeat(project, selectedNote.start) }
+            : undefined);
+        if (base) setRange(extendRange(project, base, event.key === 'ArrowRight' ? 1 : -1));
         return;
       }
       if ((event.key === 'Backspace' || event.key === 'Delete') && selection) {
@@ -1438,6 +1570,21 @@ export default function App() {
               </button>
             </div>
             <span className="tool-divider" />
+            <div className="tool-group voice-tools" role="group" aria-label="记谱声部">
+              {([1, 2, 3, 4] as const).map((voice) => (
+                <button
+                  key={voice}
+                  className={`voice-button voice-${voice} ${entryVoice === voice ? 'active-tool' : ''}`}
+                  aria-pressed={entryVoice === voice}
+                  aria-label={`声部 ${voice}`}
+                  title={`声部 ${voice} (⌥${voice})：选中音符或范围时移入该声部；否则作为之后输入的声部`}
+                  onClick={() => applyVoice(voice)}
+                >
+                  {voice}
+                </button>
+              ))}
+            </div>
+            <span className="tool-divider" />
             <div className="tool-group transpose-tools">
               <button
                 className="icon-button"
@@ -1556,6 +1703,24 @@ export default function App() {
             <button onClick={() => setStepEntry(false)}>退出</button>
           </div>
         )}
+        {range && tab === 'workbench' && (
+          <div className="range-bar" role="status" aria-label="已选范围">
+            <strong>{describeRange(range)}</strong>
+            <span>{rangeKeys?.size ?? 0} 个音符</span>
+            <button onClick={() => copySelection()}>复制 ⌘C</button>
+            <button onClick={() => copySelection(true)}>剪切 ⌘X</button>
+            <button disabled={!clipboard.current} onClick={() => pasteSelection('overwrite')}>
+              覆盖粘贴 ⌘V
+            </button>
+            <button disabled={!clipboard.current} onClick={() => pasteSelection('insert')}>
+              插入粘贴 ⌘⇧V
+            </button>
+            <button onClick={deleteSelection}>清空</button>
+            <button className="range-close" aria-label="取消范围选择" onClick={() => setRange(undefined)}>
+              Esc
+            </button>
+          </div>
+        )}
         <div className="measure-rail" aria-label="小节导航">
           <div className="measure-pages">
             <button
@@ -1668,6 +1833,18 @@ export default function App() {
             measureRange={printing ? undefined : measureRange}
             onSelect={selectNote}
             readingMode={tab === 'practice'}
+            rangeKeys={tab === 'workbench' ? rangeKeys : undefined}
+            onRubberBand={
+              tab === 'workbench'
+                ? (hits) => {
+                    const next = rangeFromHits(project, hits, visibleIds);
+                    if (next) {
+                      setSelection(undefined);
+                      setRange(next);
+                    }
+                  }
+                : undefined
+            }
           />
         </div>
         {sourceRegionOpen && hasSourcePages && tab === 'workbench' && (
@@ -2204,6 +2381,10 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
               ['L', '为选中音符输入歌词：空格 / Tab 下一音，- 连字符，⇧Tab 上一音'],
               ['[ · ]', '上一处 / 下一处待校对（含识谱可疑项，按当前筛选）'],
               ['O', '并排显示原谱对应小节；点击原谱小节跳回谱面'],
+              ['拖框 · ⇧ 点击 · ⇧ ← →', '选择整小节范围（跨所经声部）'],
+              ['⌘ C · ⌘ X · ⌘ A', '复制 / 剪切范围 · 全选'],
+              ['⌘ V · ⌘ ⇧ V', '在选中音符所在小节覆盖粘贴 / 插入粘贴'],
+              ['⌥ 1–4', '记谱声部 1–4：移入选中音符或范围，或设为输入声部'],
               ['N', '切换逐步输入'],
               ['Delete', '删除选中音符'],
               ['⌘ Z / ⌘ ⇧ Z', '撤销 / 重做'],
