@@ -59,6 +59,7 @@ def test_part_name_from_left_margin_and_cjk_split_per_character():
     boxes = [TextBox("人", (40, 104, 55, 116)), TextBox("声", (56, 104, 71, 116)), TextBox("你沉默", (150, 125, 450, 133))]
     new, evidence = apply_text_layer(XML, STAFF, (1000, 1000), boxes)
     assert ET.fromstring(new).findtext("part-list/score-part/part-name") == "人声"
+    assert ET.fromstring(new).findtext("part-list/score-part/part-abbreviation") == "人声"
     assert [t for *_, t in lyrics(new)] == ["你", "沉", "默"]
 
 

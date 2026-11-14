@@ -457,6 +457,13 @@ def apply_text_layer(xml: str, staves_text: str, size: tuple[int, int], boxes: l
         best = max(values, key=lambda v: (values.count(v), -values.index(v)))
         if index < len(score_parts) and score_parts[index].find("part-name") is not None:
             score_parts[index].find("part-name").text = best
+            # The printed name repeats on every system, so it is also the short name;
+            # without it importers fall back to "P1" on later systems.
+            abbreviation = score_parts[index].find("part-abbreviation")
+            if abbreviation is None:
+                abbreviation = ET.Element("part-abbreviation")
+                score_parts[index].insert(list(score_parts[index]).index(score_parts[index].find("part-name")) + 1, abbreviation)
+            abbreviation.text = best
             evidence["partNames"][parts[index].get("id")] = best
 
     for item in classified:
