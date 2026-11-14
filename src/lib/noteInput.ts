@@ -7,6 +7,8 @@
 import type { NoteEvent, ScoreProject } from './types';
 import { beatsPerBar, normalizeKey } from './music';
 import { editId, type Selection } from './editor';
+import { omrReviewOf, sourceRefOf, type OmrIssueKind } from './omrReview';
+import { scoreMeasureOf } from './sourceMap';
 
 /** Crescendo's number-key ladder: 1 whole ... 7 sixty-fourth (in quarter beats). */
 export const DURATION_KEYS: Record<string, number> = {
@@ -329,18 +331,39 @@ export function commitLyric(
   return { project: next, next: cursor };
 }
 
+export type ReviewKind = 'overlap' | 'low-confidence' | OmrIssueKind;
+
+export const reviewKindLabels: Record<ReviewKind, string> = {
+  overlap: '声部内重叠',
+  'low-confidence': '模型低置信',
+  'measure-overfull': '小节超拍',
+  'measure-underfull': '小节不满拍',
+  'no-anchor': '原图无定位',
+  'page-part-mismatch': '各页声部数不一致',
+  'text-discarded': '文字未采用',
+  'text-attached': '文字已贴附',
+  'engine-warning': '识谱引擎提示',
+};
+
 export interface ReviewIssue {
-  partId: string;
-  noteId: string;
+  kind: ReviewKind;
+  /** 'info' items are listed but skipped by [ ] unless explicitly filtered to. */
+  severity: 'check' | 'info';
   measure: number;
-  kind: 'overlap' | 'low-confidence';
+  /** Present when the issue is tied to a Coro note (overlap, low confidence, OMR note ref). */
+  partId?: string;
+  noteId?: string;
   message: string;
+  /** OMR page/box for source-image view. */
+  page?: number;
+  evidence?: string;
 }
 
 /**
- * Items a proof-reader should visit, in score order: notes that start before
- * the previous note of the same staff/voice has ended (the usual footprint of
- * a misread OMR duration), then uncalibrated low-confidence notes.
+ * One proof-reading queue in score order: notes that start before the previous
+ * note of the same staff/voice has ended (the usual footprint of a misread OMR
+ * duration), uncalibrated low-confidence notes, and the OMR review issues
+ * (measure overfull/underfull, missing anchors, text decisions, engine notices).
  */
 export function reviewIssues(project: ScoreProject): ReviewIssue[] {
   const bar = beatsPerBar(project);
@@ -362,6 +385,7 @@ export function reviewIssues(project: ScoreProject): ReviewIssue[] {
             noteId: note.id,
             measure: Math.floor(note.start / bar) + 1,
             kind: 'overlap',
+            severity: 'check',
             message: `前一音符尚未结束（重叠 ${+(held.start + held.duration - note.start).toFixed(3)} 拍）`,
             start: note.start,
             order,
@@ -376,30 +400,75 @@ export function reviewIssues(project: ScoreProject): ReviewIssue[] {
           noteId: note.id,
           measure: Math.floor(note.start / bar) + 1,
           kind: 'low-confidence',
+          severity: 'check',
           message: `模型低置信（${Math.round(note.confidence * 100)} 分，未校准）`,
           start: note.start,
           order,
         });
   });
+  const review = omrReviewOf(project);
+  for (const item of review?.issues ?? []) {
+    const part = item.partIndex === undefined ? undefined : project.parts[item.partIndex];
+    const note = item.noteRef && part ? part.notes.find((candidate) => sourceRefOf(candidate) === item.noteRef) : undefined;
+    const measure = note
+      ? Math.floor(note.start / bar) + 1
+      : item.measure === undefined
+        ? 1
+        : scoreMeasureOf(project, item.partIndex ?? 0, item.measure);
+    issues.push({
+      kind: item.kind,
+      severity: item.severity === 'info' ? 'info' : 'check',
+      measure,
+      partId: part?.id,
+      noteId: note?.id,
+      message: item.message,
+      page: item.page,
+      evidence: item.evidence,
+      start: note ? note.start : (measure - 1) * bar,
+      order: item.partIndex ?? -1,
+    });
+  }
+  const rank = (kind: ReviewKind) => (kind === 'overlap' ? 0 : kind === 'low-confidence' ? 2 : 1);
   return issues
-    .sort((a, b) => a.start - b.start || a.order - b.order || (a.kind === 'overlap' ? -1 : 1))
+    .sort((a, b) => a.start - b.start || a.order - b.order || rank(a.kind) - rank(b.kind))
     .map(({ start: _start, order: _order, ...issue }) => issue);
 }
 
-/** Cycle to the next/previous review issue after the current selection's beat. */
+/**
+ * Items [ ] walk through: the active filter, or by default every 'check' item
+ * ('info' such as attached text is shown but not stepped through).
+ */
+export function navigableIssues(issues: ReviewIssue[], filter?: ReviewKind): ReviewIssue[] {
+  return filter ? issues.filter((issue) => issue.kind === filter) : issues.filter((issue) => issue.severity === 'check');
+}
+
+const sameIssue = (a: ReviewIssue, b: ReviewIssue) =>
+  a.kind === b.kind && a.measure === b.measure && a.partId === b.partId && a.noteId === b.noteId && a.message === b.message;
+
+/**
+ * Cycle to the next/previous issue. `current` is the issue last visited (so
+ * measure-level items without a note can be stepped past); otherwise the
+ * selected note, otherwise the playhead beat, anchors the search.
+ */
 export function nextIssue(
   project: ScoreProject,
   issues: ReviewIssue[],
   selection: Selection | undefined,
   beat: number,
   direction: 1 | -1,
+  current?: ReviewIssue,
 ): ReviewIssue | undefined {
   if (!issues.length) return undefined;
-  const startOf = (issue: Pick<ReviewIssue, 'partId' | 'noteId'>) =>
-    project.parts.find((p) => p.id === issue.partId)?.notes.find((n) => n.id === issue.noteId)?.start ?? 0;
-  const currentIndex = selection
-    ? issues.findIndex((issue) => issue.partId === selection.partId && issue.noteId === selection.noteId)
-    : -1;
+  const bar = beatsPerBar(project);
+  const startOf = (issue: ReviewIssue): number => {
+    const note = issue.noteId
+      ? project.parts.find((p) => p.id === issue.partId)?.notes.find((n) => n.id === issue.noteId)
+      : undefined;
+    return note ? note.start : (issue.measure - 1) * bar;
+  };
+  let currentIndex = current ? issues.findIndex((issue) => sameIssue(issue, current)) : -1;
+  if (currentIndex < 0 && selection)
+    currentIndex = issues.findIndex((issue) => issue.partId === selection.partId && issue.noteId === selection.noteId);
   if (currentIndex >= 0) return issues[(currentIndex + direction + issues.length) % issues.length];
   const ahead =
     direction > 0

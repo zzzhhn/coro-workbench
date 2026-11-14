@@ -14,6 +14,7 @@ import {
   Copy,
   DotsThree,
   FilePlus,
+  FileText,
   FolderOpen,
   Headphones,
   Info,
@@ -45,8 +46,12 @@ import {
   diatonicStep,
   letterPitch,
   neighbourNote,
+  navigableIssues,
   nextIssue,
   reviewIssues,
+  reviewKindLabels,
+  type ReviewIssue,
+  type ReviewKind,
   setNoteDuration,
   setNotePitch,
   toggleDot,
@@ -86,6 +91,8 @@ import {
 } from './lib/storage';
 import { getHealth } from './lib/api';
 import ScoreView from './components/ScoreView';
+import SourceRegionPanel from './components/SourceRegionPanel';
+import { measureOfBeat } from './lib/sourceMap';
 import Inspector, { durationGlyphs, durationOptions } from './components/Inspector';
 import EnsemblePanel from './components/EnsemblePanel';
 import PracticePanel from './components/PracticePanel';
@@ -148,6 +155,7 @@ export default function App() {
   const [tab, setTab] = useState<'workbench' | 'practice'>('workbench');
   const [practicePartId, setPracticePartId] = useState('all');
   const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourceRegionOpen, setSourceRegionOpen] = useState(false);
   const [repairEntry, setRepairEntry] = useState<'staff' | 'beat'>('staff');
   const [pitchReviewSeconds, setPitchReviewSeconds] = useState(0);
   const [inspectorTab, setInspectorTab] = useState<'note' | 'check'>('note');
@@ -563,6 +571,7 @@ export default function App() {
     }
     setSelection(next);
     setSelectedPartId(next.partId);
+    setVisitedIssue((value) => (value?.noteId === next.noteId ? value : undefined));
     setInspectorTab('note');
     if (window.innerWidth <= 1120) setMobilePanel('inspector');
     if (note && !playingState.playing) engine.current?.seek(beat ?? note.start);
@@ -631,17 +640,55 @@ export default function App() {
       notify(cleanError(error), true);
     }
   };
+  const [issueFilter, setIssueFilter] = useState<ReviewKind>();
+  const [visitedIssue, setVisitedIssue] = useState<ReviewIssue>();
+  const queue = useMemo(() => navigableIssues(issues, issueFilter), [issues, issueFilter]);
+  const visitIssue = (issue: ReviewIssue) => {
+    setVisitedIssue(issue);
+    const measureStart = (issue.measure - 1) * barLength;
+    if (issue.partId && visiblePart !== 'all' && visiblePart !== issue.partId) setVisiblePart('all');
+    const note = issue.partId
+      ? project.parts.find((p) => p.id === issue.partId)?.notes.find((n) => n.id === issue.noteId)
+      : undefined;
+    if (issue.partId && note) selectNote({ partId: issue.partId, noteId: note.id }, note.start);
+    else {
+      // Measure-level OMR issue: move the score window and keep the part focus.
+      setSelection(undefined);
+      if (issue.partId) setSelectedPartId(issue.partId);
+      goToMeasure(issue.measure);
+      engine.current?.seek(measureStart);
+    }
+    notify(`第 ${issue.measure} 小节 · ${reviewKindLabels[issue.kind]}：${issue.message}`);
+  };
   const goToIssue = (direction: 1 | -1) => {
-    const issue = nextIssue(project, issues, selection, playingState.beat, direction);
+    const issue = nextIssue(project, queue, selection, playingState.beat, direction, visitedIssue);
     if (!issue) {
-      notify('没有待校对的重叠或低置信音符。');
+      notify(issueFilter ? '当前筛选下没有待校对项。' : '没有待校对项。');
       return;
     }
-    // A note outside the current 4/8-bar window needs the window to move first.
-    const note = project.parts.find((p) => p.id === issue.partId)?.notes.find((n) => n.id === issue.noteId);
-    if (visiblePart !== 'all' && visiblePart !== issue.partId) setVisiblePart('all');
-    selectNote({ partId: issue.partId, noteId: issue.noteId }, note?.start);
-    notify(`第 ${issue.measure} 小节：${issue.message}`);
+    visitIssue(issue);
+  };
+  const hasSourcePages = Boolean(project.source.pages?.length);
+  const focusMeasure = selectedNote
+    ? measureOfBeat(project, selectedNote.start)
+    : (visitedIssue?.measure ?? currentBar);
+  const focusPartIndex = project.parts.findIndex(
+    (item) => item.id === (selection?.partId ?? visitedIssue?.partId ?? selectedPartId),
+  );
+  const jumpFromSource = (target: { measure: number; partId?: string; noteId?: string }) => {
+    const measureStart = (target.measure - 1) * barLength;
+    const partId = target.partId && project.parts.some((item) => item.id === target.partId) ? target.partId : undefined;
+    // Make sure the part is visible in the score before selecting into it.
+    if (visiblePart !== 'all' && partId && visiblePart !== partId) setVisiblePart('all');
+    const notes = partId ? project.parts.find((item) => item.id === partId)!.notes : [];
+    const note =
+      (target.noteId && notes.find((item) => item.id === target.noteId)) ||
+      notes.find((item) => item.start >= measureStart - 1e-6 && item.start < measureStart + barLength - 1e-6);
+    if (partId && note) selectNote({ partId, noteId: note.id }, note.start);
+    else {
+      setSelection(undefined);
+      goToMeasure(target.measure);
+    }
   };
   const stepLyric = (text: string, direction: 1 | -1) => {
     if (!selection) return;
@@ -899,6 +946,11 @@ export default function App() {
       if (event.key.toLowerCase() === 'n' && !command) {
         event.preventDefault();
         setStepEntry((value) => !value);
+        return;
+      }
+      if (event.key.toLowerCase() === 'o' && !command && hasSourcePages) {
+        event.preventDefault();
+        setSourceRegionOpen((value) => !value);
         return;
       }
       if (event.key === ']' || event.key === '[') {
@@ -1439,14 +1491,26 @@ export default function App() {
               <span />
               待校对
             </button>
+            {hasSourcePages && (
+              <button
+                className={`text-tool ${sourceRegionOpen ? 'active-tool' : ''}`}
+                aria-label="原谱对照"
+                aria-pressed={sourceRegionOpen}
+                title="并排显示原谱对应区域 (O)"
+                onClick={() => setSourceRegionOpen((value) => !value)}
+              >
+                <FileText size={15} />
+                原谱
+              </button>
+            )}
             <button
               className="text-tool"
               aria-label="下一处待校对"
               title="跳到下一处重叠或低置信音符 ( ] )；[ 返回上一处"
-              disabled={!issues.length}
+              disabled={!queue.length}
               onClick={() => goToIssue(1)}
             >
-              下一处 <span className="issue-count">{issues.length}</span>
+              下一处 <span className="issue-count">{queue.length}</span>
             </button>
             <span className="tool-divider" />
             <div className="tool-group zoom-tools">
@@ -1583,6 +1647,7 @@ export default function App() {
             <Copy size={15} />
           </button>
         </div>
+        <div className={`score-split ${sourceRegionOpen && hasSourcePages && tab === 'workbench' ? 'with-source' : ''}`}>
         <div className="score-scroll" data-testid="score-scroll">
           <ScoreView
             project={project}
@@ -1604,6 +1669,26 @@ export default function App() {
             onSelect={selectNote}
             readingMode={tab === 'practice'}
           />
+        </div>
+        {sourceRegionOpen && hasSourcePages && tab === 'workbench' && (
+          <SourceRegionPanel
+            project={project}
+            measure={focusMeasure}
+            partIndex={focusPartIndex >= 0 ? focusPartIndex : undefined}
+            noteId={selection?.noteId}
+            issues={issues}
+            filter={issueFilter}
+            onFilter={(kind) => {
+              setIssueFilter(kind);
+              setVisitedIssue(undefined);
+            }}
+            currentIssue={visitedIssue}
+            onIssue={visitIssue}
+            onClose={() => setSourceRegionOpen(false)}
+            onJump={jumpFromSource}
+            onMessage={notify}
+          />
+        )}
         </div>
         <div className="score-status">
           <div>
@@ -2117,7 +2202,8 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
               ['.  ·  T', '附点 / 三连音（再按取消）'],
               ['R', '音符 ↔ 休止符'],
               ['L', '为选中音符输入歌词：空格 / Tab 下一音，- 连字符，⇧Tab 上一音'],
-              ['[ · ]', '上一处 / 下一处待校对（重叠或低置信）'],
+              ['[ · ]', '上一处 / 下一处待校对（含识谱可疑项，按当前筛选）'],
+              ['O', '并排显示原谱对应小节；点击原谱小节跳回谱面'],
               ['N', '切换逐步输入'],
               ['Delete', '删除选中音符'],
               ['⌘ Z / ⌘ ⇧ Z', '撤销 / 重做'],
