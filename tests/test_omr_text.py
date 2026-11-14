@@ -108,3 +108,43 @@ def test_footnote_numbers_and_lone_letters_are_not_sung():
 def test_run_together_words_split_at_capitals_under_notes():
     new, _ = apply_text_layer(XML, STAFF, (1000, 1000), [TextBox("DurchFeld", (170, 125, 330, 133))])
     assert [t for *_, t in lyrics(new)] == ["Durch", "Feld"]
+
+
+def test_chord_spellings_used_in_lead_sheets_parse():
+    from server.omr_text import CHORD, chord_text
+
+    kinds = {t: harmony_element(t).findtext("kind") for t in ["CMaj7", "C7+", "E-7", "Am9", "G7sus", "E7(#5)", "Fm7b5", "C°7", "Bb6"]}
+    assert kinds == {"CMaj7": "major-seventh", "C7+": "augmented-seventh", "E-7": "minor-seventh", "Am9": "minor-ninth",
+                     "G7sus": "suspended-fourth", "E7(#5)": "augmented-seventh", "Fm7b5": "half-diminished", "C°7": "diminished-seventh",
+                     "Bb6": "major-sixth"}
+    assert not any(CHORD.match(chord_text(word)) for word in ["And", "Be", "For", "Auld", "No", "Black"])
+
+
+def test_glued_chords_are_split_and_lone_letters_are_not():
+    from server.omr_text import split_glued_chords
+
+    parts = split_glued_chords(TextBox("D7/F#A7/E", (0, 0, 100, 10)))
+    assert [p.text for p in parts] == ["D7/F#", "A7/E"] and parts[0].box[2] <= parts[1].box[0] + 1e-6
+    assert split_glued_chords(TextBox("AB", (0, 0, 20, 10))) is None
+    assert split_glued_chords(TextBox("And", (0, 0, 20, 10))) is None
+
+
+def test_chord_far_above_next_system_belongs_to_it():
+    # System 1 staff y 100..120, system 2 staff y 300..320; the chord at y 200 is far from both.
+    two = score([note("C", 200) + note("D", 400), note("E", 200, y=310) + note("F", 400, y=310)])
+    two = two.replace('<measure number="2">', '<measure number="2"><print new-system="yes"/>')
+    staves = "0 0.5 0.11 0.8 0.02\n0 0.5 0.31 0.8 0.02\n"
+    new, _ = apply_text_layer(two, staves, (1000, 1000), [TextBox("G7", (190, 200, 215, 212))])
+    harmonies = [m.find("harmony") is not None for m in ET.fromstring(new).findall("part/measure")]
+    assert harmonies == [False, True]
+
+
+def test_ocr_parser_survives_empty_and_placeholder_word_results():
+    from server.omr_text_extract import parse_ocr_result
+
+    assert parse_ocr_result(None, None, None, (("", 1.0, None),)) == []
+    line = [[0, 0], [10, 0], [10, 5], [0, 5]]
+    boxes = parse_ocr_result([line], ["Hi"], [0.9], [()])
+    assert boxes == [{"text": "Hi", "box": [0.0, 0.0, 10.0, 5.0], "conf": 0.9}]
+    words = parse_ocr_result([line], ["a b"], [0.9], [[("a", 0.8, [[0, 0], [3, 0], [3, 5], [0, 5]]), ("", 1.0, None), ("b", 0.7, [[5, 0], [8, 0], [8, 5], [5, 5]])]])
+    assert [w["text"] for w in words] == ["a", "b"]
