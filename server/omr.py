@@ -753,7 +753,7 @@ def create_omr_router(data_dir: Path | None = None) -> APIRouter:
         return path
 
     @router.post("", status_code=202)
-    async def upload(file: UploadFile = File(...), first_page: int = Form(1), last_page: int | None = Form(None), read_text: bool = Form(False), engine: str = Form("auto"), text_layer: bool = Form(True)):
+    async def upload(file: UploadFile = File(...), first_page: int = Form(1), last_page: int | None = Form(None), read_text: bool = Form(False), engine: str = Form("auto"), text_layer: bool = Form(False)):
         if engine not in ENGINES:
             raise HTTPException(422, "未知识谱引擎。")
         if first_page < 1 or first_page > MAX_INPUT_PAGES or last_page is not None and (last_page < first_page or last_page > MAX_INPUT_PAGES or last_page - first_page + 1 > MAX_PAGES):

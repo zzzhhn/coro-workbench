@@ -372,3 +372,14 @@ def test_homr_text_layer_notices_do_not_repeat_audiveris_ocr_advice():
     assert not any("歌词/标题 OCR" in notice for notice in with_text + without_text)
     assert any("未启用文字层" in notice for notice in without_text)
     assert not any("未启用文字层" in notice for notice in with_text)
+
+
+def test_text_layer_is_off_unless_requested(client):
+    transport, manager, _ = client
+    created = transport.post("/api/omr", files={"file": ("score.png", image_bytes())}).json()
+    import json as _json
+    request = _json.loads((manager.directory / created["id"] / "request.json").read_text())
+    assert request["text_layer"] is False
+    created = transport.post("/api/omr", data={"text_layer": "true"}, files={"file": ("score.png", image_bytes())}).json()
+    request = _json.loads((manager.directory / created["id"] / "request.json").read_text())
+    assert request["text_layer"] is True

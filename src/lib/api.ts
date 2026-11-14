@@ -85,7 +85,7 @@ export async function recognizeScore(
   if (options.lastPage) data.append('last_page', String(options.lastPage));
   data.append('read_text', String(options.readText));
   data.append('engine', options.engine ?? 'auto');
-  data.append('text_layer', String(options.textLayer ?? true));
+  data.append('text_layer', String(options.textLayer ?? false));
   return jsonResponse(await fetch('/api/omr', { method: 'POST', body: data }));
 }
 export const getOmrJob = async (id: string): Promise<OmrJob> =>
