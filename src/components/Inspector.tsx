@@ -50,6 +50,8 @@ interface Props {
   onDuplicate: () => void;
   onAudition: (midi: number) => void;
   onSelect: (selection: Selection) => void;
+  /** Commit the syllable and move to the next/previous sung note (lyric flow). */
+  onLyricStep?: (text: string, direction: 1 | -1) => void;
 }
 
 export default function Inspector({
@@ -64,6 +66,7 @@ export default function Inspector({
   onDuplicate,
   onAudition,
   onSelect,
+  onLyricStep,
 }: Props) {
   const note = selection ? part.notes.find((note) => note.id === selection.noteId) : undefined;
   const [lyric, setLyric] = useState(note?.lyric ?? '');
@@ -292,8 +295,17 @@ export default function Inspector({
                       if (lyric !== (note.lyric ?? '')) onChangeNote({ lyric });
                     }}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter') event.currentTarget.blur();
+                      // Never steal keys from an IME composition (pinyin candidates use Space).
+                      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                      if (onLyricStep && (event.key === ' ' || event.key === 'Tab' || event.key === '-')) {
+                        event.preventDefault();
+                        const text = event.key === '-' ? `${lyric.replace(/-+$/, '')}-` : lyric;
+                        onLyricStep(text, event.key === 'Tab' && event.shiftKey ? -1 : 1);
+                        return;
+                      }
+                      if (event.key === 'Enter' || event.key === 'Escape') event.currentTarget.blur();
                     }}
+                    title="空格 / Tab：下一音符 · -：连字符并前进 · ⇧Tab：上一音符"
                     placeholder="例如：doo / 啦"
                   />
                 </label>
