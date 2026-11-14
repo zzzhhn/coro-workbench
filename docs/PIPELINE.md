@@ -8,6 +8,27 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-15: OMR text layer v7 — second confirmation test C2 (still off by default)
+
+Text layer only; notes still never edited. v7 (PR #28, `03cd055`) was developed on a new dev set D2 and frozen; C2 is fresh public data, rules written before any of it was opened, run once.
+
+- **D2 (development only).** OpenScore Lieder dev pages, 25 new SLUB Dresden scans (11 instrumental / 14 vocal, labelled from thumbnails before recognition), 4 quartet pages, plus the earlier lead-sheet set for regression. Changes kept: no lyrics under a keyboard grand staff; a lyric row must follow its staff's note onsets (a few words over many onsets is a caption; rows of mostly numbers are footnotes; a lone letter is a misread mark unless it is a common one-letter word); words run together in the image are cut at note positions, only before a capital or after punctuation. Rejected: re-splitting OCR words at ink gaps (lead sheets .892 → .800). Found: the LilyPond page images in `zzsi/openscore` print words of a lyric line without spaces, a rendering defect, so C1's art-song item mostly measured that; C2 re-renders the same reference MusicXML with Verovio and keeps the LilyPond images as an ungated stress test.
+- **C2 result.**
+
+  | Gate | Result | |
+  |---|---|---|
+  | Notes unchanged | 129 / 129 pages | pass |
+  | 30 new lead sheets, clean: lyrics, chords ≥ .85 and ≥ Audiveris | .881, **.837** (Audiveris .683, .610) | **fail** |
+  | Same, simulated photo: ≥ .70 and ≥ Audiveris | .773, .823 (Audiveris .336, .270) | pass |
+  | 25 OpenScore Lieder (test split) re-rendered: verse-1 sequence F ≥ .75 and ≥ Audiveris | .821 (Audiveris .547) | pass |
+  | 12 new SLUB scans + 8 orchestra pages: failure ≤ 15 %; instrumental pages ≥ 80 % with no false lyric, ≤ 2 per page | 1 / 20 failed; only 50 % clean, 8.75 per page | **fail** |
+  | Vocal scan pages with no lyrics ≤ 20 % | 0 / 11 | pass |
+  | Kong Er: 268 syllables in verse 1, OCR agrees ≥ .95, part names on all pages | 268, .992, all 人声 / 钢琴 / 弦乐合奏 | pass |
+  | Stress test, LilyPond art-song images (no gate) | .379 | — |
+
+  False lyrics on instrumental pages came from a piano method's prose paragraph (52 syllables), a chorale book's hymn titles (14) and the orchestral "a 2" mark (4). Four orchestra pages (Bach B-minor Mass) print choral lyrics; they were relabelled vocal after recognition had run, and this is recorded.
+- **Decision.** Two gates failed, so the layer stays an off-by-default experiment. C2 is not used for tuning. Next: chords on a new dev set D3 and a fresh confirmation C3. New real phone photos remain unmeasured until Bobby takes them.
+
 ## 2026-11-14 evening: OMR text layer — lyrics, chord symbols, part names (text layer, experimental, off by default)
 
 One layer added on top of homr; homr's notes are never edited (checked per page, before/after identical on every test page, otherwise that page's text is dropped).
