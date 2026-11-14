@@ -6,6 +6,12 @@ import { recommendLeadPart } from '../lib/arrange';
 
 const presets = [
   {
+    id: 'solo-satb',
+    label: 'Solo + SATB',
+    sub: '主唱 · 女高 · 女低 · 男高 · 男低',
+    detail: '主唱原样保留，按段落安排和声与低音。',
+  },
+  {
     id: 'satb',
     label: '混声 SATB',
     sub: '女高 · 女低 · 男高 · 男低',
@@ -39,10 +45,10 @@ export default function ArrangeDialog({
   const [options, setOptions] = useState<ArrangementOptions>(
     initialOptions ??
       project.arrangement?.options ?? {
-        preset: 'satb',
+        preset: 'solo-satb',
         style: 'pop',
         difficulty: 'medium',
-        percussion: true,
+        percussion: false,
         transpose: 0,
         leadPartId: recommendLeadPart(project)?.id,
       },
@@ -62,7 +68,7 @@ export default function ArrangeDialog({
             onClick={() => setOptions({ ...options, preset: preset.id })}
           >
             <div className="voice-stacks">
-              {[34, 48, 42, 29].map((height, index) => (
+              {(preset.id === 'solo-satb' ? [40, 34, 48, 42, 29] : [34, 48, 42, 29]).map((height, index) => (
                 <i
                   key={index}
                   style={{
@@ -140,12 +146,13 @@ export default function ArrangeDialog({
           <MusicNotes size={22} />
           <div>
             <strong>加入人声打击乐</strong>
-            <p>B / ts / ka 拟声音节，与主声部分开排练</p>
+            <p>B / pf / ts 拟声音节，与主声部分开排练</p>
           </div>
         </div>
         <input
           type="checkbox"
-          checked={options.percussion}
+          disabled={options.preset === 'solo-satb'}
+          checked={options.percussion && options.preset !== 'solo-satb'}
           onChange={(event) => setOptions({ ...options, percussion: event.target.checked })}
         />
         <span className="toggle-visual" />

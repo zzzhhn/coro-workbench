@@ -8,6 +8,39 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-14: arranger v2 first listening draft
+
+Layers changed one at a time: input normalization, then arrangement.
+
+```mermaid
+flowchart TD
+  IN[MusicXML / MIDI / OMR score] --> NORM[Input normalization: MIDI notation gate restore]
+  NORM --> SRC[Source score: lead, chords, optional bass]
+  SRC --> PLAN[Section plan: rule or model]
+  PLAN --> SOLO[Solo locked: pitch, onset, duration, lyric unchanged]
+  PLAN --> SATB[S/A/T skeleton by chord slot]
+  PLAN --> BASS[Bass role: sustain, pulse or groove]
+  SOLO --> CHECK[Score validation, rendered score and synthetic playback]
+  SATB --> CHECK
+  BASS --> CHECK
+  CHECK --> REVIEW[Human score reading and listening]
+```
+
+- **MIDI input.** `fromMidi` now restores written durations only when one export
+  gate dominates the file. A free-length control is unchanged. On two local
+  Crescendo exports, MusicXML 64th-note elements fall 3392 -> 212 and
+  6140 -> 89. Remaining odd values include long pedal/rubato events and are not
+  forced onto a grid. `fromMidi(bytes, { restoreNotation: false })` keeps raw values.
+- **Solo + SATB.** A new `solo-satb` preset keeps the selected lead as its own
+  Solo line. It does not choose an octave, fold notes or shorten tails. Existing
+  SATB/SSAA/TTBB presets remain on the v1 engine.
+- **Planning.** The same deterministic realizer accepts a rule plan or a model
+  plan. On Kong Er, a separate Opus 5.5 High planning session read only bar-level
+  structure, not lyrics or the private arrangement.
+- **Status.** Tests and engraving passed. A first rendered review found wordless
+  lead-following written as repeated "Ooh" on every short attack; it now follows
+  phrase anchors. Listening acceptance is still pending.
+
 ## 2026-11-13: product pivot — score → a cappella arrangement becomes the core
 
 Decision (Bobby, 2026-11-13): the core path is now a reliable score turned into a

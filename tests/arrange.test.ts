@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { arrangeV2, defaultArrangementPlan } from '../src/lib/arrangeV2';
 import abcjs from 'abcjs';
 import { arrangeForVoices, inferChords, inspectArrangement, recommendLeadPart } from '../src/lib/arrange';
 import { createBlankProject, createDemoProject } from '../src/lib/demo';
@@ -326,5 +327,23 @@ describe('non-destructive a cappella arranger', () => {
     expect(result.id).not.toBe(source.id);
     expect(result.originalAudio).toEqual(source.originalAudio);
     expect(result.originalAudio).not.toBe(source.originalAudio);
+  });
+
+  it('keeps the Solo line exact in Solo + SATB instead of moving it into Soprano range', () => {
+    const source = createBlankProject();
+    source.measures = 4;
+    source.parts[0].notes = [note('a', 43, 0, 1), note('b', 47, 1, 1), note('c', 50, 2, 2), note('d', 45, 4, 4)];
+    source.parts[0].notes[0].lyric = 'low';
+    source.chords = [
+      { start: 0, duration: 4, symbol: 'G', pitches: [43, 47, 50] },
+      { start: 4, duration: 4, symbol: 'D', pitches: [50, 54, 57] },
+    ];
+    const result = arrangeV2(source, { ...BASE, preset: 'solo-satb', percussion: false, leadPartId: source.parts[0].id }, defaultArrangementPlan(source));
+    expect(result.parts.map((part) => part.shortName)).toEqual(['Solo', 'S.', 'A.', 'T.', 'B.']);
+    expect(result.parts[0].notes.map(({ midi, start, duration, lyric }) => ({ midi, start, duration, lyric }))).toEqual(
+      source.parts[0].notes.map(({ midi, start, duration, lyric }) => ({ midi, start, duration, lyric })),
+    );
+    expect(result.arrangement?.report.changes.join('\n')).toContain('不移八度');
+    expect(validateProject(result)).toEqual([]);
   });
 });
