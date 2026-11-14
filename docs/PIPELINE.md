@@ -41,6 +41,33 @@ One layer changed: which recognizer reads PDF/images. Raw output of every engine
 - **Known gaps of homr.** No lyrics, chord symbols or part names (0 in every output); about 0.7 of the reference's ties; parts named Voice/Piano. Audiveris remains the choice when you want it to try lyrics.
 - Test pass and these scores are not musical acceptance. Compare against the source page before rehearsal.
 
+## 2026-11-14: work-computer priority moves to score input and editing
+
+Bobby's listening review: none of the first Solo + SATB drafts is yet a
+qualified a cappella arrangement. Arrangement work moves to his personal
+computer, where more reference arrangements are available. This computer now
+focuses on reliable score input and an efficient correction/editor workflow.
+
+```mermaid
+flowchart LR
+  PDF[PDF / image / MusicXML / MIDI] --> OMR[homr default OMR, Audiveris fallback]
+  OMR --> TEXT[Text and structure layer: lyrics, chords, part names, repeats]
+  TEXT --> MAP[Page coordinates and suspicious-bar evidence]
+  MAP --> EDIT[Crescendo-informed correction and notation editor]
+  EDIT --> SCORE[Reviewed, editable score]
+  SCORE -. personal computer .-> ARR[A cappella arrangement]
+```
+
+- **Production now:** homr is the default PDF/image engine; Audiveris remains an
+  explicit choice and automatic fallback.
+- **OMR session:** next layers are text/structure, real-photo and real-scan
+  evaluation, then page-region mapping for correction.
+- **Editor session:** study Crescendo's interaction model with REA and direct
+  use, then independently implement high-value input, selection and correction
+  workflows in Coro. Do not copy proprietary code or assets.
+- **Arranger:** `solo-satb` remains available for comparison, but it is not
+  accepted as a qualified arrangement and is not active work on this computer.
+
 ## 2026-11-14: arranger v2 first listening draft
 
 Layers changed one at a time: input normalization, then arrangement.
