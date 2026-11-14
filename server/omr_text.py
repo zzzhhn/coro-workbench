@@ -84,7 +84,10 @@ def read_staff_positions(text: str, width: int, height: int, crop: tuple[int, in
         parts = line.split()
         if len(parts) != 5:
             continue
-        kind, cx, cy, w, h = parts[0], *map(float, parts[1:])
+        try:
+            kind, cx, cy, w, h = parts[0], *map(float, parts[1:])
+        except ValueError:
+            continue  # a malformed line is skipped, not fatal
         staves.append(StaffBox(left + (cx - w / 2) * width, top + (cy - h / 2) * height, left + (cx + w / 2) * width, top + (cy + h / 2) * height, kind != "0"))
     return sorted(staves, key=lambda s: s.y0)
 

@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import importlib.util
 import json
+import logging
 import math
 import os
 import re
@@ -115,7 +116,7 @@ class OmrStatus(JobStatus):
         current = super().read()
         if current["status"] == "cancelled":
             current["message"] = "识谱已取消，原始谱页仍保留在本机。"
-            for key in ("musicxml", "downloadUrl", "pages", "pageUrls"):
+            for key in ("musicxml", "downloadUrl", "pages", "pageUrls", "review"):
                 current.pop(key, None)
         return current
 
@@ -492,17 +493,69 @@ def _homr_attempt(directory: Path, pages: list[Path], status: OmrStatus, text_so
         # misplace music, so name the pages instead of merging silently.
         detail = "、".join(f"第 {index + 1} 页 {value} 个" for index, value in enumerate(counts))
         notices.append(f"各页识别出的声部数不一致（{detail}）。跨页合并按声部顺序对应，多出或缺少的声部可能错位或丢失；请逐页核对，必要时分页导入。")
+    # Stable note ids go on a copy; homr's raw page MusicXML stays as written.
+    from .omr_review import label_page
+
+    labelled = []
+    for index, path in enumerate(page_xml):
+        xml, _ = label_page(path.read_text(encoding="utf-8"), index)
+        target = path.with_suffix(".ids.musicxml")
+        target.write_text(xml, encoding="utf-8")
+        labelled.append(target)
+    page_xml = labelled
+    text_evidence = []
     if text_layer:
         status.update(85, "reading-text", "读取歌词、和弦符号与声部名，并按音符位置对齐。", pages=count)
         page_xml, text_stats, text_notices = _homr_text_layer(directory, work, inputs, page_xml, text_source, status)
         stats["text"] = text_stats
         notices.extend(text_notices)
+        evidence_path = directory / "text-evidence.json"
+        if evidence_path.is_file():
+            text_evidence = json.loads(evidence_path.read_text(encoding="utf-8")).get("pages", [])
+    try:
+        stats["review"] = _homr_review(directory, inputs, page_xml, counts, text_evidence)
+    except Exception:  # noqa: BLE001 - review geometry is optional; the score must still import
+        logging.exception("OMR review data failed")
+        notices.append("原图对照数据生成失败；乐谱与原谱页不受影响。")
     if len(page_xml) == 1:
         return page_xml[0], notices, stats
     merged = work / "merged.musicxml"
     status.update(86, "merging", "按页顺序连接各页小节与声部。", pages=count)
     _run_logged([str(source / ".venv" / "bin" / "python"), "-c", HOMR_MERGE, str(merged), *map(str, page_xml)], source, _homr_env(local_home), log_path, time.monotonic() + 120, status)
     return (merged if merged.is_file() else None), notices, stats
+
+
+def _homr_review(directory: Path, inputs: list[Path], page_xml: list[Path], parts_per_page: list[int], text_evidence: list[dict]) -> dict:
+    """Review data for the editor's side-by-side view (interface decision 2026-11-15)."""
+    from PIL import Image
+
+    from .omr_review import assemble, page_review, text_issues
+
+    source = homr_home() / "src"
+    extractor = Path(__file__).with_name("omr_text_extract.py")
+    result = subprocess.run([str(source / ".venv" / "bin" / "python"), str(extractor), "--crops", *map(str, inputs)], cwd=source,
+                            env=_homr_env(directory / "runtime-home"), capture_output=True, text=True, timeout=180)
+    crops = json.loads(result.stdout) if result.returncode == 0 else [None] * len(inputs)
+    pages, extra, first = [], [], 1
+    for index, (image, xml_path) in enumerate(zip(inputs, page_xml)):
+        staves = image.with_suffix(".txt")
+        with Image.open(image) as page:
+            size = page.size
+        item = page_review(xml_path.read_text(encoding="utf-8"), index, staves.read_text() if staves.is_file() else "", size,
+                           tuple(crops[index]) if crops[index] else None, image, first)
+        pages.append(item)
+        first += item["page"]["measureCount"]
+    if len(set(parts_per_page)) > 1:
+        for index, value in enumerate(parts_per_page):
+            if value != max(parts_per_page, key=parts_per_page.count):
+                extra.append({"kind": "page-part-mismatch", "severity": "check", "page": index,
+                              "message": f"第 {index + 1} 页识别出 {value} 个声部，与其他页不同；跨页合并可能错位。"})
+    for page in text_evidence:
+        if isinstance(page, dict) and "page" in page:
+            extra.extend(text_issues(page, int(page["page"]) - 1))
+    review = assemble(pages, "homr", extra)
+    atomic_json(directory / "review.json", review)
+    return review
 
 
 def _homr_text_layer(directory: Path, work: Path, inputs: list[Path], page_xml: list[Path], text_source: Path | None, status: OmrStatus) -> tuple[list[Path], dict, list[str]]:
@@ -623,6 +676,7 @@ def recognize(directory: Path, request: dict) -> None:
     stats, recognition_notices = summarize_musicxml(xml, len(pages), logs, read_text, engine, engine == "homr" and bool(request.get("text_layer", False)))
     if engine == "homr" and engine_stats.get("partsPerPage"):
         stats["partsPerPage"] = "/".join(map(str, engine_stats["partsPerPage"]))
+    review = engine_stats.pop("review", None) if engine == "homr" else None
     if engine == "homr" and engine_stats.get("text"):
         stats["textLyrics"] = engine_stats["text"]["lyrics"]
         stats["textChords"] = engine_stats["text"]["chords"]
@@ -638,8 +692,10 @@ def recognize(directory: Path, request: dict) -> None:
     if resampling:
         source["resampling"] = resampling
     result = status.read()
+    if review is not None:
+        result["review"] = review
     result.update(status="complete", progress=100, stage="complete", message="光学识谱完成，请对照原谱校对。", musicxml=xml, warnings=notices, pages=len(pages), source=source, downloadUrl=f"/api/omr/jobs/{request['id']}/musicxml", pageUrls=[f"/api/omr/jobs/{request['id']}/pages/{index + 1}" for index in range(len(pages))], statistics=stats, wallSeconds=round(time.monotonic() - started, 3), updatedAt=utc_now())
-    atomic_json(directory / "result-evidence.json", {key: value for key, value in result.items() if key != "musicxml"})
+    atomic_json(directory / "result-evidence.json", {key: value for key, value in result.items() if key not in ("musicxml", "review")})
     status.check_cancelled()
     atomic_json(directory / "status.json", result)
 
