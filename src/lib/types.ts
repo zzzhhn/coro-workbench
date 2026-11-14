@@ -19,6 +19,9 @@ export interface NoteEvent {
   dynamicScope?: 'staff' | 'voice';
   staff?: number;
   voice?: string;
+  /** Stable reference to the recognized source note (OMR `<note id>`, e.g. "omr-0-12").
+   * Kept through edits; inserted notes have none. Not written to MusicXML/MIDI export. */
+  sourceRef?: string;
 }
 
 export interface ScorePart {
@@ -55,6 +58,57 @@ export interface ChordEvent {
   confidence?: number;
 }
 
+/** Pixel box on an original page image: [x0, y0, x1, y1], origin top-left. */
+export type OmrBox = [number, number, number, number];
+
+export type OmrIssueKind =
+  | 'measure-overfull'
+  | 'measure-underfull'
+  | 'no-anchor'
+  | 'page-part-mismatch'
+  | 'text-discarded'
+  | 'text-attached'
+  | 'engine-warning';
+
+/** Where recognized music sits on the original pages (interface decision 2026-11-15).
+ * All positions are approximate: homr gives attention centres, not glyph boxes. */
+export interface OmrReview {
+  version: 1;
+  engine: 'homr' | 'audiveris';
+  /** `page` everywhere is the 0-based index into `source.pages`. */
+  pages: Array<{ page: number; width: number; height: number; firstMeasure: number; measureCount: number }>;
+  staves: Array<{ page: number; system: number; partIndex: number; box: OmrBox; grand: boolean }>;
+  measures: Array<{
+    partIndex: number;
+    measure: number;
+    page: number;
+    system: number;
+    box: OmrBox;
+    edges: ['barline' | 'estimated', 'barline' | 'estimated'];
+  }>;
+  notes: Array<{
+    ref: string;
+    partIndex: number;
+    measure: number;
+    onsetBeats: number;
+    staff: number;
+    page: number;
+    point: [number, number] | null;
+    precision: 'approximate';
+  }>;
+  issues: Array<{
+    kind: OmrIssueKind;
+    severity: 'check' | 'info';
+    page?: number;
+    partIndex?: number;
+    measure?: number;
+    noteRef?: string;
+    box?: OmrBox;
+    message: string;
+    evidence?: string;
+  }>;
+}
+
 export interface SourceInfo {
   kind: 'demo' | 'audio' | 'midi' | 'musicxml' | 'manual' | 'omr';
   filename?: string;
@@ -87,6 +141,8 @@ export interface SourceInfo {
     }>;
   };
   pages?: string[];
+  /** OMR page geometry and review reasons; saved with the project, never exported. */
+  omrReview?: OmrReview;
   analysisStartSeconds?: number;
   /** Which local pipeline produced this transcription (absent before v5). */
   pipeline?: {
@@ -203,6 +259,7 @@ export interface OmrJob {
   downloadUrl?: string;
   pageUrls?: string[];
   statistics?: Record<string, number | string | boolean | null>;
+  review?: OmrReview;
 }
 
 export interface AnalysisJob {

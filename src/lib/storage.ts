@@ -142,10 +142,17 @@ export function parseProject(content: string): ScoreProject {
   }
   for (const part of project.parts)
     if (part.stemUrl && !/^(?:\/api\/audio\/|local:)/.test(part.stemUrl)) delete part.stemUrl;
-  if (project.source.pages)
+  if (project.source.pages) {
+    const before = project.source.pages.length;
     project.source.pages = project.source.pages.filter(
       (url) => /^\/api\/omr\/jobs\/[a-f0-9]{32}\/pages\/\d+$/.test(url) || url.startsWith('local:'),
     );
+    // Review geometry is indexed by page; it cannot survive a dropped page.
+    if (project.source.omrReview && project.source.pages.length !== before) {
+      delete project.source.omrReview;
+      project.source.warnings.push('部分原始谱页链接无效，已移除原图对照数据。');
+    }
+  }
   if (
     project.source.analysis?.rawProjectUrl &&
     !/^\/api\/projects\/[a-f0-9]{32}\/(?:raw|game-raw)$/.test(project.source.analysis.rawProjectUrl)

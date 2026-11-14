@@ -1,6 +1,6 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import { XMLParser } from 'fast-xml-parser';
-import { fromMidi, fromMusicXml } from './music';
+import { fromMidi, fromMusicXml, validateOmrReview } from './music';
 import { parseProject } from './storage';
 import type { ScoreProject, OmrJob } from './types';
 
@@ -27,6 +27,13 @@ export function projectFromOmr(job: OmrJob): ScoreProject {
     warnings: [...new Set([...(job.warnings ?? []), ...project.source.warnings])],
     pages: job.pageUrls?.filter((url) => /^\/api\/omr\/jobs\/[a-f0-9]{32}\/pages\/\d+$/.test(url)),
   };
+  if (job.review) {
+    const problems = validateOmrReview(job.review);
+    const pageCount = project.source.pages?.length ?? 0;
+    if (!problems.length && job.review.pages.every((page) => page.page < pageCount))
+      project.source.omrReview = structuredClone(job.review);
+    else project.source.warnings.push('识谱原图对照数据无效，已忽略；音符与原谱页不受影响。');
+  }
   return project;
 }
 

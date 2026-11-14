@@ -135,6 +135,40 @@ function projectShell(kind: ScoreProject['source']['kind'], title: string): Scor
   };
 }
 
+const OMR_ISSUE_KINDS = ['measure-overfull', 'measure-underfull', 'no-anchor', 'page-part-mismatch', 'text-discarded', 'text-attached', 'engine-warning'];
+
+/** Bounds and shape of OMR review geometry (interface decision 2026-11-15). */
+export function validateOmrReview(review: unknown): string[] {
+  const bad = (message: string) => [`识谱对照数据无效：${message}`];
+  const finite = (value: unknown, max = 1e6): value is number => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= max;
+  const count = (value: unknown, max: number): value is number => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= max;
+  const box = (value: unknown) => Array.isArray(value) && value.length === 4 && value.every((v) => finite(v)) && value[0] <= value[2] && value[1] <= value[3];
+  const text = (value: unknown, max: number) => typeof value === 'string' && value.length <= max;
+  if (!review || typeof review !== 'object' || Array.isArray(review)) return bad('不是对象');
+  const r = review as Record<string, unknown>;
+  if (r.version !== 1) return bad('版本不受支持');
+  if (r.engine !== 'homr' && r.engine !== 'audiveris') return bad('引擎未知');
+  for (const [key, max] of [['pages', 200], ['staves', 20_000], ['measures', 100_000], ['notes', 100_000], ['issues', 20_000]] as const)
+    if (!Array.isArray(r[key]) || (r[key] as unknown[]).length > max) return bad(`${key} 缺失或超过 ${max} 项`);
+  const pages = r.pages as Array<Record<string, unknown>>;
+  if (pages.some((p) => !p || !count(p.page, 199) || !finite(p.width) || !finite(p.height) || (p.width as number) <= 0 || (p.height as number) <= 0 || !count(p.firstMeasure, 100_000) || !count(p.measureCount, 100_000)))
+    return bad('页面尺寸或小节范围');
+  const pageOk = (value: unknown) => count(value, 199);
+  if ((r.staves as Array<Record<string, unknown>>).some((s) => !s || !pageOk(s.page) || !count(s.system, 10_000) || !count(s.partIndex, 31) || !box(s.box) || typeof s.grand !== 'boolean'))
+    return bad('谱表框');
+  if ((r.measures as Array<Record<string, unknown>>).some((m) => !m || !count(m.partIndex, 31) || !count(m.measure, 100_000) || !pageOk(m.page) || !count(m.system, 10_000) || !box(m.box)
+    || !Array.isArray(m.edges) || m.edges.length !== 2 || m.edges.some((e) => e !== 'barline' && e !== 'estimated')))
+    return bad('小节框');
+  if ((r.notes as Array<Record<string, unknown>>).some((n) => !n || !text(n.ref, 100) || !count(n.partIndex, 31) || !count(n.measure, 100_000) || !finite(n.onsetBeats) || !count(n.staff, 16) || !pageOk(n.page)
+    || (n.point !== null && !(Array.isArray(n.point) && n.point.length === 2 && n.point.every((v) => finite(v)))) || n.precision !== 'approximate'))
+    return bad('音符锚点');
+  if ((r.issues as Array<Record<string, unknown>>).some((i) => !i || !OMR_ISSUE_KINDS.includes(i.kind as string) || (i.severity !== 'check' && i.severity !== 'info') || !text(i.message, 2000)
+    || (i.page !== undefined && !pageOk(i.page)) || (i.partIndex !== undefined && !count(i.partIndex, 31)) || (i.measure !== undefined && !count(i.measure, 100_000))
+    || (i.noteRef !== undefined && !text(i.noteRef, 100)) || (i.box !== undefined && !box(i.box)) || (i.evidence !== undefined && !text(i.evidence, 2000))))
+    return bad('可疑原因');
+  return [];
+}
+
 export function validateProject(project: ScoreProject): string[] {
   const problems: string[] = [];
   const boundedText = (value: unknown, length = 1000): value is string =>
@@ -324,6 +358,10 @@ export function validateProject(project: ScoreProject): string[] {
         problems.push(`${part.name}: 原始声部编号无效。`);
         break;
       }
+      if (!optionalText(note.sourceRef, 100)) {
+        problems.push(`${part.name}: 识谱音符引用无效。`);
+        break;
+      }
     }
   }
   if (noteCount > 100_000) problems.push('工程超过 100,000 个音符的安全上限。');
@@ -401,6 +439,13 @@ export function validateProject(project: ScoreProject): string[] {
       problems.push('音频分析来源信息无效。');
   }
   if (project.source?.pages !== undefined && (!Array.isArray(project.source.pages) || project.source.pages.length > 200 || project.source.pages.some(url => typeof url !== 'string' || url.length > 10000))) problems.push('原始谱页引用无效。');
+  if (project.source?.omrReview !== undefined) {
+    problems.push(...validateOmrReview(project.source.omrReview));
+    const pageCount = project.source.pages?.length;
+    // Bundles detach pages while validating; otherwise every page index must exist.
+    if (pageCount !== undefined && project.source.omrReview?.pages?.some?.((page) => page.page >= pageCount))
+      problems.push('识谱对照数据无效：页码超出原始谱页数量');
+  }
   if (project.source?.analysisStartSeconds !== undefined && (!Number.isFinite(project.source.analysisStartSeconds) || project.source.analysisStartSeconds < 0)) problems.push('分析起点无效。');
   const uncertain = project.source?.analysis?.uncertaintyIntervals;
   if (uncertain !== undefined && (!Array.isArray(uncertain) || uncertain.length > 10000 || uncertain.some(item => !item || typeof item.partId !== 'string' || typeof item.reason !== 'string' || !Number.isFinite(item.startSeconds) || !Number.isFinite(item.endSeconds) || item.startSeconds < 0 || item.endSeconds <= item.startSeconds || item.alternatives !== undefined && (!Array.isArray(item.alternatives) || item.alternatives.some(value => typeof value !== 'string'))))) problems.push('待核对时间区间无效。');
@@ -1538,6 +1583,9 @@ export function fromMusicXml(xml: string): ScoreProject {
             const lyricNodes = allNamed(kids(node), 'lyric');
             if (lyricNodes.length > 1) warnings.add('多段歌词仅保留第一段。');
             const lyric = allNamed(kids(lyricNodes[0]), 'text').map(textOf).join('');
+            // OMR writes a stable id per recognized note; keep it so edits can be traced to the page.
+            const rawRef = attrs(node)['@_id'];
+            const sourceRef = typeof rawRef === 'string' && /^[\w.:-]{1,100}$/.test(rawRef) ? rawRef : undefined;
             const dynamics = Number(attrs(node)['@_dynamics']);
             const dynamicKey = pendingDynamics.has(`${staff}:${voice}`) ? `${staff}:${voice}` : `${staff}:*`;
             const pendingDynamic = pendingDynamics.get(dynamicKey);
@@ -1558,6 +1606,7 @@ export function fromMusicXml(xml: string): ScoreProject {
               origin: 'manual',
               staff: staffNumber,
               voice,
+              ...(sourceRef ? { sourceRef } : {}),
               ...(lyric ? { lyric } : {}),
               ...(pendingDynamic ? { dynamic: pendingDynamic, dynamicScope: dynamicKey.endsWith(':*') ? 'staff' as const : 'voice' as const } : {}),
               ...(named(kids(named(kids(node), 'notations')), 'arpeggiate') ? { arpeggio: true } : {}),
