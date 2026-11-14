@@ -28,6 +28,7 @@ bash scripts/setup-audio-quality.sh
 bash scripts/setup-lead-separation.sh
 bash scripts/setup-rosvot.sh
 bash scripts/setup-omr.sh
+bash scripts/setup-omr-homr.sh   # default OMR engine (AGPL-3.0, separate venv)
 .venv/bin/python scripts/setup-chordino.py
 npm start
 ```

@@ -262,3 +262,105 @@ def test_recognition_stops_after_one_evidence_based_retry(tmp_path, monkeypatch)
         recognize(tmp_path, request)
     assert [path.name for path in calls] == ["score.tiff", "score-retry.tiff"]
     assert (tmp_path / "resampling-evidence.json").is_file()
+
+
+TWO_PART_XML = MINIMAL_XML.replace("</part-list>", '<score-part id="P2"><part-name>B</part-name></score-part></part-list>').replace("</score-partwise>", '<part id="P2"><measure number="1"><attributes><divisions>1</divisions></attributes><note><pitch><step>C</step><octave>3</octave></pitch><duration>4</duration></note></measure></part></score-partwise>')
+
+
+def test_auto_engine_prefers_verified_homr(monkeypatch):
+    monkeypatch.setattr(omr, "homr_manifest", lambda: {"version": "x", "weights": {}})
+    assert omr.resolve_engine("auto") == "homr"
+    monkeypatch.setattr(omr, "homr_manifest", lambda: None)
+    assert omr.resolve_engine("auto") == "audiveris"
+    with pytest.raises(ValueError):
+        omr.resolve_engine("oemer")
+
+
+def test_upload_rejects_unknown_or_missing_engine(client, monkeypatch):
+    transport, _, _ = client
+    assert transport.post("/api/omr", data={"engine": "oemer"}, files={"file": ("score.png", image_bytes())}).status_code == 422
+    monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True, "engines": {"homr": {"ready": False}, "audiveris": {"ready": True}}})
+    assert transport.post("/api/omr", data={"engine": "homr"}, files={"file": ("score.png", image_bytes())}).status_code == 503
+
+
+def test_legacy_request_without_engine_stays_on_audiveris(tmp_path, monkeypatch):
+    request = make_job(tmp_path, image_bytes())
+    monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True})
+    monkeypatch.setattr(omr, "audiveris_ready", lambda: True)
+    monkeypatch.setattr(omr, "homr_manifest", lambda: {"version": "x"})
+    monkeypatch.setattr(omr, "_homr_attempt", lambda *args: pytest.fail("homr must not run for a legacy request"))
+    monkeypatch.setattr(omr, "_audiveris_attempt", lambda *args: (_ for _ in ()).throw(ValueError("audiveris ran")))
+    with pytest.raises(ValueError, match="audiveris ran"):
+        recognize(tmp_path, request)
+
+
+def test_homr_result_keeps_engine_label_and_no_text_notice(tmp_path, monkeypatch):
+    request = make_job(tmp_path, image_bytes(), engine="homr")
+    result = tmp_path / "homr.musicxml"
+    result.write_text(MINIMAL_XML)
+    monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True})
+    monkeypatch.setattr(omr, "homr_manifest", lambda: {"version": "0.7.1"})
+    monkeypatch.setattr(omr, "_homr_attempt", lambda directory, pages, status: (result, ["各页识别出的声部数不一致"], {"engineExit": 0, "partsPerPage": [1]}))
+    monkeypatch.setattr(omr, "_audiveris_attempt", lambda *args: pytest.fail("no fallback when homr succeeded"))
+    recognize(tmp_path, request)
+    state = OmrStatus(tmp_path).read()
+    assert state["source"]["engineId"] == "homr" and state["source"]["engine"].startswith("homr 0.7.1")
+    assert any("不读取歌词" in notice for notice in state["warnings"])
+    assert any("声部数不一致" in notice for notice in state["warnings"])
+    assert state["statistics"]["partsPerPage"] == "1"
+
+
+def test_auto_falls_back_to_audiveris_only_when_homr_produced_nothing(tmp_path, monkeypatch):
+    request = make_job(tmp_path, image_bytes(), engine="auto")
+    result = tmp_path / "audiveris.musicxml"
+    result.write_text(MINIMAL_XML)
+    monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True})
+    monkeypatch.setattr(omr, "homr_manifest", lambda: {"version": "0.7.1"})
+    monkeypatch.setattr(omr, "audiveris_ready", lambda: True)
+    monkeypatch.setattr(omr, "_homr_attempt", lambda directory, pages, status: (None, [], {"engineExit": 1, "pagesMissing": [1]}))
+    monkeypatch.setattr(omr, "_audiveris_attempt", lambda directory, pages, read_text, status, notices: (result, "", 0, []))
+    recognize(tmp_path, request)
+    state = OmrStatus(tmp_path).read()
+    assert state["source"]["engineId"] == "audiveris" and state["source"]["requestedEngine"] == "auto"
+    assert any("已改用 Audiveris" in notice for notice in state["warnings"])
+
+
+def test_explicit_homr_failure_does_not_silently_switch_engine(tmp_path, monkeypatch):
+    request = make_job(tmp_path, image_bytes(), engine="homr")
+    monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True})
+    monkeypatch.setattr(omr, "homr_manifest", lambda: {"version": "0.7.1"})
+    monkeypatch.setattr(omr, "audiveris_ready", lambda: True)
+    monkeypatch.setattr(omr, "_homr_attempt", lambda directory, pages, status: (None, [], {"engineExit": 1, "pagesMissing": [1]}))
+    monkeypatch.setattr(omr, "_audiveris_attempt", lambda *args: pytest.fail("explicit engine must not fall back"))
+    with pytest.raises(ValueError, match="homr 未能识别"):
+        recognize(tmp_path, request)
+
+
+def test_homr_page_part_mismatch_is_reported_not_hidden(tmp_path, monkeypatch):
+    pages = []
+    for index, xml in enumerate([MINIMAL_XML, TWO_PART_XML], 1):
+        page = tmp_path / "pages" / f"page-{index:03d}.png"
+        page.parent.mkdir(exist_ok=True)
+        page.write_bytes(image_bytes())
+        pages.append(page)
+    source = tmp_path / "models" / "omr" / "homr" / "src"
+
+    def fake_run(command, cwd, env, log_path, deadline, status, on_log=None):
+        if "--no-title" in command:
+            assert env["HTTPS_PROXY"].startswith("http://127.0.0.1")
+            for index, xml in enumerate([MINIMAL_XML, TWO_PART_XML], 1):
+                (tmp_path / "recognized-homr" / f"page-{index:03d}.musicxml").write_text(xml)
+        else:
+            Path(command[3]).write_text(MINIMAL_XML)
+        return 0
+
+    monkeypatch.setattr(omr, "homr_home", lambda: source.parent)
+    monkeypatch.setattr(omr, "_run_logged", fake_run)
+    status = OmrStatus(tmp_path)
+    atomic_json(tmp_path / "status.json", {"id": "x", "status": "running", "progress": 0})
+    merged, notices, stats = omr._homr_attempt(tmp_path, pages, status)
+    assert merged.name == "merged.musicxml"
+    assert stats["partsPerPage"] == [1, 2]
+    assert any("第 1 页 1 个" in notice and "第 2 页 2 个" in notice for notice in notices)
+    # Raw per-page output stays next to the merged result.
+    assert (tmp_path / "recognized-homr" / "page-002.musicxml").is_file()
