@@ -100,8 +100,28 @@ export interface SourceInfo {
   };
 }
 
+export interface ArrangementSectionPlan {
+  id: string;
+  kind: 'intro' | 'verse' | 'prechorus' | 'chorus' | 'bridge' | 'interlude' | 'outro';
+  label: string;
+  startBar: number;
+  bars: number;
+  energy: 1 | 2 | 3 | 4 | 5;
+  texture: 'bell' | 'pad' | 'sparse' | 'rhythm' | 'answer' | 'lyric';
+  bass: 'sustain' | 'pulse' | 'groove';
+  rationale?: string;
+}
+
+export interface ArrangementPlan {
+  version: 2;
+  planner: 'rule' | 'model' | 'manual';
+  ensemble: 'solo+satb';
+  sections: ArrangementSectionPlan[];
+  model?: string;
+}
+
 export interface ArrangementOptions {
-  preset: 'satb' | 'ssaa' | 'ttbb';
+  preset: 'satb' | 'ssaa' | 'ttbb' | 'solo-satb';
   style: 'pop' | 'choral' | 'jazz';
   difficulty: 'easy' | 'medium' | 'advanced';
   percussion: boolean;
@@ -143,7 +163,7 @@ export interface ScoreProject {
     offsetSeconds: number;
     tempo?: number;
   };
-  arrangement?: { options: ArrangementOptions; report: ArrangementReport };
+  arrangement?: { options: ArrangementOptions; report: ArrangementReport; plan?: ArrangementPlan };
   createdAt: string;
   updatedAt: string;
   pitchReview?: {

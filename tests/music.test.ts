@@ -516,6 +516,26 @@ describe('MIDI interchange', () => {
     expect(() => toMidi(createDemoProject(), [])).toThrow('至少');
   });
 
+  it('restores a dominant notation-software MIDI gate without changing free-length MIDI', () => {
+    const source = createBlankProject();
+    source.parts[0].notes = [
+      note('a', 60, 0, 1), note('b', 62, 1, 0.5), note('c', 64, 1.5, 0.5),
+      note('d', 65, 2, 2), note('e', 67, 4, 0.25), note('f', 69, 4.25, 0.25),
+      note('g', 71, 4.5, 1.5), note('h', 72, 6, 2),
+    ];
+    const gated = structuredClone(source);
+    for (const item of gated.parts[0].notes) item.duration *= 0.95;
+    const restored = fromMidi(midiBuffer(toMidi(gated)));
+    expect(restored.parts[0].notes.map((item) => item.duration)).toEqual(source.parts[0].notes.map((item) => item.duration));
+    expect(restored.source.analysis?.transforms).toContain('midi-notation-gate-restore');
+    const raw = fromMidi(midiBuffer(toMidi(gated)), { restoreNotation: false });
+    expect(raw.parts[0].notes[0].duration).toBeCloseTo(0.95, 3);
+
+    const free = structuredClone(source);
+    free.parts[0].notes.forEach((item, index) => (item.duration *= [0.72, 0.91, 0.83, 0.67, 0.98, 0.76, 0.88, 0.7][index]));
+    expect(fromMidi(midiBuffer(toMidi(free))).source.analysis?.transforms ?? []).not.toContain('midi-notation-gate-restore');
+  });
+
   it('prevents GM percussion channel collisions rather than silently cutting notes off', () => {
     const project = createDemoProject();
     project.parts.push({ ...structuredClone(project.parts[4]), id: 'drums2', name: 'Second drums' });

@@ -1,4 +1,5 @@
 import * as ToneMidi from '@tonejs/midi';
+import { normalizeMidiNotation } from './midiNotation';
 import type { Midi as MidiType } from '@tonejs/midi';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { parseMidi, writeMidi } from 'midi-file';
@@ -424,7 +425,7 @@ export function validateProject(project: ScoreProject): string[] {
     const report = arrangement?.report;
     if (
       !options ||
-      !['satb', 'ssaa', 'ttbb'].includes(options.preset) ||
+      !['satb', 'ssaa', 'ttbb', 'solo-satb'].includes(options.preset) ||
       !['pop', 'choral', 'jazz'].includes(options.style) ||
       !['easy', 'medium', 'advanced'].includes(options.difficulty) ||
       typeof options.percussion !== 'boolean' ||
@@ -1695,7 +1696,7 @@ export function toMidi(project: ScoreProject, partIds?: string[]): Uint8Array {
   return new Uint8Array(writeMidi(raw));
 }
 
-export function fromMidi(bytes: ArrayBuffer): ScoreProject {
+export function fromMidi(bytes: ArrayBuffer, options: { restoreNotation?: boolean } = {}): ScoreProject {
   if (bytes.byteLength > 20_000_000) throw new Error('MIDI 文件超过 20 MB 的安全上限。');
   if (new TextDecoder().decode(new Uint8Array(bytes, 0, Math.min(4, bytes.byteLength))) !== 'MThd')
     throw new Error('文件不是有效的标准 MIDI。');
@@ -1757,6 +1758,7 @@ export function fromMidi(bytes: ArrayBuffer): ScoreProject {
     ...project.parts.flatMap((part) => part.notes.map((note) => note.start + note.duration)),
   );
   project.measures = Math.max(1, Math.ceil((end - EPSILON) / beatsPerBar(project)));
+  if (options.restoreNotation !== false) normalizeMidiNotation(project);
   assertValid(project);
   return project;
 }

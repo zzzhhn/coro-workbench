@@ -1101,7 +1101,7 @@ export default function App() {
               阿卡贝拉
               {arrangement ? (
                 <span className="tab-count">
-                  {arrangement.arrangement?.options.preset.toUpperCase() ?? arrangement.parts.length}
+                  {arrangement.arrangement?.options.preset.replace('solo-satb', 'Solo+SATB').toUpperCase() ?? arrangement.parts.length}
                 </span>
               ) : (
                 <span className="tab-new">生成</span>

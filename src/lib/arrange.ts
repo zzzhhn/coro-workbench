@@ -16,6 +16,7 @@ import {
   validateProject,
 } from './music';
 import { MIN_BREATH_SECONDS, planVocalBreaths, vocalPhrases } from './vocalBreathing';
+import { arrangeV2 as arrangeSoloSatb } from './arrangeV2';
 import { harmonyNoteDuration, minimumHarmonySeconds, planHarmonySlots } from './harmonyRhythm';
 
 const EPSILON = 0.00001;
@@ -32,7 +33,7 @@ interface VocalDefinition {
   clef: ScorePart['clef'];
 }
 
-const ENSEMBLES: Record<ArrangementOptions['preset'], VocalDefinition[]> = {
+const ENSEMBLES: Record<Exclude<ArrangementOptions['preset'], 'solo-satb'>, VocalDefinition[]> = {
   satb: [
     { name: 'Soprano · 主旋律', shortName: 'S.', range: [60, 81], easyRange: [60, 77], clef: 'treble' },
     { name: 'Alto · 中声部', shortName: 'A.', range: [55, 74], easyRange: [57, 72], clef: 'treble' },
@@ -446,6 +447,7 @@ function mergeSustains(notes: NoteEvent[]): NoteEvent[] {
 export function arrangeForVoices(source: ScoreProject, options: ArrangementOptions): ScoreProject {
   const errors = validateProject(source);
   if (errors.length) throw new Error(errors.join('\n'));
+  if (options.preset === 'solo-satb') return arrangeSoloSatb(source, options);
   if (
     !(options.preset in ENSEMBLES) ||
     !['pop', 'choral', 'jazz'].includes(options.style) ||
@@ -481,7 +483,7 @@ export function arrangeForVoices(source: ScoreProject, options: ArrangementOptio
   const melody = extractMelody(melodySource);
   if (melody.polyphonic)
     warnings.add('主旋律声部含复音：按最高持续音提取单旋律，并非已确认的人声旋律；请先试听。');
-  const definitions = ENSEMBLES[options.preset];
+  const definitions = ENSEMBLES[options.preset as Exclude<ArrangementOptions['preset'], 'solo-satb'>];
   const inheritedRoleSource = (originalLead as ScorePart & { roleSource?: 'manual' | 'model' }).roleSource;
   const parts: ScorePart[] = definitions.map((definition, index) => ({
     id: `voice-${index + 1}`,
@@ -762,9 +764,11 @@ export function inspectArrangement(project: ScoreProject): ArrangementReport {
       violations,
     };
   });
-  for (let index = 1; index < parts.length; index++) {
-    const upper = parts[index - 1];
-    const lower = parts[index];
+  // A solo may sit inside or below the backing texture; only adjacent backing voices must not cross.
+  const backing = parts.filter((part) => part.role !== 'lead');
+  for (let index = 1; index < backing.length; index++) {
+    const upper = backing[index - 1];
+    const lower = backing[index];
     let crossings = 0;
     for (const note of lower.notes) {
       if (note.midi === null) continue;
