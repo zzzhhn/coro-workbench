@@ -20,6 +20,7 @@ import {
   getOmrJob,
   cancelOmrJob,
   type EngineHealth,
+  type OmrEngine,
 } from '../lib/api';
 import { importScoreFile, projectFromOmr } from '../lib/import';
 import type { AnalysisJob, OmrJob, ScoreProject } from '../lib/types';
@@ -70,6 +71,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
   const [firstPage, setFirstPage] = useState(1);
   const [lastPage, setLastPage] = useState('');
   const [readText, setReadText] = useState(false);
+  const [omrEngine, setOmrEngine] = useState<OmrEngine>('auto');
   const jobKind = useRef<'audio' | 'omr'>('audio');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -81,6 +83,13 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
   const ready = (key: string) => {
     const engine = health?.engines[key];
     return typeof engine === 'boolean' ? engine : (engine?.ready ?? engine?.available ?? false);
+  };
+  const omrReady = (name: 'homr' | 'audiveris') => {
+    const engine = health?.engines.omr;
+    if (!engine || typeof engine === 'boolean') return false;
+    const engines = engine.engines as Record<string, { ready?: boolean }> | undefined;
+    // Older backends report only Audiveris without a per-engine table.
+    return engines ? Boolean(engines[name]?.ready) : name === 'audiveris' && Boolean(engine.ready);
   };
   const phonemeReady = ready('phonemeNotes') && ready('quality');
   const rosvotReady = ready('vocalNotes') && ready('quality');
@@ -213,7 +222,8 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
         ? await recognizeScore(file, {
             firstPage,
             lastPage: lastPage ? Number(lastPage) : undefined,
-            readText,
+            readText: omrEngine === 'audiveris' ? readText : false,
+            engine: omrEngine,
           })
         : await analyzeAudio(file, {
             mode,
@@ -486,8 +496,8 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
           <div className="import-note">
             <FileText size={22} />
             <p>
-              使用本机 Audiveris 识别印刷五线谱，转为可编辑、可播放的
-              MusicXML。扫描件、手写谱、模糊照片和复杂连线可能出错；结果需对照原谱校正。
+              在本机识别印刷五线谱，转为可编辑、可播放的 MusicXML。默认用 homr：扫描件与手机照片明显更稳；
+              Audiveris 可尝试读歌词，保留作对照。手写谱和复杂连线仍可能出错，结果需对照原谱校正。
             </p>
           </div>
           <div className="import-settings">
@@ -517,14 +527,33 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
               />
             </label>
           </div>
+          <div className="import-settings">
+            <label style={{ gridColumn: '1 / -1' }}>
+              识谱引擎
+              <select
+                aria-label="识谱引擎"
+                value={omrEngine}
+                onChange={(event) => setOmrEngine(event.target.value as OmrEngine)}
+                disabled={busy}
+              >
+                <option value="auto">自动：homr 优先，失败时改用 Audiveris</option>
+                <option value="homr" disabled={!omrReady('homr')}>
+                  {omrReady('homr') ? 'homr：扫描 / 照片更稳，不读歌词和和弦' : 'homr · 未安装（scripts/setup-omr-homr.sh）'}
+                </option>
+                <option value="audiveris" disabled={!omrReady('audiveris')}>
+                  {omrReady('audiveris') ? 'Audiveris：干净矢量谱，可尝试读歌词' : 'Audiveris · 未安装（scripts/setup-omr.sh）'}
+                </option>
+              </select>
+            </label>
+          </div>
           <label className="check-option">
             <input
               type="checkbox"
-              checked={readText}
+              checked={readText && omrEngine === 'audiveris'}
               onChange={(event) => setReadText(event.target.checked)}
-              disabled={busy}
+              disabled={busy || omrEngine !== 'audiveris'}
             />
-            尝试文字 / 歌词 OCR（实验）
+            尝试文字 / 歌词 OCR（实验，仅 Audiveris）
           </label>
           <p className="subtle-note">
             默认关闭文字 OCR，避免中文标题和歌词误读造成声部串接；识别后保留原谱页供核对。PDF 若超过 12
@@ -533,7 +562,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
           <div className={`engine-status ${ready('omr') ? 'ready' : ''}`}>
             <span className="status-dot" />
             {ready('omr')
-              ? 'Audiveris 本地光学识谱已就绪'
+              ? `本地光学识谱已就绪 · ${[omrReady('homr') && 'homr', omrReady('audiveris') && 'Audiveris'].filter(Boolean).join(' + ')}`
               : healthError
                 ? '本地引擎未连接，请运行 npm start。'
                 : '本地 OMR 未就绪，请运行 scripts/setup-omr.sh。'}

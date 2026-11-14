@@ -8,6 +8,39 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-14: score input — homr becomes the default OMR engine (recognition layer)
+
+One layer changed: which recognizer reads PDF/images. Raw output of every engine is kept; Audiveris stays installed and selectable.
+
+- **Pre-registered A/B.** Rules were written before any run (private `work/omr-20261114/PROTOCOL.md`).
+  - Public pages: the 31 Sheetly OMR benchmark pages (CC BY 4.0) in four conditions: clean render (~242 dpi), half-resolution (~121 dpi), simulated scan (tilt ±1.5°, blur, noise, JPEG), and the benchmark's own simulated phone photo.
+  - Metric: the benchmark's strict F1 (pitch, onset in bar and duration all right, page 1). Our run of its scorer on its published Audiveris files reproduces 88.43 / 50.43.
+  - Fixed 11-piece TEST split (`crc32(slug) % 3 == 0`), run once; any rule tuning only on the other 20.
+- **Result, strict F1 on TEST (all 31 in brackets).**
+
+  | Condition | Audiveris 5.11 (current) | homr 72fdfa8 | copisteria 1.3.4 |
+  |---|---:|---:|---:|
+  | clean | 79.3 (87.6) | **97.3 (96.7)** | 96.1 (96.0) |
+  | half resolution | 74.9 (82.3) | **97.7 (96.9)** | 96.1 (96.1) |
+  | simulated scan | 73.4 (83.8) | **97.4 (97.3)** | 95.9 (95.7) |
+  | simulated photo | 26.9 (32.5) | **97.2 (96.7)** | 73.7 (71.4) |
+  | pieces with no output (all 31) | 1 / 1 / 1 / 16 | 0 | 0 |
+
+- **Same Kong Er ruler as 2026-11-13** (bars 1–70, same pitch on the same sixteenth; all parts, lead in brackets):
+  - Audiveris: PDF .880 (.967), half-res .798, scan .723, photo 0 (rejected as "several movements").
+  - homr: PDF through Coro's real `recognize()` .901 (.995); half-res .897, scan .901, photo .897 (.955).
+  - These are still synthetic degradations of a vector export. Real phone photos, real scans, handwriting and jianpu are not measured.
+- **Shipped.** `engine` = `auto` (default: homr, falls back to Audiveris only when homr returns nothing) / `homr` / `audiveris`.
+  - homr runs as a separate AGPL process from `models/omr/homr` (`scripts/setup-omr-homr.sh`), pinned commit, SHA256-checked weights, private HOME and blocked proxies.
+  - Per-page raw MusicXML is kept in the job folder; pages are merged with homr's own page joiner. Different part counts across pages are reported, not hidden.
+  - Old requests without `engine` keep using Audiveris.
+- **Rejected / not shipped.**
+  - copisteria: weaker on photos and on Kong Er scan/photo; kept as a candidate.
+  - Measure-level fusion (take the other engine's bar when homr's bar does not fill its meter): +0.7 clean, −0.6 scan, −2.5 photo on DEV, so it never reached TEST.
+  - Cross-engine disagreement as a confidence score: on TEST, bars where homr and Audiveris agree were still wrong 2–10% of the time, so it is not a confidence. Not shown as one.
+- **Known gaps of homr.** No lyrics, chord symbols or part names (0 in every output); about 0.7 of the reference's ties; parts named Voice/Piano. Audiveris remains the choice when you want it to try lyrics.
+- Test pass and these scores are not musical acceptance. Compare against the source page before rehearsal.
+
 ## 2026-11-14: arranger v2 first listening draft
 
 Layers changed one at a time: input normalization, then arrangement.

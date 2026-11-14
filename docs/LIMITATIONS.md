@@ -122,9 +122,13 @@ reference, not a human beatbox performance.
 
 ## OMR and notation
 
-PDF and image imports use Audiveris. Printed, clear scores work better than
-handwriting, photographs or low-resolution scans. Recognition can introduce
-wrong accidentals, ties, meter, voice assignments and extra/missing notes.
+PDF and image imports use homr by default and Audiveris as a selectable or
+automatic fallback engine. On simulated scans and phone photos of printed pages
+homr held up far better than Audiveris (2026-11-14 A/B in PIPELINE.md); real
+photos, real scans, handwriting and jianpu are not yet measured. homr does not
+read lyrics, chord symbols or part names, and reads fewer ties than printed.
+Either engine can introduce wrong accidentals, ties, meter, voice assignments
+and extra/missing notes.
 
 MusicXML supports core notes, rests, ties, staves, voice assignments, lyrics,
 basic dynamics, articulations and harmony. Variable tempo/meter/key, arbitrary

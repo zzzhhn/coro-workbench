@@ -45,22 +45,63 @@ def omr_home() -> Path:
     return config.MODELS_DIR / "omr"
 
 
-def omr_health() -> dict:
+def homr_home() -> Path:
+    return omr_home() / "homr"
+
+
+ENGINES = ("auto", "homr", "audiveris")
+
+
+def audiveris_ready() -> bool:
     home = omr_home()
     app = home / "Audiveris.app" / "Contents"
-    ready = all(path.is_file() for path in (
+    return all(path.is_file() for path in (
         app / "runtime" / "Contents" / "Home" / "bin" / "java",
         app / "app" / "audiveris.jar",
         home / "tessdata" / "eng.traineddata",
         home / "verified-install.json",
     ))
+
+
+def homr_manifest() -> dict | None:
+    path = homr_home() / "verified-install.json"
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    source = homr_home() / "src"
+    if not (source / ".venv" / "bin" / "homr").is_file():
+        return None
+    if not all((source / relative).is_file() for relative in manifest.get("weights", {})):
+        return None
+    return manifest
+
+
+def resolve_engine(requested: str) -> str:
+    if requested not in ENGINES:
+        raise ValueError("未知识谱引擎。")
+    if requested == "auto":
+        return "homr" if homr_manifest() else "audiveris"
+    return requested
+
+
+def omr_health() -> dict:
     dependencies = all(importlib.util.find_spec(name) is not None for name in ("PIL", "pypdf"))
     pdf = bool(config.binary("pdftoppm"))
+    homr = homr_manifest()
+    engines = {
+        "homr": {"ready": bool(homr), "version": homr and homr.get("version"), "license": "AGPL-3.0"},
+        "audiveris": {"ready": audiveris_ready(), "version": VERSION, "license": "AGPL-3.0"},
+    }
+    ready = dependencies and pdf and any(engine["ready"] for engine in engines.values())
+    default = "homr" if homr else "audiveris"
     return {
-        "ready": ready and dependencies and pdf,
-        "version": VERSION,
-        "engine": "Audiveris",
-        "runtime": "bundled Java, local CPU",
+        "ready": ready,
+        "version": engines[default]["version"],
+        "engine": "homr" if default == "homr" else "Audiveris",
+        "defaultEngine": default,
+        "engines": engines,
+        "runtime": "separate local CPU process",
         "license": "AGPL-3.0",
         "formats": sorted(extension[1:] for extension in SUPPORTED_EXTENSIONS),
         "maxPages": MAX_PAGES,
@@ -301,7 +342,7 @@ def read_musicxml(path: Path) -> str:
     return xml
 
 
-def summarize_musicxml(xml: str, pages: int, logs: str, read_text: bool) -> tuple[dict, list[str]]:
+def summarize_musicxml(xml: str, pages: int, logs: str, read_text: bool, engine: str = "audiveris") -> tuple[dict, list[str]]:
     root = ET.fromstring(xml)
     pitched = len(root.findall(".//note/pitch"))
     percussion = len(root.findall(".//note/unpitched"))
@@ -310,7 +351,9 @@ def summarize_musicxml(xml: str, pages: int, logs: str, read_text: bool) -> tupl
         "此结果来自本地光学识谱，可能误读音高、时值、连线、调号与声部。请逐页对照原谱校对后再排练。",
         "图片只提供印刷记号；识谱模型没有提供校准准确率，不能把成功导入当成识别无误。",
     ]
-    if not read_text:
+    if engine == "homr":
+        notices.append("homr 不读取歌词、和弦符号和声部名称文字；这些需要手动补填。")
+    elif not read_text:
         notices.append("为避免文字误识别造成声部串接，默认不启用歌词/标题 OCR；声部名称和歌词可能需要手动填写。")
     else:
         notices.append("文字 OCR 为实验选项，复杂歌词和中文标题可能错读；错误的声部文字也可能影响跨系统合并。")
@@ -371,15 +414,89 @@ def _recognition_attempt(directory: Path, input_path: Path, output: Path, log_pa
     return code, logs
 
 
-def recognize(directory: Path, request: dict) -> None:
-    status = OmrStatus(directory)
-    started = time.monotonic()
-    if not omr_health()["ready"]:
-        raise ValueError("本地光学识谱引擎未就绪，请运行 scripts/setup-omr.sh。")
-    pages, total_pages, notices = prepare_pages(directory, request, status)
+HOMR_MERGE = """
+import sys
+import xml.etree.ElementTree as ET
+from homr.relieur import process_concat
+merged, _, _ = process_concat(sys.argv[2:])
+ET.ElementTree(merged).write(sys.argv[1], encoding="UTF-8", xml_declaration=True)
+"""
+
+
+def _homr_env(local_home: Path) -> dict:
+    # Same isolation as Audiveris: private HOME, unreachable proxies, so the
+    # recognizer cannot fetch models or send page images anywhere at runtime.
+    blocked = "http://127.0.0.1:9"
+    return dict(os.environ, HOME=str(local_home), HTTP_PROXY=blocked, HTTPS_PROXY=blocked, http_proxy=blocked, https_proxy=blocked, NO_PROXY="", OMP_NUM_THREADS="4", PYTHONUNBUFFERED="1")
+
+
+def _run_logged(command: list[str], cwd: Path, env: dict, log_path: Path, deadline: float, status: OmrStatus, on_log=None) -> int:
+    with log_path.open("ab") as log:
+        process = subprocess.Popen(command, cwd=cwd, env=env, stdout=log, stderr=log)
+        while process.poll() is None:
+            try:
+                status.check_cancelled()
+                if time.monotonic() > deadline:
+                    raise ValueError("光学识谱超时，请缩小页数或裁剪谱页后重试。")
+                if on_log:
+                    on_log(log_path.read_text(encoding="utf-8", errors="replace")[-25000:])
+                time.sleep(0.3)
+            except BaseException:
+                process.kill()
+                process.wait(timeout=10)
+                raise
+        return process.returncode
+
+
+def _homr_attempt(directory: Path, pages: list[Path], status: OmrStatus) -> tuple[Path | None, list[str], dict]:
+    """Run homr once over the normalized pages; keep every page's raw MusicXML."""
+    source = homr_home() / "src"
+    work = directory / "recognized-homr"
+    work.mkdir(exist_ok=True)
+    local_home = directory / "runtime-home"
+    local_home.mkdir(exist_ok=True)
+    inputs = []
+    for page in pages:
+        target = work / page.name
+        target.write_bytes(page.read_bytes())
+        inputs.append(target)
+    log_path = directory / "omr-homr.log"
+    deadline = time.monotonic() + 120 + len(pages) * 90
+    count = len(pages)
+
+    def progress(text: str) -> None:
+        done = len(re.findall(r"(?m)^Finished ", text))
+        status.update(min(85, 18 + int(done / count * 62)), "recognizing", f"识别谱表、音符与节奏（第 {min(done + 1, count)}/{count} 页）。", pages=count)
+
+    # A directory run loads the models once and writes one MusicXML per page;
+    # pages are merged afterwards so the per-page raw output stays inspectable.
+    code = _run_logged([str(source / ".venv" / "bin" / "homr"), "--no-title", str(work)], source, _homr_env(local_home), log_path, deadline, status, progress)
+    page_xml = [work / (page.stem + ".musicxml") for page in inputs]
+    missing = [index + 1 for index, path in enumerate(page_xml) if not path.is_file()]
+    stats = {"engineExit": code, "pagesMissing": missing}
+    if missing:
+        return None, [], stats
+    notices = []
+    counts = []
+    for path in page_xml:
+        root = ET.fromstring(path.read_bytes())
+        counts.append(len(root.findall("part")))
+    stats["partsPerPage"] = counts
+    if len(set(counts)) > 1:
+        # homr's page merge pairs parts by order; different counts would drop or
+        # misplace music, so name the pages instead of merging silently.
+        detail = "、".join(f"第 {index + 1} 页 {value} 个" for index, value in enumerate(counts))
+        notices.append(f"各页识别出的声部数不一致（{detail}）。跨页合并按声部顺序对应，多出或缺少的声部可能错位或丢失；请逐页核对，必要时分页导入。")
+    if len(page_xml) == 1:
+        return page_xml[0], notices, stats
+    merged = work / "merged.musicxml"
+    status.update(86, "merging", "按页顺序连接各页小节与声部。", pages=count)
+    _run_logged([str(source / ".venv" / "bin" / "python"), "-c", HOMR_MERGE, str(merged), *map(str, page_xml)], source, _homr_env(local_home), log_path, time.monotonic() + 120, status)
+    return (merged if merged.is_file() else None), notices, stats
+
+
+def _audiveris_attempt(directory: Path, pages: list[Path], read_text: bool, status: OmrStatus, notices: list[str]) -> tuple[Path, str, int, list]:
     output = directory / "recognized"
-    read_text = bool(request.get("read_text", False))
-    status.update(15, "recognizing", f"正在本机识别 {len(pages)} 页五线谱：谱线、音符、节奏和声部。", pages=len(pages))
     code, logs = _recognition_attempt(directory, directory / "score.tiff", output, directory / "omr.log", len(pages), read_text, status)
     rejected_pages = low_interline_pages(logs, len(pages))
     resampling = []
@@ -401,8 +518,44 @@ def recognize(directory: Path, request: dict) -> None:
         raise ValueError("未能识别出完整可播放乐谱。请提供清晰、平整、未裁断谱线的印刷谱；手写谱暂不保证识别。")
     if len(outputs) != 1:
         raise ValueError("识谱结果包含多个独立乐章，请分页面或逐乐章导入，避免错误拼接。")
-    xml = read_musicxml(outputs[0])
-    stats, recognition_notices = summarize_musicxml(xml, len(pages), logs, read_text)
+    return outputs[0], logs, code, resampling
+
+
+def recognize(directory: Path, request: dict) -> None:
+    status = OmrStatus(directory)
+    started = time.monotonic()
+    if not omr_health()["ready"]:
+        raise ValueError("本地光学识谱引擎未就绪，请运行 scripts/setup-omr-homr.sh 或 scripts/setup-omr.sh。")
+    requested = request.get("engine", "audiveris")
+    engine = resolve_engine(requested)
+    if engine == "homr" and not homr_manifest():
+        raise ValueError("homr 识谱引擎未安装，请运行 scripts/setup-omr-homr.sh，或改选 Audiveris。")
+    if engine == "audiveris" and not audiveris_ready():
+        raise ValueError("Audiveris 未安装，请运行 scripts/setup-omr.sh，或改选 homr。")
+    pages, total_pages, notices = prepare_pages(directory, request, status)
+    read_text = bool(request.get("read_text", False))
+    status.update(15, "recognizing", f"正在本机识别 {len(pages)} 页五线谱：谱线、音符、节奏和声部。", pages=len(pages))
+    resampling, logs, code, engine_stats = [], "", 0, {}
+    result_path = None
+    if engine == "homr":
+        result_path, homr_notices, engine_stats = _homr_attempt(directory, pages, status)
+        logs = (directory / "omr-homr.log").read_text(encoding="utf-8", errors="replace") if (directory / "omr-homr.log").exists() else ""
+        code = engine_stats.get("engineExit", 0)
+        if result_path is None and requested == "auto" and audiveris_ready():
+            # Only the automatic choice may fall back; both attempts stay on disk.
+            missing = engine_stats.get("pagesMissing") or []
+            notices.append(f"homr 未能完成{'第 ' + '、'.join(map(str, missing)) + ' 页' if missing else '合并'}，已改用 Audiveris 重新识别整份谱；两次原始输出均保留在本机。")
+            engine = "audiveris"
+        elif result_path is None:
+            raise ValueError("homr 未能识别出完整可播放乐谱。请提供清晰、平整、未裁断谱线的印刷谱，或改选 Audiveris。")
+        else:
+            notices.extend(homr_notices)
+    if engine == "audiveris":
+        result_path, logs, code, resampling = _audiveris_attempt(directory, pages, read_text, status, notices)
+    xml = read_musicxml(result_path)
+    stats, recognition_notices = summarize_musicxml(xml, len(pages), logs, read_text, engine)
+    if engine == "homr" and engine_stats.get("partsPerPage"):
+        stats["partsPerPage"] = "/".join(map(str, engine_stats["partsPerPage"]))
     notices.extend(recognition_notices)
     if code != 0:
         notices.append("引擎部分处理步骤报错，但生成了可解析音符；当前结果为部分识别，请重点检查缺失页面和声部。")
@@ -410,7 +563,8 @@ def recognize(directory: Path, request: dict) -> None:
         raise ValueError("未识别到可播放音符。")
     status.check_cancelled()
     (directory / "recognized.musicxml").write_text(xml, encoding="utf-8")
-    source = {"filename": request["filename"], "engine": f"Audiveris {VERSION} local CPU OMR", "sha256": hashlib.sha256((directory / request["input"]).read_bytes()).hexdigest(), "readText": read_text, "originalPages": total_pages}
+    label = f"homr {homr_manifest()['version']} local CPU OMR" if engine == "homr" else f"Audiveris {VERSION} local CPU OMR"
+    source = {"filename": request["filename"], "engine": label, "engineId": engine, "requestedEngine": requested, "sha256": hashlib.sha256((directory / request["input"]).read_bytes()).hexdigest(), "readText": read_text, "originalPages": total_pages}
     if resampling:
         source["resampling"] = resampling
     result = status.read()
@@ -529,15 +683,20 @@ def create_omr_router(data_dir: Path | None = None) -> APIRouter:
         return path
 
     @router.post("", status_code=202)
-    async def upload(file: UploadFile = File(...), first_page: int = Form(1), last_page: int | None = Form(None), read_text: bool = Form(False)):
+    async def upload(file: UploadFile = File(...), first_page: int = Form(1), last_page: int | None = Form(None), read_text: bool = Form(False), engine: str = Form("auto")):
+        if engine not in ENGINES:
+            raise HTTPException(422, "未知识谱引擎。")
         if first_page < 1 or first_page > MAX_INPUT_PAGES or last_page is not None and (last_page < first_page or last_page > MAX_INPUT_PAGES or last_page - first_page + 1 > MAX_PAGES):
             raise HTTPException(422, "页码范围无效；每次最多识别 12 页。")
         name = Path((file.filename or "score").replace("\\", "/")).name[:240]
         suffix = Path(name).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
             raise HTTPException(415, "请选择 PDF、PNG、JPEG、TIFF、WebP 或 BMP 乐谱。")
-        if not omr_health()["ready"]:
-            raise HTTPException(503, "本地光学识谱未安装，请运行 scripts/setup-omr.sh。")
+        health = omr_health()
+        if not health["ready"]:
+            raise HTTPException(503, "本地光学识谱未安装，请运行 scripts/setup-omr-homr.sh 或 scripts/setup-omr.sh。")
+        if engine != "auto" and not health["engines"][engine]["ready"]:
+            raise HTTPException(503, f"所选识谱引擎 {engine} 未安装。")
         if not manager.reserve():
             raise HTTPException(429, "本机识谱队列已满，请等待或取消已有识谱任务。")
         job_id = uuid.uuid4().hex
@@ -559,7 +718,7 @@ def create_omr_router(data_dir: Path | None = None) -> APIRouter:
                     handle.write(chunk)
             if size < 32:
                 raise HTTPException(422, "谱页文件为空或过短。")
-            request = {"id": job_id, "filename": name, "input": source.name, "first_page": first_page, "last_page": last_page, "read_text": read_text}
+            request = {"id": job_id, "filename": name, "input": source.name, "first_page": first_page, "last_page": last_page, "read_text": read_text, "engine": engine}
             result = {"id": job_id, "status": "queued", "progress": 0, "stage": "queued", "message": "等待本地光学识谱。", "createdAt": utc_now(), "updatedAt": utc_now()}
             atomic_json(path / "request.json", request)
             atomic_json(path / "status.json", result)

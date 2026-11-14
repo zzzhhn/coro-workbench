@@ -37,3 +37,19 @@ test('multi upload transmits GAME selection and optional timed lyrics unchanged'
     vi.unstubAllGlobals();
   }
 });
+
+test('score recognition sends the chosen OMR engine, defaulting to auto', async () => {
+  const { recognizeScore } = await import('../src/lib/api');
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({ id: 'omr-job', status: 'queued' })));
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    await recognizeScore(new File(['%PDF-1.4'], 'score.pdf'), { firstPage: 1, readText: false });
+    await recognizeScore(new File(['%PDF-1.4'], 'score.pdf'), { firstPage: 2, lastPage: 3, readText: true, engine: 'audiveris' });
+    const bodies = fetcher.mock.calls.map((call) => (call as unknown as [string, RequestInit])[1].body as FormData);
+    expect(bodies[0].get('engine')).toBe('auto');
+    expect(bodies[1].get('engine')).toBe('audiveris');
+    expect(bodies[1].get('read_text')).toBe('true');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
