@@ -8,8 +8,10 @@ Each folder has:
 - `page-001.png` — the page image homr read (pixel coordinates in `review.json` refer to it).
 - `homr.musicxml` — homr's MusicXML for that page (homr 72fdfa8), with the server's stable
   note ids `id="omr-{page}-{k}"` added in document order. Notes are otherwise as recognized.
-- `review.json` — the review data: page size, staff boxes, measure boxes (edges marked
-  `barline` when a full-height ink column was found near the estimate, else `estimated`),
+- `staves.txt` — homr's `--write-staff-positions` output for that page (input to the generator).
+- `review.json` — the review data, as `server/omr_review.py` produces it: page size, staff boxes, measure boxes (an edge is `barline` when an ink column crosses the staff lines of most
+  staves of the system near the estimate, else `estimated`; the first and last edge of each
+  system are always `estimated`),
   approximate note anchors (homr's attention centres, not glyph boxes) and review issues.
   No confidence scores.
 
