@@ -8,6 +8,41 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-15: cross-phrase background continuity (personal-computer candidate)
+
+One rhythm/participation layer, after the earlier phrase candidate. The default
+Solo+SATB generator remains unchanged until Bobby reviews the audition.
+
+```mermaid
+flowchart LR
+  INPUT[Same reviewed source and Solo] --> PLAN[Same section and harmony plan]
+  PLAN -.-> TASK[Candidate: cross-phrase background tasks]
+  TASK -.-> MOTIF[Input-derived motif memory and independent rhythm clock]
+  MOTIF -.-> ENTRY[Entrances, responses, long-gap exits]
+  ENTRY -.-> REALIZE[Existing pitch and syllable realizer]
+  REALIZE -.-> REVIEW[Score inspection and loudness-matched comparison]
+  REVIEW -.-> HUMAN[Bobby listening acceptance]
+```
+
+- `planBackgroundContinuity` builds a complete-song timeline before section
+  rendering. Short Solo breaths do not restart motifs; long silence or a changed
+  motion policy begins another episode. Identical rhythm motifs can recur.
+- Motifs come from the input melody, never a reference-score template or song
+  name. Upper-voice tasks use register clearance; support can enter after the
+  first phrase, and responses occupy actual Solo gaps. Bass retains its own
+  harmonic landmarks. This is a deterministic candidate, not a trained model.
+- Generated backgrounds use a half-beat clock. A sixteenth Solo pickup must not
+  permanently offset a repeated background and cause short chord-edge pieces.
+  Solo itself is not quantized or edited by this layer.
+- Frozen comparison: old v2, previous phrase candidate, new continuity candidate;
+  same input, Solo, Solo+SATB, harmony, plan, pitch allocator, syllable mapping,
+  tempo, sample renderer and part mix. Private files stay outside Git.
+- Limits: the existing section plan still uses heuristic eight-bar blocks;
+  chord-boundary articulation, independent pitch-line development and phonetic
+  rendering are not redesigned here. Static constraints are not musical approval.
+  All nine newly studied references are development material, not blind holdouts.
+
+
 ## 2026-11-15: OMR text layer v8 — chord fix on D3, third confirmation test C3 (still off by default)
 
 Text layer only; notes still never edited. v8 (`5152bdf`) was developed on a new dev set D3 and frozen by file hash; C3 is fresh public data with the C2 gates unchanged, written before any C3 item was opened, run once. C2 was not used for tuning.
