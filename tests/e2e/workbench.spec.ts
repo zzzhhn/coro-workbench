@@ -72,6 +72,7 @@ test('rehearsal scope and quick loops do not change score content', async ({ pag
   await page.getByRole('button', { name: '排练室', exact: true }).click();
   await page.getByRole('button', { name: '练习 长笛 · 主旋律', exact: true }).click();
   await page.getByRole('button', { name: '循环第 5 至 8 小节', exact: true }).click();
+  await page.getByRole('button', { name: /^播放设置/ }).click();
   await expect(page.getByLabel('循环开始小节', { exact: true })).toHaveValue('5');
   await expect(page.getByLabel('循环结束小节', { exact: true })).toHaveValue('8');
   await expect(page.getByRole('button', { name: '小节循环', exact: true })).toHaveAttribute(
@@ -79,6 +80,7 @@ test('rehearsal scope and quick loops do not change score content', async ({ pag
     'true',
   );
   await expect(page.getByRole('button', { name: '音符', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '关闭播放设置', exact: true }).click();
   await page.getByTestId('score-note').first().locator('path').first().click();
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Delete');
@@ -118,11 +120,36 @@ test('clicking Pause after editing a loop field commits the range without restar
   await page.getByRole('button', { name: '循环第 5 至 8 小节', exact: true }).click();
   await page.getByRole('button', { name: '播放', exact: true }).click();
   await expect(page.getByRole('button', { name: '暂停', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: /^播放设置/ }).click();
   await page.getByLabel('循环开始小节', { exact: true }).fill('6');
   await page.getByRole('button', { name: '暂停', exact: true }).click();
   await expect(page.getByLabel('循环开始小节', { exact: true })).toHaveValue('6');
   await expect(page.getByRole('button', { name: '播放', exact: true })).toBeVisible();
   await expect(page.locator('.meter-bars .lit')).toHaveCount(0);
+});
+
+test('playback settings disclose controls and retain active state after Escape', async ({ page }) => {
+  await page.goto('/');
+  const trigger = page.getByRole('button', { name: /^播放设置/ });
+  const loop = page.getByRole('button', { name: '小节循环', exact: true });
+  await expect(loop).not.toBeVisible();
+  await trigger.press('Space');
+  await expect(loop).toBeVisible();
+  await loop.click();
+  await page.getByRole('button', { name: '节拍器', exact: true }).click();
+  await page.getByLabel('预备拍', { exact: true }).check();
+  await page.getByLabel('循环结束小节', { exact: true }).fill('8');
+  await page.getByLabel('循环结束小节', { exact: true }).press('Tab');
+  await page.keyboard.press('Escape');
+  await expect(loop).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAccessibleName('播放设置，循环第 1 至 8 小节，节拍器已开，预备拍已开');
+  await expect(page.getByRole('button', { name: '播放', exact: true })).toBeVisible();
+  await trigger.click();
+  await expect(loop).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('循环结束小节', { exact: true })).toHaveValue('8');
+  await page.getByRole('heading', { name: 'Blue Hour', exact: true }).click();
+  await expect(loop).not.toBeVisible();
 });
 
 test('switching a mobile rehearsal part keeps the current measure in view', async ({ page }) => {
