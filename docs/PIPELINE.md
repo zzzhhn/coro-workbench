@@ -8,6 +8,57 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: rebuild from the partially accepted joint-voicing implementation
+
+Bobby rejected the subsequent anchor/structural-voicing experiments (#52/#53).
+This branch starts at `15e1a5b`, not those experiments. Replaying the original
+joint-voicing implementation against the saved input reproduces its parts exactly.
+The accepted bars 21 to 28 are frozen in the private audition; this is preservation,
+not evidence that the new algorithm passes that region. Only 13 to 20 and 45 to 52
+are regenerated. Solo and ensemble remain identical.
+
+```mermaid
+flowchart LR
+  INPUT[Reliable accompaniment score] -.-> SOURCE[Shared sounding notes and actual low-register arrivals]
+  SOURCE -.-> CONTEXT[Explicit pitch palettes and bass with source note IDs]
+  CONTEXT -.-> FOUNDATION[Background foundation and phrase tasks]
+  SOLO[Unchanged Solo] -.-> DIALOGUE[Accepted conversation and motif mechanism]
+  FOUNDATION -.-> DIALOGUE
+  CONTEXT -.-> DIALOGUE
+  DIALOGUE -.-> JOINT[Accepted joint SATB beam search]
+  CONTEXT -.-> JOINT
+  JOINT -.-> REVIEW[New rewritten excerpts: score, piano mix and stems]
+  FROZEN[Approved excerpt and rejected candidates preserved] -.-> REVIEW
+  REVIEW -.-> HUMAN[Bobby listening; no default rollout yet]
+```
+
+`sourceHarmony.ts` reduces a voiced accompaniment, without completing guessed
+chord names with unheard thirds. Rolled arrivals and held common tones contribute;
+Solo ornaments do not. `sourceArrangement.ts` supplies the same context to the
+foundation, dialogue planner and joint realization. Previously, an override could
+reach pitch selection while foundation planning still read old project chords.
+All rewritten excerpts use the accepted conversation path; section labels no longer
+raise the background register through `lift`. The joint voicer's default path and
+weights remain unchanged. With explicit source palettes it skips guessed-scale
+passing tones and root-relative third/seventh completion.
+
+This is an opt-in experimental composition path. It changes background pitches and
+rhythms; it is not a pitch-only A/B. The half-beat arrival grid, chordal-part selection,
+low-register heuristic and two-bar maximum context are limitations, not general
+musical truth. Unvoiced regions can remain evidence gaps. The implementation is
+oriented to reliable block/rolled accompaniment; it does not replace audio inference.
+No reference arrangement, song title or bar-specific pitch rule enters generation.
+
+Private review: `tests/private-rebuild-review.html` on the existing 5174 server.
+A is the version containing the approved passage, B the rejected anchor experiment,
+C the rebuild. C's protected passage reuses A's score notes and audio exactly.
+Ten newly rendered piano clips (mix plus SATB for each rewritten excerpt) use static
+gain to -23 LUFS, measured within 0.02 LU. Solo timbre, tempo and mix settings stay
+fixed. Stem normalization is independent and does not represent mix balance.
+All 16 rewritten bars were visually inspected in-browser; 25 relevant tests and
+TypeScript pass. No direct listening acceptance is claimed. Private input, rendered
+scores, clips, feedback, provenance and scripts remain local, never in Git.
+
 ## 2026-11-16: listening feedback and selectable background audition timbre
 
 Bobby gave positive listening feedback on joint-voicing bars 21 to 28, but rejected

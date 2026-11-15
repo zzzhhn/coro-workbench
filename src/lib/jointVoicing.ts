@@ -1,5 +1,6 @@
 import type { ChordEvent, NoteEvent, ScoreProject } from './types';
 import { beatsPerBar, validateProject } from './music';
+import type { SourceHarmony } from './sourceHarmony';
 
 const IDS = ['voice-s', 'voice-a', 'voice-t', 'voice-b'];
 const RANGES = [[62, 76], [55, 69], [48, 64], [40, 55]];
@@ -20,13 +21,15 @@ function bassClass(chord: ChordEvent) {
  * harmonic hypotheses and rhythmic gestures remain separate from realization.
  * Notes may change pitch at an actual chord boundary; unchanged common tones
  * are rejoined to avoid manufacturing repeated syllables. No song-specific rules. */
-export function realizeJointVoicing(source: ScoreProject, span: { first: number; last: number }) {
+export function realizeJointVoicing(source: ScoreProject, span: { first: number; last: number }, sourceHarmony?: SourceHarmony[]) {
   const bar = beatsPerBar(source), start = (span.first - 1) * bar, end = span.last * bar;
   if (!(start >= 0 && end > start && end <= source.measures * bar)) throw Error('Invalid voicing span');
   const parts = IDS.map(id => source.parts.find(p => p.id === id));
   if (parts.some(p => !p) || !source.parts.some(p => p.id === 'solo')) throw Error('Joint audition requires Solo + SATB');
   const lead = source.parts.find(p => p.id === 'solo')!.notes.filter(n => n.midi !== null && overlaps(start, end, n.start, n.start + n.duration));
-  const chords = source.chords.filter(c => c.pitches.length && overlaps(start, end, c.start, c.start + c.duration));
+  const harmony = sourceHarmony?.filter(c => overlaps(start, end, c.start, c.start + c.duration));
+  const chords = (harmony ? harmony.map(c => ({ start: c.start, duration: c.duration, symbol: '', pitches: [c.bass, ...c.pitches.filter(p => p !== c.bass)] })) : source.chords)
+    .filter(c => c.pitches.length && overlaps(start, end, c.start, c.start + c.duration));
   const chordAt = (t: number) => chords.find(c => c.start <= t + EPS && c.start + c.duration > t + EPS);
   // An evidence gap is not a new chord: do not reset a held singer to its old
   // target just because the upstream harmonic annotation ended.
@@ -60,7 +63,7 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
       const weak = n.note.start % 1 !== 0 || (v === 3 && Math.abs(n.note.start % bar - (bar - 1)) < EPS);
       const minor = /^[A-G][b#]?m(?!aj)/.test(chord.symbol);
       const scale = (minor ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11]).map(n => pc(n + chord.pitches[0]));
-      const passing = n.note.duration <= (v === 3 ? 1 : 0.5) && weak && before?.midi != null && after?.midi != null
+      const passing = !harmony && n.note.duration <= (v === 3 ? 1 : 0.5) && weak && before?.midi != null && after?.midi != null
         && Math.abs(n.note.midi! - before.midi) <= 2 && Math.abs(after.midi - n.note.midi!) <= 2
         && chordPcs.has(pc(after.midi)) && scale.includes(pc(n.note.midi!));
       let pitches = Array.from({ length: RANGES[v][1] - RANGES[v][0] + 1 }, (_, k) => k + RANGES[v][0])
@@ -126,8 +129,10 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
           // four singers, prioritize third/seventh before optional color tones.
           const root = pc(chord.pitches[0]), third = chord.pitches.map(pc).find(p => [3, 4, 5].includes(pc(p - root)));
           const seventh = chord.pitches.map(pc).find(p => [10, 11].includes(pc(p - root)));
-          if (third !== undefined && !pcs.has(third)) vertical += solo.length ? 5 : 11;
-          if (seventh !== undefined && !pcs.has(seventh)) vertical += solo.length ? 0.5 : 2;
+          // A voiced source need not contain the named root's third or seventh.
+          // Its actual palette constrains pitches; do not complete a chord name.
+          if (!harmony && third !== undefined && !pcs.has(third)) vertical += solo.length ? 5 : 11;
+          if (!harmony && seventh !== undefined && !pcs.has(seventh)) vertical += solo.length ? 0.5 : 2;
           // Doubling a root/fifth is legitimate. Demanding four different pitch
           // classes at every instant flattens melodic gestures into chord filling.
           vertical += Math.max(0, Math.min(3, active.length, chordPcs.size) - pcs.size) * (solo.length ? 2 : 4);
