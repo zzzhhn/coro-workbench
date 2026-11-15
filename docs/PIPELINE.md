@@ -8,7 +8,48 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
-## 2026-11-15: cross-phrase background continuity (personal-computer candidate)
+## 2026-11-15: bounded ensemble sketches after continuity rejection
+
+Bobby rejected the continuity candidate: some singers had no meaningful contribution
+for long stretches. Its Alto had only 12 notes. Tests and the earlier score inspection
+did not establish musical acceptance. Do not promote that candidate as an accepted baseline.
+
+`ensembleSketch.ts` is an audition-only, bounded rewrite of an existing Solo+SATB
+project. Three explicit musical intentions (flow, conversation, lift) guide group
+gestures from harmonic arrivals and Solo phrase evidence. A joint voicing search
+considers horizontal movement, spacing, pitch-class coverage and Solo collisions.
+Common tones can continue; phrase-end gaps can release the group. There is no
+per-singer attendance quota, song-name dispatch or reference-note input.
+
+```mermaid
+flowchart LR
+  INPUT[Fixed Solo + SATB, harmony and mix] -.-> INTENT[Human-selected short-span intention]
+  INTENT -.-> GROUP[Harmonic arrivals and phrase-based group gestures]
+  GROUP -.-> VOICE[Joint voicing and horizontal line search]
+  VOICE -.-> SCORE[Score inspection and revision]
+  SCORE -.-> AUDIO[Matched full mixes and individual background auditions]
+  AUDIO -.-> BOBBY[Bobby judges musical benefit before expansion]
+```
+
+The experiment retains old v2 and rejected continuity output. It changes background
+pitches, rhythms and syllable allocation together as a musical-sketch layer; this is
+not a rhythm-only ablation. Solo, ensemble, source harmony, tempo, samples and part
+mix stay fixed. Only three eight-bar spans are newly arranged. Other bars in the
+private project remain the rejected candidate, not a new complete arrangement.
+
+Five synthetic tests and TypeScript checking passed. The 24 excerpt bars were
+visually inspected in the actual review page; the first draft's missing cadence
+breaths were revised and rerendered. The private audition has 45 selections:
+43 non-silent clips at -23 LUFS within 0.03 LU and two explicitly marked silent old
+stems. Same renderer as earlier comparisons; normalization applies static gain
+after that shared rendering chain. Individual stems are normalized for diagnosis,
+not to represent their level inside the mix. No direct hearing acceptance is claimed.
+
+Limitations: high-level intentions are manually selected, source harmony is inherited
+and unverified, flow remains simple, phonetic playback uses choir samples, and
+motivic development is still rudimentary. The production generator is unchanged.
+
+## 2026-11-15: cross-phrase background continuity (personal-computer candidate, subsequently rejected)
 
 One rhythm/participation layer, after the earlier phrase candidate. The default
 Solo+SATB generator remains unchanged until Bobby reviews the audition.
