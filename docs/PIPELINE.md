@@ -8,6 +8,49 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: isolated joint-voicing audition
+
+The next controlled layer realizes the four background voices together, using the
+previous harmonic hypotheses and rhythmic gestures. `jointVoicing.ts` performs a
+bounded beam search over simultaneous sounding notes, with whole-duration costs for
+spacing, close dissonance, missing chord identity and Solo collision. Bass arrivals
+follow the supplied root or slash bass; short prepared/resolved connections remain
+possible. Existing contours and smooth transitions are soft preferences.
+
+```mermaid
+flowchart LR
+  OLD[Previous harmonic candidate and background gestures] -.-> JOINT[Joint SATB search over sounding intervals]
+  SOLO[Fixed Solo and Solo silence] -.-> JOINT
+  JOINT -.-> HOLD[Retune at new chord starts only; rejoin unchanged common tones]
+  HOLD -.-> REVIEW[Three unchanged excerpt ranges; previous versions retained]
+  REVIEW -.-> MEDIA[Score inspection plus matched mix and S A T B audio]
+  MEDIA -.-> HUMAN[Bobby listens for benefit and regression]
+```
+
+Solo, ensemble, chord hypotheses, tempo, samples, mix settings and sounding coverage
+remain unchanged. Background pitches may change; a held note may turn at a new chord
+start, but an annotation ending without a new chord is not permission to reset its
+pitch. Common-tone pieces are rejoined. No song, bar or reference-score exceptions
+are embedded in the solver. Only bars 13 to 20, 21 to 28 and 45 to 52 are auditioned.
+
+The reported bars 27/28 illustrate the defect: the previous bass held D through an
+Am9 segment, while an upper neighbor introduced Bb. The candidate moves the bass to
+A at the supplied Am9 boundary and removes the unsupported chromatic neighbor.
+This is a structural diagnosis, not proof that the inherited harmony or arrangement
+is musically correct. Bars 21/22 have five changed background events and require an
+explicit regression listen; they are not hard-coded or claimed preserved in quality.
+
+Private review: `tests/private-joint-review.html` on port 5174. It retains the earlier
+dialogue and previous harmonic versions, offers mixes and each background voice,
+and displays source-score images. Fifteen new clips and thirty unchanged old clips
+measure -23 LUFS within 0.03 LU. Stem normalization is independent and does not
+represent full-mix balance. The 24 candidate bars were visually inspected; 76 related
+tests and TypeScript checking passed. Listening acceptance remains Bobby's task.
+
+This is an isolated heuristic candidate, not the production default. Harmony remains
+unverified; original rhythmic gestures and sample articulation still limit quality.
+Nine previously read reference arrangements remain development material, not holdout.
+
 ## 2026-11-15: isolated harmonic-evidence audition
 
 Bobby reported that the dialogue candidate was pleasant around bars 21 and 22 but
