@@ -15,6 +15,7 @@ const NATURAL = [0, 2, 4, 5, 7, 9, 11];
 /** Diatonic index (C0 = 0, D0 = 1 ...) of the top staff line for each clef. */
 const TOP_LINE: Record<Clef, number> = {
   treble: 5 * 7 + 3, // F5
+  treble8: 4 * 7 + 3, // written F5 sounds F4
   bass: 3 * 7 + 5, // A3
   alto: 4 * 7 + 4, // G4
   percussion: 5 * 7 + 3, // drawn like treble

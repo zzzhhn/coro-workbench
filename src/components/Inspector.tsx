@@ -437,6 +437,7 @@ export default function Inspector({
                     onChange={(event) => onChangePart({ clef: event.target.value as ScorePart['clef'] })}
                   >
                     <option value="treble">高音谱号</option>
+                    <option value="treble8">男高音谱号（高音下八度）</option>
                     <option value="bass">低音谱号</option>
                     <option value="alto">中音谱号</option>
                     <option value="percussion">打击乐谱号</option>

@@ -1,5 +1,5 @@
 export type PartRole = 'lead' | 'harmony' | 'bass' | 'percussion' | 'instrument';
-export type Clef = 'treble' | 'bass' | 'alto' | 'percussion';
+export type Clef = 'treble' | 'treble8' | 'bass' | 'alto' | 'percussion';
 export type NoteOrigin = 'transcribed' | 'arranged' | 'manual' | 'demo';
 
 export interface NoteEvent {

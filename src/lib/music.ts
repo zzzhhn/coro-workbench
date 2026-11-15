@@ -244,7 +244,7 @@ export function validateProject(project: ScoreProject): string[] {
       problems.push(`${part.name}: GM 音色编号无效。`);
     if (!Number.isFinite(part.volume) || part.volume < 0 || part.volume > 1)
       problems.push(`${part.name}: 音量无效。`);
-    if (!['treble', 'bass', 'alto', 'percussion'].includes(part.clef))
+    if (!['treble', 'treble8', 'bass', 'alto', 'percussion'].includes(part.clef))
       problems.push(`${part.name}: 谱号无效。`);
     if (
       part.staves !== undefined &&
@@ -257,7 +257,7 @@ export function validateProject(project: ScoreProject): string[] {
             !Number.isInteger(staff.number) ||
             staff.number < 1 ||
             staff.number > 16 ||
-            !['treble', 'bass', 'alto', 'percussion'].includes(staff.clef),
+            !['treble', 'treble8', 'bass', 'alto', 'percussion'].includes(staff.clef),
         ) ||
         new Set(part.staves.map((staff) => staff.number)).size !== part.staves.length)
     )
@@ -755,14 +755,14 @@ export function toAbc(
   });
   voices.forEach(({ clef, name, shortName, lanes }) =>
     lanes.forEach((voice, index) => {
-      abc += `V:${voice.id} clef=${clef === 'percussion' ? 'perc' : clef}${voice.stem ? ` stems=${voice.stem}` : ''}${index === 0 ? ` name="${abcText(name)}" snm="${abcText(shortName)}"` : ''}\n`;
+      abc += `V:${voice.id} clef=${clef === 'percussion' ? 'perc' : clef === 'treble8' ? 'treble-8 transpose=-12' : clef}${voice.stem ? ` stems=${voice.stem}` : ''}${index === 0 ? ` name="${abcText(name)}" snm="${abcText(shortName)}"` : ''}\n`;
     }),
   );
   // Timed invisible spacers carry harmony independently: a mid-note chord
   // label must not split the singer's note into artificial tied fragments.
   if (harmonyVoiceId)
-    abc += `V:${harmonyVoiceId} clef=${voices[0].clef === 'percussion' ? 'perc' : voices[0].clef} stems=up\n`;
-  for (const [staff, id] of pedalVoiceIds) abc += `V:${id} clef=${staff.clef}\n`;
+    abc += `V:${harmonyVoiceId} clef=${voices[0].clef === 'percussion' ? 'perc' : voices[0].clef === 'treble8' ? 'treble-8 transpose=-12' : voices[0].clef} stems=up\n`;
+  for (const [staff, id] of pedalVoiceIds) abc += `V:${id} clef=${staff.clef === 'treble8' ? 'treble-8 transpose=-12' : staff.clef}\n`;
   abc += `K:${normalizeKey(project.key)}\n`;
   if (firstMeasure > 1 || layout.measureNumberOffset) abc += `%%setbarnb ${printedFirstMeasure}\n`;
   const [meterBeats, meterUnit] = project.timeSignature;
@@ -830,7 +830,7 @@ export function toAbc(
             const pitchedTokens = pitches.map((note) =>
               part.role === 'percussion'
                 ? drumPitch(note.midi!)
-                : abcPitch(note.midi!, project.key, accidentals, Math.abs(note.start - segment.start) < EPSILON),
+                : abcPitch(note.midi! + (clef === 'treble8' ? 12 : 0), project.key, accidentals, Math.abs(note.start - segment.start) < EPSILON),
             );
             const continuing = pitches.map(
               (note) => note.start + note.duration > segment.start + segment.duration + EPSILON,
@@ -1183,7 +1183,7 @@ export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
         const clefs = staves
           .map(
             (staff) =>
-              `<clef${staves.length > 1 ? ` number="${staff.number}"` : ''}>${staff.clef === 'bass' ? '<sign>F</sign><line>4</line>' : staff.clef === 'alto' ? '<sign>C</sign><line>3</line>' : staff.clef === 'percussion' ? '<sign>percussion</sign>' : '<sign>G</sign><line>2</line>'}</clef>`,
+              `<clef${staves.length > 1 ? ` number="${staff.number}"` : ''}>${staff.clef === 'bass' ? '<sign>F</sign><line>4</line>' : staff.clef === 'alto' ? '<sign>C</sign><line>3</line>' : staff.clef === 'percussion' ? '<sign>percussion</sign>' : '<sign>G</sign><line>2</line>'}${staff.clef === 'treble8' ? '<clef-octave-change>-1</clef-octave-change>' : ''}</clef>`,
           )
           .join('');
         const key =
@@ -1458,7 +1458,7 @@ export function fromMusicXml(xml: string): ScoreProject {
                     ? 'alto'
                     : sign === 'percussion'
                       ? 'percussion'
-                      : 'treble';
+                      : childNumber(clef, 'clef-octave-change', 0) === -1 ? 'treble8' : 'treble';
               const existing = part.staves!.find((staff) => staff.number === number);
               if (existing) {
                 if (measureStart > 0 && existing.clef !== value)
@@ -1470,7 +1470,7 @@ export function fromMusicXml(xml: string): ScoreProject {
           } else {
             const sign = childText(clefs[0], 'sign');
             const value =
-              sign === 'F' ? 'bass' : sign === 'C' ? 'alto' : sign === 'percussion' ? 'percussion' : 'treble';
+              sign === 'F' ? 'bass' : sign === 'C' ? 'alto' : sign === 'percussion' ? 'percussion' : childNumber(clefs[0], 'clef-octave-change', 0) === -1 ? 'treble8' : 'treble';
             if (sign && measureStart > 0 && part.clef !== value)
               warnings.add('乐谱包含谱号变化；音高保留，当前使用初始谱号。');
             else if (sign) part.clef = value;

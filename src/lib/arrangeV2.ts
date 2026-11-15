@@ -18,7 +18,7 @@ const DYNAMICS = ['p', 'mp', 'mf', 'f', 'ff'] as const;
 const VOICES = {
   S: { name: 'Soprano · 女高', short: 'S.', range: [60, 79] as [number, number], comfort: [62, 74], clef: 'treble' as const, color: '#6e826e', pan: -0.3 },
   A: { name: 'Alto · 女低', short: 'A.', range: [55, 72] as [number, number], comfort: [57, 69], clef: 'treble' as const, color: '#5e8195', pan: 0.3 },
-  T: { name: 'Tenor · 男高', short: 'T.', range: [48, 67] as [number, number], comfort: [50, 64], clef: 'bass' as const, color: '#9a804e', pan: -0.12 },
+  T: { name: 'Tenor · 男高', short: 'T.', range: [48, 67] as [number, number], comfort: [50, 64], clef: 'treble8' as const, color: '#9a804e', pan: -0.12 },
   B: { name: 'Bass · 男低', short: 'B.', range: [40, 60] as [number, number], comfort: [41, 55], clef: 'bass' as const, color: '#887286', pan: 0.12 },
 };
 type Upper = 'S' | 'A' | 'T';
