@@ -8,6 +8,56 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-15: melodic dialogue audition and vocal tenor clef
+
+Bobby found the bounded ensemble sketches still sounded like chord padding. This
+revision remains an audition, not an accepted or production arrangement. Solo and
+Solo+SATB stay fixed; flexible divisions such as SSATTB are a future requirement,
+not a reason to silently change this comparison's ensemble.
+
+`melodicDialogue.ts` extracts one short moving cell from stable Solo notes, retains
+its rhythmic/contour identity across phrase windows, and assigns statement,
+imitation or contrary answer, phrase-end Solo harmony and harmonic support to
+different singers. Bass connects actual harmonic destinations. Horizontal pitch
+search balances contour with range, chord context, collisions and voice ordering;
+chromatic connections need evidence in the input melody or current chord. The
+composed Solo harmony is not a transcription of original backing vocals.
+
+```mermaid
+flowchart LR
+  INPUT[Fixed Solo, SATB, harmony and mix] -.-> CELL[Input-derived melodic cell]
+  INPUT -.-> PHRASE[Breaths and short phrase windows]
+  CELL -.-> TASK[Statement, answer, Solo harmony and support]
+  PHRASE -.-> TASK
+  TASK -.-> LINES[Horizontal pitch realization with harmonic context]
+  LINES -.-> SCORE[Inspect actual scores, including vocal tenor clef]
+  SCORE -.-> AB[Old v2, previous sketch and new short candidate]
+  AB -.-> LISTEN[Matched mix and separate S A T B auditions]
+  LISTEN -.-> BOBBY[Bobby judges melodic identity and ensemble interaction]
+```
+
+Only bars 13 to 20, 21 to 28 and 45 to 52 are rewritten. All other bars remain the
+previous candidate. The private review page retains existing audio unchanged and
+adds 15 new renders. Each excerpt offers a full mix and four background stems.
+Post-render normalization uses static gain to the same -23 LUFS target; individually
+normalized stems are diagnostic, not the balance heard in the full mix.
+
+Reference study revisited development scores for imitative handoff, moving inner
+parts and distinct bass arrivals. No reference notes enter generation. All nine
+already-read scores remain development material, not an unseen holdout set.
+The 24 newly arranged bars were visually inspected. Automated checks protect Solo,
+outside-span notes, ensemble and octave semantics; listening approval remains Bobby's.
+
+The separate tenor correction adds `treble8`: ABC displays the written octave and
+compensates playback; MusicXML keeps sounding pitches with clef-octave-change -1;
+MIDI stays unchanged. New arrangeV2 tenor parts use this clef. Existing projects can
+select it in the inspector, without forced migration of saved notes.
+
+Limitations: source harmony is inherited and unverified; phonetic playback uses
+choir samples; role scheduling and motif development remain rule-based and may
+still feel repetitive. No claim of learned arrangement competence or listening
+acceptance. The default arrangement algorithm is unchanged apart from tenor clef.
+
 ## 2026-11-15: bounded ensemble sketches after continuity rejection
 
 Bobby rejected the continuity candidate: some singers had no meaningful contribution
