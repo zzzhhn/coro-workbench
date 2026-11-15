@@ -1,4 +1,4 @@
-import type { NoteEvent, ScoreProject } from './types';
+import type { ChordEvent, NoteEvent, ScoreProject } from './types';
 import { beatsPerBar, validateProject } from './music';
 import { createEnsembleSketch, type SketchSpan } from './ensembleSketch';
 
@@ -15,14 +15,18 @@ const overlaps = (a: number, b: number, c: number, d: number) => a < d - 1e-6 &&
 /** Independent phrases retain an input-derived cell, then pass it between singers.
  * Reference scores inform the musical operations, never supply notes or templates.
  * This is an audition candidate, not an original-backing-vocal transcription. */
-export function createMelodicDialogue(source: ScoreProject, span: SketchSpan) {
+export function createMelodicDialogue(source: ScoreProject, span: SketchSpan, options: { harmonicContext?: ChordEvent[] } = {}) {
   const foundation = createEnsembleSketch(source, span).project;
   const bar = beatsPerBar(source), a = (span.first - 1) * bar, b = span.last * bar;
   const lead = source.parts.find(p => p.id === 'solo')!.notes.filter(n => n.midi !== null && overlaps(a, b, n.start, n.start + n.duration)).sort((x, y) => x.start - y.start);
   const stable = lead.filter(n => n.duration >= 0.5);
   if (stable.length < 3) throw Error('A melodic sketch needs at least three stable Solo notes');
   const melodicPcs = new Set(stable.map(n => pc(n.midi!)));
-  const chordAt = (t: number) => source.chords.find(c => c.start <= t + 1e-6 && c.start + c.duration > t + 1e-6);
+  // An explicit harmonic ablation changes only the pitch search's evidence.
+  // Foundation, motif targets and timing still use the original source, so a
+  // new chord boundary cannot silently change attacks, duration or participation.
+  const chordAt = (t: number) => (options.harmonicContext ?? source.chords).find(c => c.start <= t + 1e-6 && c.start + c.duration > t + 1e-6)
+    ?? source.chords.find(c => c.start <= t + 1e-6 && c.start + c.duration > t + 1e-6);
   // Pick a short moving cell, not the first run of repeated pitches. Keep identity
   // throughout the excerpt; phrase endings may extend it, never randomize it.
   const seeds = stable.slice(0, -2).map((_, i) => stable.slice(i, i + 4));

@@ -8,6 +8,58 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-15: isolated harmonic-evidence audition
+
+Bobby reported that the dialogue candidate was pleasant around bars 21 and 22 but
+inconsistent elsewhere. The first controlled experiment changes harmonic evidence
+only. It does not claim that the entire arrangement is improved or accepted.
+
+`harmonyEvidence.ts` excludes the selected Solo and percussion, integrates the
+accompaniment's sounding pitch classes and lowest notes, and pools broken-chord
+members across segments. Its hypotheses include sixths, added ninths and ninths,
+with possible inversions. A bounded approximate segment search penalizes unsupported
+changes; actual silent evidence gaps remain unassigned. This is rule-based harmonic
+analysis, not a trained model or a calibrated confidence estimate. Per-beat alternatives
+are diagnostics, not the same objective as the pooled segment decision.
+
+```mermaid
+flowchart LR
+  INPUT[Fixed reliable score] -.-> BACKING[Accompaniment evidence excluding Solo]
+  BACKING -.-> HARMONY[Segment-level harmonic hypotheses and review reasons]
+  OLD[Previous background schedule and pitch search] -.-> REALIZE[Same realizer with explicit harmonic context]
+  HARMONY -.-> REALIZE
+  REALIZE -.-> COMPARE[Previous dialogue versus harmonic candidate]
+  REF[Original score image and MIDI playback] -.-> COMPARE
+  COMPARE -.-> LISTEN[Matched mixes and S A T B stems]
+  LISTEN -.-> BOBBY[Bobby judges benefit and regression before promotion]
+```
+
+`createMelodicDialogue` accepts an optional harmonic context without changing its
+schedule, seed material or default behavior. The experiment preserves Solo, ensemble,
+all attacks, durations, syllables, velocities, tempo, samples and mix. Only background
+pitches and displayed harmonic hypotheses change inside bars 13 to 20, 21 to 28 and
+45 to 52. Bars 21 and 22 are a regression case, not a song-specific exception.
+All other notes retain the previous candidate. No reference arrangement is read by
+the generator; the nine studied arrangements remain development material.
+
+Private review: `tests/private-harmony-review.html` on port 5174. It offers the
+original hand-transcribed score's MIDI playback, unchanged previous dialogue and new
+candidate, with expandable source-score images. The reference uses its original
+instrumentation and is not the equal-timbre arrangement A/B. Eighteen new audio files
+and fifteen unchanged previous files are available: all 33 measure -23 LUFS within
+0.01 LU. Stem gains are independent diagnostic gains, not the full-mix balance.
+
+The 24 candidate bars were visually inspected. Sixty-nine related synthetic tests
+and TypeScript checking passed; private assertions verify exact Solo, schedule and
+outside-span notes, plus hashes of retained audio. These checks do not establish
+harmonic correctness, singability or hearing acceptance.
+
+Known limitation: the fixed sequential pitch search can still choose an unsuitable
+bass or keep a long note across a harmony change. A better chord hypothesis does not
+guarantee that the generated vertical voicing realizes it. Joint voice realization,
+whole-duration dissonance handling and phrase-level musical judgment remain later,
+separate layers. The default production generator is unchanged.
+
 ## 2026-11-15: melodic dialogue audition and vocal tenor clef
 
 Bobby found the bounded ensemble sketches still sounded like chord padding. This
