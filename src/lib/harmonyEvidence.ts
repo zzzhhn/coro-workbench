@@ -13,9 +13,19 @@ const QUALITIES = [
   { suffix: '9', intervals: [0, 4, 7, 10, 2] }, { suffix: 'maj9', intervals: [0, 4, 7, 11, 2] },
   { suffix: 'm9', intervals: [0, 3, 7, 10, 2] }, { suffix: '7sus4', intervals: [0, 5, 7, 10] },
 ];
-const CHORDS = QUALITIES.flatMap(q => Array.from({ length: 12 }, (_, root) => ({
+const chordVocabulary = (qualities: typeof QUALITIES) => qualities.flatMap(q => Array.from({ length: 12 }, (_, root) => ({
   root, symbol: NAMES[root] + q.suffix, pcs: q.intervals.map(i => pc(root + i)),
 })));
+const LEGACY_CHORDS = chordVocabulary(QUALITIES);
+const ANCHORED_CHORDS = chordVocabulary([...QUALITIES,
+  { suffix: 'aug', intervals: [0,4,8] },
+  { suffix: '7#5', intervals: [0,4,8,10] },
+  { suffix: '7b5', intervals: [0,4,6,10] },
+  { suffix: 'm7b5', intervals: [0,3,6,10] },
+  { suffix: 'dim7', intervals: [0,3,6,9] },
+  { suffix: '7b9', intervals: [0,4,7,10,1] },
+  { suffix: 'maj9#11', intervals: [0,4,7,11,2,6] },
+]);
 export interface HarmonyFrame {
   start: number;
   duration: number;
@@ -30,12 +40,19 @@ export interface HarmonyFrame {
  * Lead ornaments never become evidence for accompaniment chord identity.
  * Quarter-note frames allow within-bar changes; sequence decoding suppresses
  * unsupported changes, but never bridges a silent gap as if it were evidence. */
-export function analyzeHarmonyEvidence(source: ScoreProject, leadPartId: string) {
+export function analyzeHarmonyEvidence(source: ScoreProject, leadPartId: string, options: { bassAnchors?: boolean } = {}) {
+  const CHORDS = options.bassAnchors ? ANCHORED_CHORDS : LEGACY_CHORDS;
   if (!source.parts.some(p => p.id === leadPartId)) throw Error('Unknown Solo part');
   const parts = source.parts.filter(p => p.id !== leadPartId && p.role !== 'percussion');
   if (!parts.some(p => p.notes.some(n => n.midi !== null))) throw Error('Harmony analysis requires accompaniment');
   const total = source.measures * beatsPerBar(source);
-  const frames: Array<HarmonyFrame & { costs: number[] }> = [];
+  const lowRegister = parts.map(p => {
+    const pitches=p.notes.flatMap(n=>n.midi===null?[]:[n.midi]).sort((a,b)=>a-b);
+    return pitches.length ? pitches[Math.floor((pitches.length-1)*.2)] : Infinity;
+  });
+  const lowestRegister=Math.min(...lowRegister);
+  const bassParts=parts.filter((_,i)=>lowRegister[i]<=lowestRegister+5);
+  const frames: Array<HarmonyFrame & { costs: number[]; arrival: boolean }> = [];
   for (let start = 0; start < total; start += 1) {
     const end = Math.min(total, start + 1), duration = end - start;
     const active = parts.map(p => p.notes.filter(n => n.midi !== null && n.start < end && n.start + n.duration > start));
@@ -51,7 +68,13 @@ export function analyzeHarmonyEvidence(source: ScoreProject, leadPartId: string)
       if (notes.length) bassWeights[pc(Math.min(...notes.map(n => n.midi!)))] += d;
     }
     const mass = weights.reduce((s, v) => s + v, 0);
-    const bass = Math.max(...bassWeights) >= 0.5 ? bassWeights.indexOf(Math.max(...bassWeights)) : null;
+    // At a tied duration, pitch-class ordering cannot decide which note was the
+    // arrival. Use the actual low register sounding at the start of the beat.
+    const low = bassParts.flatMap(p=>p.notes).filter(n=>n.midi!==null && n.midi<=lowestRegister+12
+      && n.start<=start+.06 && n.start+n.duration>=start+.4).sort((a,b)=>a.midi!-b.midi!)[0];
+    const bass = options.bassAnchors ? (low ? pc(low.midi!) : null)
+      : Math.max(...bassWeights) >= 0.5 ? bassWeights.indexOf(Math.max(...bassWeights)) : null;
+    const arrival=!!low && Math.abs(low.start-start)<.06;
     const evidence = weights.flatMap((weight, midiClass) => weight > 1e-6 ? [{ midiClass, weight }] : []);
     const costs = CHORDS.map(c => {
       if (!mass) return 0;
@@ -60,7 +83,21 @@ export function analyzeHarmonyEvidence(source: ScoreProject, leadPartId: string)
       const bassCost = bass === null ? 0 : c.root === bass ? 0 : c.pcs.includes(bass) ? 0.32 : 1.4;
       return outside * 5 + missing + bassCost + (c.pcs.length === 4 ? 0.08 : 0);
     });
-    frames.push({ start, duration, evidence, bass, selected: '', alternatives: [], review: [], costs });
+    frames.push({ start, duration, evidence, bass, arrival, selected: '', alternatives: [], review: [], costs });
+  }
+  const anchors=new Set<number>();
+  if(options.bassAnchors) {
+    let previousBass: number | null=null;
+    frames.forEach((f,i)=>{
+      if(!f.arrival || f.bass===null)return;
+      const current=new Set(f.evidence.filter(e=>e.weight>=.3).map(e=>e.midiClass));
+      const before=new Set(frames[i-1]?.evidence.filter(e=>e.weight>=.3).map(e=>e.midiClass)??[]);
+      const changed=[...current].some(p=>!before.has(p));
+      // Polyphonic evidence plus a new bass arrival can justify a one-beat
+      // change. A lone arpeggio member cannot create a structural boundary.
+      if(previousBass!==null && previousBass!==f.bass && current.size>=3 && before.size>=3 && changed) anchors.add(i);
+      previousBass=f.bass;
+    });
   }
   const chosen = Array<number>(frames.length).fill(-1);
   // Segmental decoding pools arpeggio evidence before scoring a chord. Framewise
@@ -76,9 +113,10 @@ export function analyzeHarmonyEvidence(source: ScoreProject, leadPartId: string)
     for (let stop = from + 1; stop <= end; stop++) {
       for (let begin = Math.max(from, stop - Math.ceil(bar * 2)); begin < stop; begin++) {
         const length = stop - begin;
-        // Interior segments need at least two quarter beats. One-beat fragments
-        // are allowed only next to an actual silence, never as every-beat churn.
-        if (length < 2 && begin !== from && stop !== end) continue;
+        if(options.bassAnchors && [...anchors].some(t=>t>begin && t<stop))continue;
+        // Interior segments need two beats unless a supported bass boundary
+        // or actual silence makes a one-beat segment musically necessary.
+        if (length < 2 && begin !== from && stop !== end && !anchors.has(begin) && !anchors.has(stop)) continue;
         if (!Number.isFinite(dp[begin - from].cost)) continue;
         const weights = Array<number>(12).fill(0);
         for (let j = begin; j < stop; j++) for (const e of frames[j].evidence) weights[e.midiClass] += e.weight / length;
@@ -87,7 +125,9 @@ export function analyzeHarmonyEvidence(source: ScoreProject, leadPartId: string)
         CHORDS.forEach((c, k) => {
           const outside = weights.reduce((s, w, i) => s + (c.pcs.includes(i) ? 0 : w), 0) / mass;
           const missing = c.pcs.reduce((s, pitch, i) => s + Math.max(0, 0.22 - weights[pitch]) * (i === 2 ? 0.5 : i > 2 ? 2 : 2.5), 0);
-          const bassCost = bass === null ? 0 : c.root === bass ? 0 : c.pcs.includes(bass) ? 0.28 : 1;
+          const bassCost = options.bassAnchors
+            ? frames.slice(begin,stop).reduce((sum,f)=>sum+(f.bass===null?0:c.root===f.bass?0:c.pcs.includes(f.bass)?.28:1.6),0)/length
+            : bass === null ? 0 : c.root === bass ? 0 : c.pcs.includes(bass) ? 0.28 : 1;
           const prior = dp[begin - from];
           const change = prior.chord === k ? 0 : 1;
           const metric = begin % bar === 0 || begin % (bar / 2) === 0 ? 0 : 0.4;
@@ -117,9 +157,10 @@ export function analyzeHarmonyEvidence(source: ScoreProject, leadPartId: string)
     if (ranked[1].cost - ranked[0].cost < 0.25) f.review.push('多个和声解释接近');
     if (ranked[0].j !== k) f.review.push('由前后文选择');
     if (f.evidence.length < 3) f.review.push('和声音不足');
+    if(anchors.has(i))f.review.push('低音与和声音共同支持边界');
     const last = chords.at(-1);
     if (last && last.symbol === f.selected && Math.abs(last.start + last.duration - f.start) < 1e-6) last.duration += f.duration;
     else chords.push({ start: f.start, duration: f.duration, symbol: f.selected, pitches: c.pcs.map(p => 48 + p) });
   });
-  return { chords, frames: frames.map(({ costs, ...frame }) => frame), sourcePartIds: parts.map(p => p.id) };
+  return { chords, frames: frames.map(({ costs, arrival, ...frame }) => frame), sourcePartIds: parts.map(p => p.id) };
 }
