@@ -16,6 +16,8 @@ import { metronomeGrid } from '../lib/audio';
 import type { ScoreProject } from '../lib/types';
 import { beatsPerBar } from '../lib/music';
 import { timeLabel } from './Waveform';
+import BackgroundTimbreSelect from './BackgroundTimbreSelect';
+import type { BackgroundTimbre } from '../lib/auditionTimbre';
 
 function NumberSetting({
   value,
@@ -69,6 +71,8 @@ function NumberSetting({
 
 interface Props {
   project: ScoreProject;
+  backgroundTimbre?: BackgroundTimbre;
+  onBackgroundTimbre?: (value: BackgroundTimbre) => void;
   state: PlaybackState;
   mode: PlaybackMode;
   busy: boolean;
@@ -92,6 +96,8 @@ interface Props {
 
 export default function TransportBar({
   project,
+  backgroundTimbre,
+  onBackgroundTimbre,
   state,
   mode,
   busy,
@@ -201,11 +207,12 @@ export default function TransportBar({
           <NumberSetting value={project.tempo} min={30} max={240} label="播放速度 BPM" onCommit={onTempo} />
           <small>BPM</small>
         </label>
-        <div className="beat-dots" aria-hidden="true">
+        {backgroundTimbre && onBackgroundTimbre ? <BackgroundTimbreSelect
+          value={backgroundTimbre} onChange={onBackgroundTimbre} disabled={busy || mode !== 'score'} /> : <div className="beat-dots" aria-hidden="true">
           {Array.from({ length: Math.ceil(barLength / grid.step) }, (_, i) => (
             <i key={i} className={state.playing && i === beatIndex ? 'current' : ''} />
           ))}
-        </div>
+        </div>}
       </div>
       <div className="transport-timing">
         <button

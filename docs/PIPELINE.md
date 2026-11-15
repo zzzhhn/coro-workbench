@@ -8,6 +8,34 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: listening feedback and selectable background audition timbre
+
+Bobby gave positive listening feedback on joint-voicing bars 21 to 28, but rejected
+17/18 and all of 45 to 52. This is partial acceptance, not whole-arrangement quality.
+See [audition learnings](ARRANGEMENT_AUDITION_LEARNINGS.md) for observations,
+counterexamples and the next harmonic-segmentation hypothesis.
+
+This iteration changes timbre only. `auditionTimbre.ts` builds a non-mutating
+playback view: vocal harmony/bass defaults to piano, with an original-timbre option.
+Musical Solo, source instruments and percussion remain unchanged. The App uses the
+view for score playback, sample priming and note audition; written instruments and
+exports retain the project data. Transport controls pause before changing timbre.
+
+```mermaid
+flowchart LR
+  SCORE[Unchanged written score] --> VIEW[Playback view: piano backing or original]
+  VIEW --> ENGINE[Existing PlaybackEngine and audio renderer]
+  SCORE --> EXPORT[Unchanged score and export instrumentation]
+  ENGINE --> COMPARE[Same timbre for all compared versions]
+```
+
+The private joint review defaults to piano and retains the original audio option.
+Forty-five new piano clips use static gain to -23 LUFS within 0.04 LU; all forty-five
+original clips and score hashes are unchanged. Eight playback/timbre tests and the
+TypeScript check pass. Production TransportBar was exercised in an isolated browser
+harness at desktop and narrow width; this does not claim a production deployment.
+The new App playback control is on the audition branch, not canonical main.
+
 ## 2026-11-16: isolated joint-voicing audition
 
 The next controlled layer realizes the four background voices together, using the
