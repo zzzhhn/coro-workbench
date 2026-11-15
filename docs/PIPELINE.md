@@ -8,6 +8,41 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: bass-supported harmony and structural voicing audition
+
+Two opt-in layers remain separate: `analyzeHarmonyEvidence(..., {bassAnchors:true})`
+and `realizeJointVoicing(..., {structural:true, targets})`. Defaults remain unchanged.
+The first uses low-register arrivals with changed polyphonic evidence to support
+short harmonic segments; segment costs include every bass frame. The second uses
+pre-quantization motif direction, phrase-local Solo register and stronger third/seventh
+coverage. These are heuristics for audition, not trained or calibrated models.
+
+```mermaid
+flowchart LR
+  INPUT[Reliable accompaniment score] -.-> H[Bass arrivals plus polyphonic evidence]
+  H -.-> SEG[Harmonic segments and altered-chord hypotheses]
+  PLAN[Existing phrase rhythm and raw motif targets] -.-> JOINT[Joint voices: contour, register, harmonic identity]
+  SEG -.-> JOINT
+  OLD[Unchanged approved excerpt baseline] --> AB[Same piano backing and loudness comparison]
+  SEG -.-> LEGACY[Existing joint voicing: harmonic-only ablation]
+  LEGACY -.-> AB
+  JOINT -.-> AB
+  AB -.-> HUMAN[Human listening before default integration]
+```
+
+Private review: `tests/private-anchor-review.html` at the existing 5174 service.
+A retains the prior joint candidate, B changes harmonic analysis only, C adds
+structural voicing. All keep Solo, ensemble and sounding coverage; only the same
+three eight-bar excerpts change. Thirty new piano clips, mix and S/A/T/B, are
+normalized by static gain to -23 LUFS within 0.04 LU; A reuses fifteen old clips.
+All 24 candidate bars were visually reviewed. 29 focused tests and TypeScript pass.
+
+The accepted 21–28 baseline is immutable, but the new algorithm also changes the
+regression candidate: 21–22 has one Soprano event difference. This is explicitly
+pending human comparison, not a claimed non-regression or production deployment.
+The cost model, one-beat evidence grid and some complex chord interpretations remain
+limitations. No claim of direct listening acceptance is made.
+
 ## 2026-11-16: listening feedback and selectable background audition timbre
 
 Bobby gave positive listening feedback on joint-voicing bars 21 to 28, but rejected

@@ -20,7 +20,9 @@ function bassClass(chord: ChordEvent) {
  * harmonic hypotheses and rhythmic gestures remain separate from realization.
  * Notes may change pitch at an actual chord boundary; unchanged common tones
  * are rejoined to avoid manufacturing repeated syllables. No song-specific rules. */
-export function realizeJointVoicing(source: ScoreProject, span: { first: number; last: number }) {
+export interface VoicingTarget { voice: string; start: number; target: number; motif?: string }
+export interface JointVoicingOptions { structural?: boolean; targets?: VoicingTarget[] }
+export function realizeJointVoicing(source: ScoreProject, span: { first: number; last: number }, options: JointVoicingOptions = {}) {
   const bar = beatsPerBar(source), start = (span.first - 1) * bar, end = span.last * bar;
   if (!(start >= 0 && end > start && end <= source.measures * bar)) throw Error('Invalid voicing span');
   const parts = IDS.map(id => source.parts.find(p => p.id === id));
@@ -44,13 +46,28 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
   const frames = times.slice(0, -1).map((t, i) => ({ start: t, duration: times[i + 1] - t,
     notes: pieces.map(ns => ns.find(n => n.start <= t + EPS && n.end > t + EPS)),
     chord: chordAt(t), solo: lead.filter(n => sounding(n, t)) }));
+  const planned = (v: number, n: NoteEvent) => options.targets?.find(x => x.voice === IDS[v] && Math.abs(x.start - n.start) < EPS);
+  // Use one register offset within a phrase window, without per-note octave
+  // folding. Phrase-local Solo register is evidence, not a section label.
+  const registerShift = (v: number, n: NoteEvent) => {
+    if (!options.structural || v !== 0) return 0;
+    const window = Math.floor((n.start - start) / (bar * 2));
+    const a = start + window * bar * 2, b = a + bar * 2;
+    const local = lead.filter(x => overlaps(a, b, x.start, x.start + x.duration)).map(x => x.midi!).sort((x, y) => x - y);
+    if (!local.length) return 0;
+    const ceiling = Math.max(RANGES[0][0] + 5, Math.min(RANGES[0][1], local[Math.floor((local.length - 1) * .75)] + 7));
+    const guides = parts[v]!.notes.filter(x => x.midi !== null && x.start >= a && x.start < b).map(x => planned(v, x)?.target ?? x.midi!);
+    const center = guides.length ? guides.reduce((sum, x) => sum + x, 0) / guides.length : n.midi!;
+    return Math.min(0, Math.round(ceiling - center));
+  };
+  const targetFor = (v: number, n: NoteEvent) => (planned(v, n)?.target ?? n.midi!) + registerShift(v, n);
   const initial = parts.map(p => p!.notes.filter(n => n.midi !== null && n.start < start).at(-1)?.midi ?? null);
   let beam: State[] = [{ cost: 0, current: [null, null, null, null], last: initial, path: [] }];
   frames.forEach((frame, frameIndex) => {
     const { chord, notes, solo, duration, start: t } = frame;
     const chordPcs = new Set(chord?.pitches.map(pc) ?? []);
     const newNote = notes.map((n, v) => !!n && (frameIndex === 0 || frames[frameIndex - 1].notes[v] !== n));
-    const targets = notes.map(n => n?.note.midi ?? null);
+    const targets = notes.map((n, v) => n ? targetFor(v, n.note) : null);
     const choices = notes.map((n, v): Array<number | null> => {
       if (!n) return [null];
       if (!chord) return [n.note.midi];
@@ -93,9 +110,11 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
                 cost += Math.abs(step) * 0.45 + Math.max(0, Math.abs(step) - (v === 3 ? 7 : 5)) ** 2 * 2;
                 const index = notes[v]!.original, prior = parts[v]!.notes[index - 1];
                 if (prior?.midi != null && notes[v]!.start === notes[v]!.note.start) {
-                  const desired = target - prior.midi;
-                  cost += Math.abs(step - desired) * (solo.length ? 1.2 : 1.8);
-                  if (desired && step === 0) cost += 1.5;
+                  const guide = planned(v, notes[v]!.note), priorGuide = planned(v, prior);
+                  const sameCell = guide?.motif && guide.motif === priorGuide?.motif && prior.start + prior.duration >= notes[v]!.note.start - EPS;
+                  const desired = sameCell ? guide.target - priorGuide!.target : target - targetFor(v, prior);
+                  cost += Math.abs(step - desired) * (options.structural && sameCell ? 4 : solo.length ? 1.2 : 1.8);
+                  if (desired && step === 0) cost += options.structural && sameCell ? 6 : 1.5;
                 }
               }
             }
@@ -126,8 +145,8 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
           // four singers, prioritize third/seventh before optional color tones.
           const root = pc(chord.pitches[0]), third = chord.pitches.map(pc).find(p => [3, 4, 5].includes(pc(p - root)));
           const seventh = chord.pitches.map(pc).find(p => [10, 11].includes(pc(p - root)));
-          if (third !== undefined && !pcs.has(third)) vertical += solo.length ? 5 : 11;
-          if (seventh !== undefined && !pcs.has(seventh)) vertical += solo.length ? 0.5 : 2;
+          if (third !== undefined && !pcs.has(third)) vertical += options.structural ? 18 : solo.length ? 5 : 11;
+          if (seventh !== undefined && !pcs.has(seventh)) vertical += options.structural ? 9 : solo.length ? 0.5 : 2;
           // Doubling a root/fifth is legitimate. Demanding four different pitch
           // classes at every instant flattens melodic gestures into chord filling.
           vertical += Math.max(0, Math.min(3, active.length, chordPcs.size) - pcs.size) * (solo.length ? 2 : 4);

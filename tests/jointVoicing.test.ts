@@ -64,4 +64,28 @@ describe('joint ensemble realization', () => {
     q.parts.slice(1).forEach((v, i) => expect(v.notes.filter(n => n.start >= 8)).toEqual(p.parts[i + 1].notes.filter(n => n.start >= 8)));
     expect(q.chords).toEqual(p.chords);
   });
+  it('structural mode retains third and seventh before optional ninth colors', () => {
+    const p = fixture([74, 69, 55, 48]);
+    p.parts[0].notes = [{ id: 'solo', start: 0, duration: 8, midi: 67, velocity: .7 }];
+    p.chords = [{ start: 0, duration: 8, symbol: 'Cmaj9', pitches: [48, 52, 55, 59, 62] }];
+    const q = realizeJointVoicing(p, { first: 1, last: 2 }, { structural: true }).project;
+    const pcs = at(q, 0).map(n => n % 12);
+    expect(pcs).toContain(4); expect(pcs).toContain(11);
+    expect(q.parts[0]).toEqual(p.parts[0]);
+  });
+
+  it('uses the unquantized cell direction instead of learning a previous collapsed contour', () => {
+    const p = fixture([71, 66, 59, 43]);
+    p.chords = [{ start: 0, duration: 8, symbol: 'Gmaj9', pitches: [55, 59, 62, 66, 69] }];
+    p.parts[0].notes = [{ id: 'solo', start: 0, duration: 8, midi: 62, velocity: .7 }];
+    p.parts[1].notes = [71, 71, 71, 74].map((midi, i) => ({ id: `s-${i}`, start: i * .5, duration: i === 3 ? 6.5 : .5, midi, velocity: .5 }));
+    const targets = [74, 72, 72, 76].map((target, i) => ({ voice: 'voice-s', start: i * .5, target, motif: 'descending-answer' }));
+    const q = realizeJointVoicing(p, { first: 1, last: 2 }, { structural: true, targets }).project;
+    const ns = q.parts[1].notes;
+    expect(ns[1].midi!).toBeLessThan(ns[0].midi!);
+    expect(ns[2].midi).toBe(ns[1].midi);
+    expect(ns[3].midi!).toBeGreaterThan(ns[2].midi!);
+    expect(ns.map(n => [n.start, n.duration])).toEqual(p.parts[1].notes.map(n => [n.start, n.duration]));
+  });
+
 });

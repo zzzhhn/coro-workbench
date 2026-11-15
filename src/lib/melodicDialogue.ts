@@ -192,5 +192,6 @@ export function createMelodicDialogue(source: ScoreProject, span: SketchSpan, op
   }
   const errors = validateProject(result);
   if (errors.length) throw Error(errors.join('\n'));
-  return { project: result, trace, seed: { id: motifId, durations, contour }, windows };
+  return { project: result, trace, seed: { id: motifId, durations, contour }, windows,
+    targets: planned.flatMap((ns,v)=>ns.map(n=>({voice: IDS[v], ...n}))) };
 }
