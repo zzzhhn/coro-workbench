@@ -12,11 +12,27 @@ export interface ChantAnchor {
   sourceNoteIds: string[]; reason: 'chord-arrival' | 'bass-arrival';
 }
 
-function reduceUpper(upper: number[], bass: number) {
+function reduceUpper(upper: number[], bass: number, preserveGuideTones = false) {
   const distinct = [...new Map([...upper].sort((a, b) => b - a).map(m => [pc(m), m])).values()];
   if (new Set([bass, ...distinct.map(pc)]).size <= 4) return { upper: distinct, omitted: [] as number[] };
   const candidates: number[][] = [];
   const nonBass = distinct.filter(m => pc(m) !== bass);
+  if (preserveGuideTones) {
+    // Four singers cannot retain every extension. Preserve the source's
+    // third/seventh (or suspension when no third is present) before colors.
+    // Pitch-class priority must not change when the piano changes register.
+    // This is a bass-relative reduction, not a claim to know the chord root.
+    const hasThird = nonBass.some(m => [3, 4].includes(pc(m - bass)));
+    const priority = (m: number) => {
+      const interval = pc(m - bass);
+      if ([3, 4].includes(interval) || (!hasThird && interval === 5)) return 0;
+      if ([10, 11].includes(interval)) return 1;
+      if ([6, 7].includes(interval) || (!hasThird && interval === 2)) return 2;
+      return 3;
+    };
+    const selected = [...nonBass].sort((a, b) => priority(a) - priority(b) || pc(a - bass) - pc(b - bass)).slice(0, 3);
+    return { upper: selected, omitted: nonBass.filter(m => !selected.includes(m)).map(pc) };
+  }
   // Prefer a complete triad already written in the upper structure over an
   // arbitrary cluster of the three highest notes. Never supply missing tones.
   for (let i = 0; i < nonBass.length; i++) for (let j = i + 1; j < nonBass.length; j++) for (let k = j + 1; k < nonBass.length; k++) {
@@ -39,7 +55,7 @@ export function createSourceChant(
   scaffold: ScoreProject, source: ScoreProject,
   selection: { accompanimentIds: string[]; bassPartId: string },
   spans: Array<{ first: number; last: number }>,
-  options: { rhythm?: 'phrase-pulse'; blockBars?: number } = {},
+  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' } = {},
 ) {
   const bar = beatsPerBar(source);
   if (!selection.accompanimentIds.includes(selection.bassPartId)) throw Error('Bass staff must belong to selected accompaniment');
@@ -48,6 +64,7 @@ export function createSourceChant(
   const low = prepared.notes.filter(n => bassIds.has(n.id));
   const high = prepared.notes.filter(n => !bassIds.has(n.id));
   const allCoverage: ChantRegion[] = [];
+  const bassRoleDecisions: Array<{ start: number; sourceNoteIds: string[]; heldBass: number; compingMidi: number }> = [];
   const anchors: ChantAnchor[] = [], breaths: Array<{ start: number; end: number }> = [];
   const control = structuredClone(source);
   const template = source.parts.find(p => selection.accompanimentIds.includes(p.id))!;
@@ -72,13 +89,26 @@ export function createSourceChant(
       const sparse = onBeat && freshHigh.length > 0 && stableLow.length > 0;
       const chordArrival = blockHigh || blockLow || sparse;
       const lowArrival = freshLow[0];
-      const bassArrival = lowArrival && (chordArrival || (onBeat && lowArrival.duration >= .45
+      // A high approach immediately confirmed an octave down is evidence of
+      // a genuine bass move, not an upper-voicing replacement.
+      const confirmedBassMove = lowArrival && low.some(n => n.start > t + EPS && n.start <= t + 1 + EPS
+        && n.duration >= .45 && pc(n.midi) === pc(lowArrival.midi) && n.midi <= lowArrival.midi - 12);
+      // A piano's left hand is not a monophonic bass part. A large upward
+      // leap into the chord register inside a continuous measure can complete
+      // the upper structure without replacing its low foundation. This opt-in
+      // inference is logged; bar starts and genuinely low moves remain anchors.
+      const comping = options.harmony === 'sustained-bass' && !confirmedBassMove && bass && lowArrival && upper.length > 0
+        && Math.abs(t / bar - Math.round(t / bar)) > EPS
+        && lowArrival.midi - bass.midi >= 10 && lowArrival.midi >= Math.min(...upper.map(n => n.midi)) - 12
+        && (blockHigh || blockLow) && ns.some(n => n.start < t && n.start + n.duration >= t - EPS);
+      if (comping && bass) bassRoleDecisions.push({ start: t, sourceNoteIds: freshLow.map(n => n.id), heldBass: bass.midi, compingMidi: lowArrival.midi });
+      const bassArrival = !comping && lowArrival && (chordArrival || (onBeat && lowArrival.duration >= .45
         && (!bass || lowArrival.midi <= bass.midi + 12)));
       if (!chordArrival && !bassArrival) continue;
       if (bassArrival) bass = lowArrival;
       if (!bass) bass = low.filter(n => n.start <= t && n.start + n.duration > t).sort((x, y) => x.midi - y.midi)[0];
       if (!bass) continue;
-      const arrivingUpper = [...freshHigh, ...stableLow.filter(n => n !== lowArrival)];
+      const arrivingUpper = [...freshHigh, ...stableLow.filter(n => comping || n !== lowArrival)];
       if (chordArrival && arrivingUpper.length) {
         const sameBass = local.at(-1)?.bass === pc(bass.midi);
         const subset = arrivingUpper.every(n => upper.some(old => pc(old.midi) === pc(n.midi)));
@@ -90,7 +120,7 @@ export function createSourceChant(
       const last = local.at(-1);
       if (last && last.bass === pc(bass.midi) && pitches.every(m => last.sourceUpper.some(old => pc(old) === pc(m)))
         && last.sourceUpper.every(m => pitches.some(old => pc(old) === pc(m)))) continue;
-      const reduction = reduceUpper(pitches, pc(bass.midi));
+      const reduction = reduceUpper(pitches, pc(bass.midi), options.harmony === 'sustained-bass');
       local.push({ start: t, duration: 0, bass: pc(bass.midi), ...reduction, sourceUpper: pitches,
         sourceNoteIds: [...new Set([bass.id, ...upper.map(n => n.id)])], reason: chordArrival ? 'chord-arrival' : 'bass-arrival' });
     }
@@ -168,5 +198,5 @@ export function createSourceChant(
   const result = transferSourceToSatb(scaffold, control, ['chant-source-reduction'], spans, {
     connectCommonTones: options.rhythm !== 'phrase-pulse', voiceRanges: [[64, 76], [57, 69], [50, 64], [40, 55]],
   });
-  return { ...result, anchors, breaths, phraseBlocks: phrase?.blocks, preprocessing: { rolls: prepared.rolls, ornaments: prepared.ornaments } };
+  return { ...result, anchors, breaths, bassRoleDecisions, phraseBlocks: phrase?.blocks, preprocessing: { rolls: prepared.rolls, ornaments: prepared.ornaments } };
 }

@@ -8,7 +8,38 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
-## 2026-11-16: phrase-stable chant audition
+## 2026-11-16: legato source-chant diagnostic candidate
+
+Bobby confirmed that A (source piano plus Solo) sounds normal and B/C do not.
+The shared beat-pulse candidate below was rejected: stable backing does not mean
+all four voices rearticulate together. New opt-in `harmony: 'sustained-bass'`
+keeps the existing legato path instead of enabling `phrase-pulse`.
+
+```mermaid
+flowchart LR
+  SOURCE[Selected reliable piano staves] -.-> ROLES[Low foundation vs left-hand upper comping]
+  ROLES -.-> REDUCE[Source third and seventh or suspension before extra colors]
+  REDUCE -.-> SATB[Existing SATB allocation]
+  SATB -.-> HOLD[Join same pitches; retain source rests and breath budget]
+  HOLD -.-> REVIEW[Source piano / rejected pulse / legato candidate]
+```
+
+Two reproducible reduction defects were found: high left-hand comping could
+replace the bass foundation, and a register-dependent upper-triad preference
+could remove a source seventh. The candidate logs comping decisions and all
+capacity omissions. An octave-down confirmation on the next beat protects a
+real high-register bass approach. Four-or-fewer pitch classes remain intact;
+no new pitch classes are supplied. Bass-relative guide-tone priority is a
+bounded heuristic, not complete root/inversion recognition.
+
+Private entry: `tests/private-legato-review.html`; output in `output/arranger-legato/`.
+Only verses 13–20 and 45–52 change. Solo, ensemble, approved 21–28 and all other
+notes remain exact. Original and old auditions remain available. Ten new mix/stem
+clips use piano backgrounds at −23 LUFS. Actual engraving is reviewed separately
+from tests; there is no direct auditory acceptance. Defaults remain unchanged,
+and the arranging branch must not be merged until Bobby accepts it.
+
+## 2026-11-16: phrase-stable chant audition (subsequently rejected)
 
 The previous source chant still varied rhythm too often. New opt-in
 `rhythm: 'phrase-pulse'` adds `phraseChant.ts` between harmonic reduction and
