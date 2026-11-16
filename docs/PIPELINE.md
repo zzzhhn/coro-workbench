@@ -8,6 +8,39 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: chant structure, Solo pickups and register audition
+
+Bobby reports that simple chant is substantially better, but identifies remaining
+harmonic, phrase-boundary and register problems. This is partial acceptance only.
+Two opt-in comparisons retain the previous chant: B adds source-structure costs and
+Solo-informed breaths; C additionally changes register preferences. Production
+defaults and the accepted excerpt are unchanged. This does not demonstrate that
+the new algorithm would regenerate the accepted excerpt equally well.
+
+```mermaid
+flowchart LR
+  SOURCE[Reliable source notes and actual bass] -.-> STRUCTURE[Prefer supported upper structure over redundant doubling]
+  SOLO[Unchanged Solo rests and pickups] -.-> BREATH[Background release and rearticulation]
+  STRUCTURE -.-> VOICING[Joint SATB voicing]
+  BREATH -.-> VOICING
+  REGISTER[Optional register preference] -.-> VOICING
+  VOICING -.-> REVIEW[A previous chant / B structure and phrasing / C register]
+  REVIEW -.-> LISTEN[Matched piano mix and individual stems; Bobby acceptance]
+```
+
+The structure option never adds a pitch absent from source harmony. It penalizes
+redundant bass/upper doubling, retains supported third/seventh intervals relative
+to the actual bass, and favors a supported upper triad. These are soft heuristics,
+not a definitive chord analysis, especially with inversions or ambiguous palettes.
+Solo gaps of at least half a beat can release the background; a late pickup can
+lead into a shared beat restart instead of an automatic common-tone tie.
+
+Private entry: `tests/private-chant-refine-review.html` on existing 5174. Twenty
+new piano mix/stem clips are matched to −23 LUFS (maximum deviation 0.03 LU).
+Both rewritten excerpts were visually reviewed in B and C. Default replay, Solo
+and untouched regions match their saved baseline. Twenty focused tests and
+TypeScript pass. Audio playback validation is not listening acceptance.
+
 ## 2026-11-16: plain chord chant, following rejection of melodic backgrounds
 
 Bobby rejected the rebuild: repeated verse melodies received unnecessarily complex

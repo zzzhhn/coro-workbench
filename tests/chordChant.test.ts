@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { createBlankProject } from '../src/lib/demo';
 import { arrangeV2 } from '../src/lib/arrangeV2';
 import { createChordChant } from '../src/lib/chordChant';
+import { realizeJointVoicing } from '../src/lib/jointVoicing';
 
 const note = (midi: number, start: number, duration: number) => ({ id: `${midi}-${start}`, midi, start, duration, velocity: .6 });
 function fixture() {
@@ -50,4 +51,32 @@ it('keeps actual bass arrivals and avoids crossed voices', () => {
     expect(voices[3] % 12).toBe(beat ? 9 : 0);
     expect(voices.every((pitch, i) => i === 0 || voices[i - 1] > pitch)).toBe(true);
   }
+});
+
+it('preserves supported chord identity instead of doubling an extension or bass', () => {
+  const { old } = fixture();
+  old.parts[0].notes = [];
+  old.parts.slice(1).forEach((part, i) => { part.notes = [note([69, 62, 57, 43][i], 0, 4)]; });
+  for (const [bass, pitches, required] of [
+    [7, [2, 6, 7, 9, 11], [6, 11]],
+    [8, [2, 6, 8, 10], [2, 6, 10]],
+    [2, [0, 2, 4, 7, 11], [0, 4, 7]],
+  ] as Array<[number, number[], number[]]>) {
+    const guides = [{ start: 0, duration: 4, bass, pitches, sourceNoteIds: [] }];
+    const q = realizeJointVoicing(old, { first: 1, last: 1 }, guides, { sourceStructure: true }).project;
+    const pcs = q.parts.slice(1).map(v => v.notes[0].midi! % 12);
+    expect(required.every(pc => pcs.includes(pc))).toBe(true);
+    expect(pcs.every(pc => pitches.includes(pc))).toBe(true);
+  }
+});
+
+it('releases a common-tone background before a Solo pickup and restarts on the beat', () => {
+  const { p, old } = fixture();
+  old.parts[0].notes = [note(64, 0, 3), note(62, 3.75, .25), note(64, 4, 2)];
+  const q = createChordChant(old, p, 'lead', [{ first: 1, last: 2 }], { leadPhrasing: true }).project;
+  for (const voice of q.parts.slice(1)) {
+    expect(voice.notes.some(n => n.start < 4 && n.start + n.duration > 3.5)).toBe(false);
+    expect(voice.notes.some(n => n.start === 4)).toBe(true);
+  }
+  expect(q.parts[0]).toEqual(old.parts[0]);
 });

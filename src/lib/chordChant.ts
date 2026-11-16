@@ -13,6 +13,7 @@ const EPS = 1e-6;
 export function createChordChant(
   scaffold: ScoreProject, source: ScoreProject, leadPartId: string,
   spans: Array<{ first: number; last: number }>,
+  options: { sourceStructure?: boolean; leadPhrasing?: boolean; register?: 'original' | 'raised' } = {},
 ) {
   const evidence = extractSourceHarmony(source, leadPartId);
   let project = structuredClone(scaffold);
@@ -34,7 +35,7 @@ export function createChordChant(
     }
     // Rest together at a phrase gap; continuous textures get a half-beat breath
     // after at most two bars. Breath timing is shared, not an extra rhythmic role.
-    const phrases = regions.flatMap(r => {
+    let phrases = regions.flatMap(r => {
       const result = [];
       for (let t = r.start; t < r.end - EPS; t += bar * 2) {
         const stop = Math.min(r.end, t + bar * 2);
@@ -42,16 +43,43 @@ export function createChordChant(
       }
       return result;
     });
+    if (options.leadPhrasing) {
+      const lead = project.parts.find(p => p.id === 'solo')!.notes.filter(n => n.midi !== null)
+        .sort((a, b) => a.start - b.start);
+      const breaths: Array<{ start: number; end: number }> = [];
+      let soundingEnd = -Infinity;
+      for (const n of lead) {
+        if (Number.isFinite(soundingEnd) && n.start - soundingEnd >= .5 - EPS && n.start > start && n.start < end) {
+          // A pickup in the final sixteenth joins the next beat's phrase. Let
+          // the Solo lead it in, then rearticulate the background on that beat.
+          const restart = Math.ceil(n.start) - n.start <= .25 + EPS ? Math.ceil(n.start) : n.start;
+          breaths.push({ start: Math.max(soundingEnd, restart - .5), end: restart });
+        }
+        soundingEnd = Math.max(soundingEnd, n.start + n.duration);
+      }
+      for (const breath of breaths) phrases = phrases.flatMap(p => {
+        const stop = p.start + p.duration;
+        if (p.start >= breath.end || stop <= breath.start) return [p];
+        return [
+          ...(p.start < breath.start ? [{ start: p.start, duration: breath.start - p.start }] : []),
+          ...(stop > breath.end ? [{ start: breath.end, duration: stop - breath.end }] : []),
+        ];
+      });
+    }
     const isolated = structuredClone(project);
     IDS.forEach((id, v) => {
       isolated.parts.find(p => p.id === id)!.notes = phrases.map((phrase, i): NoteEvent => ({
-        id: `chant-${id}-${start}-${i}`, ...phrase, midi: CENTRES[v],
+        id: `chant-${id}-${start}-${i}`, ...phrase, midi: (options.register === 'raised' ? [74, 67, 62, 45] : CENTRES)[v],
         velocity: .48, lyric: 'Hmm', dynamic: 'p', origin: 'arranged',
       }));
     });
     // Do not let a previous experimental line seed the new phrase's registers.
     // Identical source/Solo passages produce identical music at different offsets.
-    const realized = realizeJointVoicing(isolated, span, guides);
+    const realized = realizeJointVoicing(isolated, span, guides, {
+      sourceStructure: options.sourceStructure,
+      // Audition preference, not a universal claim about every singer's comfort.
+      tessitura: options.register === 'raised' ? [[72, 76], [64, 69], [60, 64], [40, 52]] : undefined,
+    });
     IDS.forEach(id => {
       const part = project.parts.find(p => p.id === id)!;
       const outside = part.notes.flatMap(n => n.start >= end || n.start + n.duration <= start ? [n] : [

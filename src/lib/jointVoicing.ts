@@ -21,7 +21,10 @@ function bassClass(chord: ChordEvent) {
  * harmonic hypotheses and rhythmic gestures remain separate from realization.
  * Notes may change pitch at an actual chord boundary; unchanged common tones
  * are rejoined to avoid manufacturing repeated syllables. No song-specific rules. */
-export function realizeJointVoicing(source: ScoreProject, span: { first: number; last: number }, sourceHarmony?: SourceHarmony[]) {
+export function realizeJointVoicing(source: ScoreProject, span: { first: number; last: number }, sourceHarmony?: SourceHarmony[], options: {
+  sourceStructure?: boolean;
+  tessitura?: Array<[number, number]>;
+} = {}) {
   const bar = beatsPerBar(source), start = (span.first - 1) * bar, end = span.last * bar;
   if (!(start >= 0 && end > start && end <= source.measures * bar)) throw Error('Invalid voicing span');
   const parts = IDS.map(id => source.parts.find(p => p.id === id));
@@ -108,6 +111,12 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
         }
         let vertical = 0;
         const active = current.filter((p): p is number => p !== null), pcs = new Set(active.map(pc));
+        if (options.tessitura) current.forEach((pitch, v) => {
+          if (pitch !== null) {
+            const band = options.tessitura![v];
+            if (band) vertical += Math.max(0, band[0] - pitch, pitch - band[1]) ** 2;
+          }
+        });
         for (let i = 0; i < 4; i++) if (current[i] !== null) {
           for (let j = i + 1; j < 4; j++) if (current[j] !== null) {
             const distance = current[i]! - current[j]!, interval = pc(distance);
@@ -125,6 +134,21 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
           }
         }
         if (chord && active.length >= 3) {
+          if (options.sourceStructure && harmony) {
+            const bass = bassClass(chord);
+            const upper = new Set(current.slice(0, 3).filter((p): p is number => p !== null).map(pc));
+            // Preserve supported upper harmony before doubling an existing tone.
+            // No chord member is fabricated: every candidate is still in source.
+            vertical += Math.max(0, Math.min(3, chordPcs.size - 1) - upper.size) * 12;
+            if (chordPcs.size >= 4 && upper.has(bass)) vertical += 8;
+            for (const member of chordPcs) {
+              if ([3, 4, 10, 11].includes(pc(member - bass)) && !pcs.has(member)) vertical += 8;
+            }
+            // Prefer a supported coherent upper triad to an arbitrary subset of
+            // extensions; allow augmented/diminished structures actually present.
+            const shapes = [[0, 4, 7], [0, 3, 7], [0, 3, 6], [0, 4, 8]];
+            if (upper.size === 3 && [...upper].some(root => shapes.some(shape => shape.every(d => upper.has(pc(root + d)))))) vertical -= 5;
+          }
           // Solo silence increases responsibility for harmonic identity. With
           // four singers, prioritize third/seventh before optional color tones.
           const root = pc(chord.pitches[0]), third = chord.pitches.map(pc).find(p => [3, 4, 5].includes(pc(p - root)));
