@@ -8,6 +8,42 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: source harmony chant, not piano-note transfer
+
+Bobby rejected literal transfer of piano figures into all four voices. The new
+opt-in `sourceChant.ts` separates harmonic arrivals from instrumental events.
+It uses the explicitly selected accompaniment/bass staves and the previous MIDI
+notation preprocessing. Solo never supplies replacement harmony.
+
+```mermaid
+flowchart LR
+  SOURCE[Selected reliable accompaniment staves] -.-> ARRIVALS[Block chord arrivals and structural bass arrivals]
+  ARRIVALS -.-> HOLD[Hold through single-note fills and repeated pulses]
+  HOLD -.-> REDUCE[Source-supported upper structure plus actual bass]
+  REDUCE -.-> SATB[Comfort-range octave allocation and common-tone continuity]
+  SOLO[Unchanged Solo pickups] -.-> BREATH[Safe breath placement]
+  SATB -.-> BREATH
+  BREATH -.-> REVIEW[Original piano / literal transfer / simple chant]
+```
+
+New sustained blocks and on-beat bass landmarks can change harmony; a single-note
+fill or octave-up bass figure does not automatically do so. Repeated pulses that
+omit a member preserve the previous source harmony. This is an explicit reduction
+heuristic, not proven chord/function recognition. Above four pitch classes, prefer
+a triad already present in the upper structure plus bass, with a preference against
+extra seconds above bass when alternatives exist. Log all omitted colors; do not
+invent pitches or call the result an exact copy of every original chord color.
+
+SATB ranges for this audition are E4–C5, A3–A4, D3–E4, E2–G3. Common tones can
+continue, but source silence and breaths break them. A Solo pickup after a gap can
+lead into a shared downbeat restart. Continuous humming has a two-measure breath
+budget; placement must leave a genuine short harmonic event audible, rather than
+erase it with a rest. There are no note-count quotas or song/bar-specific rules.
+
+Only the two verse excerpts change. Solo, ensemble and accepted excerpt remain
+exact. Private review: `tests/private-source-chant-review.html`. Formal defaults,
+old candidates and unmerged arranging PRs are unchanged; Bobby listening pending.
+
 ## 2026-11-16: literal source accompaniment transfer audition
 
 Bobby rejected the harmonic-interpretation audition. PR #58 remains unmerged.

@@ -15,13 +15,14 @@ export interface TransferSlice {
 /** Literal reduction of selected accompaniment staves, not harmonic inference.
  * No chord dictionary, Solo-based correction, invented tone, or pedal extension.
  * Rhythmic figures in the source remain rhythmic figures in the reduction. */
-export function transferSourceToSatb(
-  scaffold: ScoreProject, source: ScoreProject, accompanimentIds: string[],
-  spans: Array<{ first: number; last: number }>,
-  options: { collapseRolledChords?: boolean; reducePerformedGraceNotes?: boolean } = {},
-) {
-  const project = structuredClone(scaffold), bar = beatsPerBar(source);
-  if (beatsPerBar(project) !== bar || !IDS.every(id => project.parts.some(p => p.id === id))) throw Error('SATB scaffold/meter mismatch');
+export interface SourceTransferOptions {
+  collapseRolledChords?: boolean;
+  reducePerformedGraceNotes?: boolean;
+  connectCommonTones?: boolean;
+  voiceRanges?: Array<[number, number]>;
+}
+
+export function prepareSourceNotes(source: ScoreProject, accompanimentIds: string[], options: SourceTransferOptions = {}) {
   if (!accompanimentIds.length || accompanimentIds.some(id => !source.parts.some(p => p.id === id))) throw Error('Select source accompaniment staves');
   const rolls: Array<{ sourceNoteIds: string[]; start: number; end: number }> = [];
   const ornaments: Array<{ graceId: string; mainIds: string[]; start: number; end: number }> = [];
@@ -68,6 +69,18 @@ export function transferSourceToSatb(
     }
     return ns.filter(n => !excluded.has(n.id));
   });
+  return { notes, rolls, ornaments };
+}
+
+export function transferSourceToSatb(
+  scaffold: ScoreProject, source: ScoreProject, accompanimentIds: string[],
+  spans: Array<{ first: number; last: number }>, options: SourceTransferOptions = {},
+) {
+  const project = structuredClone(scaffold), bar = beatsPerBar(source);
+  if (beatsPerBar(project) !== bar || !IDS.every(id => project.parts.some(p => p.id === id))) throw Error('SATB scaffold/meter mismatch');
+  const ranges = options.voiceRanges ?? RANGES;
+  if (ranges.length !== 4 || ranges.some(([lo, hi]) => !Number.isInteger(lo) || !Number.isInteger(hi) || lo < 0 || hi > 127 || lo > hi)) throw Error('Invalid SATB ranges');
+  const { notes, rolls, ornaments } = prepareSourceNotes(source, accompanimentIds, options);
   const slices: TransferSlice[] = [];
   const sortedSpans = [...spans].sort((a, b) => a.first - b.first);
   if (sortedSpans.some((s, i) => !Number.isInteger(s.first) || !Number.isInteger(s.last) || s.first < 1 || s.last < s.first || s.last > Math.min(project.measures, source.measures) || (i > 0 && s.first <= sortedSpans[i - 1].last))) throw Error('Invalid or overlapping spans');
@@ -87,7 +100,7 @@ export function transferSourceToSatb(
       // the actual bass and uppermost source tones; expose every omitted class.
       const kept = [pc(active[0].midi)];
       for (const n of [...active].reverse()) if (!kept.includes(pc(n.midi)) && kept.length < 4) kept.push(pc(n.midi));
-      const choices = RANGES.map(([lo, hi], v) => Array.from({ length: hi - lo + 1 }, (_, k) => lo + k)
+      const choices = ranges.map(([lo, hi], v) => Array.from({ length: hi - lo + 1 }, (_, k) => lo + k)
         .filter(m => v === 3 ? pc(m) === pc(active[0].midi) : kept.includes(pc(m))));
       let best: number[] | undefined, cost = Infinity;
       for (const s of choices[0]) for (const alto of choices[1]) for (const t of choices[2]) for (const bass of choices[3]) {
@@ -102,7 +115,7 @@ export function transferSourceToSatb(
         omitted: pitches.filter(p => !kept.includes(p)), voicing: best });
       best.forEach((midi, v) => {
         const tail = output[v].at(-1);
-        const reattack = active.some(n => Math.abs(n.start - start) < EPS && pc(n.midi) === pc(midi));
+        const reattack = !options.connectCommonTones && active.some(n => Math.abs(n.start - start) < EPS && pc(n.midi) === pc(midi));
         if (tail && tail.midi === midi && Math.abs(tail.start + tail.duration - start) < EPS && !reattack) tail.duration += end - start;
         else output[v].push({ id: `transfer-${IDS[v]}-${start}`, midi, start, duration: end - start, velocity: .48,
           lyric: !tail || start - tail.start - tail.duration >= .5 - EPS ? 'Hmm' : '',
