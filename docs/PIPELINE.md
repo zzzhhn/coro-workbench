@@ -8,6 +8,46 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: literal source accompaniment transfer audition
+
+Bobby rejected the harmonic-interpretation audition. PR #58 remains unmerged.
+The new opt-in `sourceTransfer.ts` bypasses chord naming and `jointVoicing`.
+Selected accompaniment staves, not Solo or generated backgrounds, supply every
+pitch class. Actual note starts and releases delimit the source sonorities.
+
+```mermaid
+flowchart LR
+  SCORE[Explicitly selected reliable accompaniment staves] -.-> EVENTS[Actual sounding notes and bass]
+  EVENTS -.-> FOUR[Keep all pitch classes up to four; disclose capacity omissions]
+  FOUR -.-> RANGE[Octave allocation into SATB ranges]
+  RANGE -.-> OUT[Source-faithful candidate with note provenance]
+  SCORE -.-> REF[Original piano playback]
+  OUT -.-> REVIEW[Original / rejected previous / direct transfer audition]
+  REF -.-> REVIEW
+```
+
+The actual lowest sounding source pitch class stays in Bass. All source pitch
+classes are required when there are at most four. With more than four, retain
+the lowest pitch and the highest remaining distinct classes; explicitly report
+omissions. This is a deterministic capacity reduction, not harmonic importance
+analysis. Motion/register preferences can choose octaves but cannot add tones.
+No extension through source silence, no invented breaths, no Solo-led correction.
+Source figures and reattacks remain; this is not yet a complete vocal arrangement.
+An optional, logged preprocessing step makes tightly staggered ascending,
+overlapping MIDI rolled chords simultaneous. It is an inference, not literal
+timing preservation, and is off by default.
+
+Another default-off, logged reduction recognizes isolated very short on-beat
+MIDI attacks immediately followed by a sustained event as possible performed
+grace notes. It omits that ornament only from the backing reduction and moves the
+main event to the beat. It does not remove short runs. Original playback retains
+all ornaments; this inference still needs listening review.
+
+Private audition enables both MIDI notation options, retains Solo and the approved excerpt,
+and changes only the two verse excerpts. A is original piano plus the same Solo;
+B is the rejected interpretation; C is direct allocation. Production default is
+unchanged. Private entry: `tests/private-source-transfer-review.html`.
+
 ## 2026-11-16: explicit harmonic interpretation before chant voicing
 
 Bobby still rejects the harmony in the previous candidates. `harmonicPlan.ts` is
