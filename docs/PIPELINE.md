@@ -8,6 +8,39 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: plain chord chant, following rejection of melodic backgrounds
+
+Bobby rejected the rebuild: repeated verse melodies received unnecessarily complex
+background lines. `chordChant.ts` is a deliberately simpler opt-in path. It bypasses
+foundation/motif/dialogue planning entirely, sustains source-supported harmony with
+Hmm, and uses joint voicing only to connect those sustained voices. Source events
+shorter than one beat are omitted from this reduction, leaving explicit gaps;
+continuous regions have a shared half-beat breath after at most two bars. This is
+a limited harmonic chant candidate, not a claim of skilled full-song arranging.
+
+```mermaid
+flowchart LR
+  SCORE[Reliable source accompaniment] -.-> HARMONY[Supported sustained harmony and bass]
+  HARMONY -.-> HOLD[Shared sustained Hmm regions with breath gaps]
+  HOLD -.-> VOICE[Joint SATB voice leading; no melodic dialogue]
+  SOLO[Unchanged Solo] -.-> VOICE
+  VOICE -.-> REVIEW[Piano mix and individual stems; Bobby listening]
+  OLD[Approved passage and rejected candidates preserved] -.-> REVIEW
+```
+
+The voicer starts independently of prior experimental background notes. Identical
+source/Solo passages at different locations produce the same chant; this is not a
+fuzzy repeated-section detector. Actual accompaniment differences can change voicing.
+Only the two rejected verse excerpts are regenerated; the accepted excerpt, Solo
+and ensemble are unchanged. No song title, bar-specific notes or reference template
+enters the algorithm. Source extraction and joint-voicing heuristics still apply.
+
+Private entry: `tests/private-chant-review.html`, existing 5174 service. A is the
+partially accepted original, B the rejected rebuild, C plain chant. Ten new mix/stem
+clips use piano backing and static-gain loudness matching. All 16 rewritten bars
+were visually inspected. Eighteen focused tests and TypeScript pass; these do not
+constitute listening acceptance. Production defaults are unchanged.
+
 ## 2026-11-16: rebuild from the partially accepted joint-voicing implementation
 
 Bobby rejected the subsequent anchor/structural-voicing experiments (#52/#53).
