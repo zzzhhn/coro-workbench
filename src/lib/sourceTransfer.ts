@@ -24,6 +24,8 @@ export interface SourceTransferOptions {
   melodyPartId?: string;
   /** Optional absolute-beat repair window inside the context spans. */
   editWindow?: { start: number; end: number };
+  /** Disable merging across a frozen region's note-object boundary. */
+  joinWindowEdges?: boolean;
 }
 
 export function prepareSourceNotes(source: ScoreProject, accompanimentIds: string[], options: SourceTransferOptions = {}) {
@@ -202,7 +204,7 @@ export function transferSourceToSatb(
         ...(n.start + n.duration > b ? [{ ...n, id: n.id + '-outside', start: b, duration: n.start + n.duration - b }] : []),
       ]);
       part.notes = [...outside, ...output[v]].sort((x, y) => x.start - y.start);
-      if (options.editWindow && options.connectCommonTones) {
+      if (options.editWindow && options.connectCommonTones && options.joinWindowEdges !== false) {
         const joined: NoteEvent[] = [];
         for (const n of part.notes) {
           const tail = joined.at(-1);

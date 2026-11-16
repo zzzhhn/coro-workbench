@@ -155,4 +155,9 @@ it('repairs only the selected beats and retains frozen neighboring attacks', () 
   for (const window of [{ start: -1, end: 2 }, { start: 2, end: 2 }, { start: 1, end: Infinity }]) {
     expect(() => transferSourceToSatb(scaffold, source, ['upper', 'low'], spans, { editWindow: window })).toThrow('Invalid edit window');
   }
+  scaffold.parts.slice(1).forEach(p=>{p.notes[0].duration=1;});
+  const frozen=transferSourceToSatb(scaffold,source,['upper','low'],spans,{
+    melodyPartId:'solo',connectCommonTones:true,editWindow:{start:1,end:3},joinWindowEdges:false,
+  });
+  frozen.project.parts.slice(1).forEach((p,i)=>expect(p.notes.filter(n=>n.start<1||n.start>=3)).toEqual(scaffold.parts[i+1].notes));
 });

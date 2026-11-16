@@ -9,7 +9,7 @@ type Pitched = NoteEvent & { midi: number };
 export interface ChantAnchor {
   start: number; duration: number; bass: number; upper: number[];
   sourceUpper: number[]; omitted: number[];
-  sourceNoteIds: string[]; reason: 'chord-arrival' | 'bass-arrival';
+  sourceNoteIds: string[]; reason: 'chord-arrival' | 'bass-arrival' | 'instrumental-arpeggio' | 'octave-unison';
 }
 
 function reduceUpper(upper: number[], bass: number, preserveGuideTones = false, vocalCore = false): { upper: number[]; omitted: number[] } {
@@ -68,7 +68,7 @@ export function createSourceChant(
   scaffold: ScoreProject, source: ScoreProject,
   selection: { accompanimentIds: string[]; bassPartId: string },
   spans: Array<{ first: number; last: number }>,
-  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' | 'vocal-core'; editWindow?: { start: number; end: number } } = {},
+  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' | 'vocal-core'; editWindow?: { start: number; end: number }; joinWindowEdges?: boolean; recoverInstrumentalArpeggios?: boolean } = {},
 ) {
   const bar = beatsPerBar(source);
   if (!selection.accompanimentIds.includes(selection.bassPartId)) throw Error('Bass staff must belong to selected accompaniment');
@@ -144,6 +144,37 @@ export function createSourceChant(
       local.push({ start: t, duration: 0, bass: pc(bass.midi), ...reduction, sourceUpper: pitches,
         sourceNoteIds: [...new Set([bass.id, ...upper.map(n => n.id)])], reason: chordArrival ? 'chord-arrival' : 'bass-arrival' });
     }
+    if (options.recoverInstrumentalArpeggios) {
+      for (let start = a; start < b; start += bar) {
+        const end = Math.min(start + bar, b);
+        if (local.some(g => g.start >= start && g.start < end && g.reason === 'chord-arrival')) continue;
+        const run = ns.filter(n => n.start >= start && n.start < end).sort((x, y) => x.start - y.start || x.midi - y.midi);
+        if (run.length < 2 || Math.abs(run[0].start - start) > EPS || run.some(n => n.duration < .45)) continue;
+        let covered = start, gaps = false;
+        for (const n of run) { if (n.start > covered + EPS) gaps = true; covered = Math.max(covered, n.start + n.duration); }
+        if (gaps || covered < end - .25) continue;
+        const pitches = [...new Set(run.map(n => n.midi))], classes = [...new Set(pitches.map(pc))];
+        const root = pc(Math.min(...pitches));
+        const octaves = classes.length === 1;
+        // A monotonic, non-overlapping expansion of an actual triad is
+        // harmonic evidence. A scalar fill is not. Only selected accompaniment
+        // notes contribute, whether or not Solo overlaps the instrumental run.
+        const monotonic = run.every((n, i) => !i || (n.midi >= run[i - 1].midi && n.start >= run[i - 1].start + run[i - 1].duration - EPS))
+          || run.every((n, i) => !i || (n.midi <= run[i - 1].midi && n.start >= run[i - 1].start + run[i - 1].duration - EPS));
+        const intervals = classes.map(c => pc(c - root));
+        const triad = [[0, 4, 7], [0, 3, 7]].some(form => form.every(d => intervals.includes(d))
+          && intervals.every(d => [...form, 2, 10, 11].includes(d)) && intervals.length <= 5);
+        if (!octaves && (!monotonic || !triad)) continue;
+        // Bass-only arrivals may have inherited an obsolete upper harmony.
+        // Replace that inference with the complete written arpeggio evidence.
+        for (let i = local.length - 1; i >= 0; i--) if (local[i].start >= start && local[i].start < end) local.splice(i, 1);
+        const upperPitches = octaves ? pitches : pitches.filter(m => pc(m) !== root);
+        const reduced = reduceUpper(upperPitches, root, true, options.harmony === 'vocal-core');
+        local.push({ start, duration: 0, bass: root, ...reduced, sourceUpper: upperPitches,
+          sourceNoteIds: run.map(n => n.id), reason: octaves ? 'octave-unison' : 'instrumental-arpeggio' });
+      }
+      local.sort((x, y) => x.start - y.start);
+    }
     // A fill can continue the accompaniment but never changes its harmony.
     // An actual half-beat-or-longer accompaniment silence remains a rest.
     const coverage: Array<{ start: number; end: number }> = [];
@@ -151,6 +182,13 @@ export function createSourceChant(
       const start = Math.max(a, n.start), end = Math.min(b, n.start + n.duration), tail = coverage.at(-1);
       if (tail && start - tail.end < .5 - EPS) tail.end = Math.max(tail.end, end);
       else coverage.push({ start, end });
+    }
+    // A near-complete final octave-unison is a sung release at the bar line,
+    // not a request for a tiny machine-gate rest. This arrangement-only option
+    // does not change source notes, internal gaps, or the frozen scaffold.
+    if (options.recoverInstrumentalArpeggios && local.at(-1)?.reason === 'octave-unison') {
+      const tail = coverage.at(-1);
+      if (tail && b - tail.end > EPS && b - tail.end <= .125 + EPS) tail.end = b;
     }
     allCoverage.push(...coverage);
     for (let i = 0; i < local.length; i++) {
@@ -219,6 +257,7 @@ export function createSourceChant(
     connectCommonTones: options.rhythm !== 'phrase-pulse', voiceRanges: [[64, 76], [57, 69], [50, 64], [40, 55]],
     melodyPartId: options.harmony === 'vocal-core' ? 'solo' : undefined,
     editWindow: options.editWindow,
+    joinWindowEdges: options.joinWindowEdges,
   });
   return { ...result, anchors, breaths, bassRoleDecisions, phraseBlocks: phrase?.blocks, preprocessing: { rolls: prepared.rolls, ornaments: prepared.ornaments } };
 }

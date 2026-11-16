@@ -8,6 +8,45 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: accepted excerpt baseline, full-song candidate
+
+Bobby accepted the final two-beat repair and requested expansion. Preserve
+`eea5cd8` and its private score as the accepted **excerpt** baseline. The accepted
+scope is 13–20, 21–28 and 45–52, not the entire archived score outside those spans.
+
+```mermaid
+flowchart LR
+  B[Accepted score snapshot and hashes] --> L[Lock approved spans and whole Solo]
+  S[Reliable original accompaniment] --> H[Harmony arrivals and limited arpeggio evidence]
+  H --> V[Vocal-core SATB with frozen boundary context]
+  L --> V
+  V --> C[Generate only complement of locked spans]
+  C --> E[Exact frozen-note and ensemble checks]
+  E --> R[Full-song piano and sampled choir comparisons]
+  R --> U[Section-by-section listening review]
+```
+
+Full-song audition covers 70 source-score measures. Opt-in
+`recoverInstrumentalArpeggios` recovers complete, continuous, monotonic source
+arpeggios when no explicit block arrival exists; scalar runs are excluded.
+This can replace a stale upper structure inherited at a bass-only arrival.
+An exposed octave unison stays unison instead of acquiring invented chord tones.
+`joinWindowEdges: false` preserves frozen note objects exactly while retaining
+common-tone joins inside newly generated regions.
+
+Private review: `tests/private-full-song-review.html`. Baseline manifest and
+artifact hashes live in `output/arranger-full-song/`; public source contains no
+private score. A is original piano + Solo; B is the prior snapshot (only its
+locked excerpts are accepted); C is the full candidate. B/C use identical timbre
+choices and full-song loudness normalization. Production defaults and merge
+remain unchanged until a separate adoption decision.
+
+The review defaults to **whole song, measures 1–70**, with continuous playback,
+eight section choices and two-measure score paging. Piano and sampled choir
+share the same notes. A final octave-unison release within one eighth beat of
+the barline may close at the barline in the new arrangement; source notes and
+all frozen excerpt note objects remain untouched.
+
 ## 2026-11-16: two-beat repair with frozen boundary voices
 
 Bobby now reports that the three audition excerpts are essentially satisfactory
