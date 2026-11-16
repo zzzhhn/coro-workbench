@@ -1,5 +1,6 @@
 import type { NoteEvent, ScoreProject } from './types';
 import { beatsPerBar } from './music';
+import { planPhraseChant, type ChantRegion } from './phraseChant';
 import { prepareSourceNotes, transferSourceToSatb } from './sourceTransfer';
 
 const EPS = 1e-6;
@@ -38,6 +39,7 @@ export function createSourceChant(
   scaffold: ScoreProject, source: ScoreProject,
   selection: { accompanimentIds: string[]; bassPartId: string },
   spans: Array<{ first: number; last: number }>,
+  options: { rhythm?: 'phrase-pulse'; blockBars?: number } = {},
 ) {
   const bar = beatsPerBar(source);
   if (!selection.accompanimentIds.includes(selection.bassPartId)) throw Error('Bass staff must belong to selected accompaniment');
@@ -45,6 +47,7 @@ export function createSourceChant(
   const bassIds = new Set(source.parts.find(p => p.id === selection.bassPartId)!.notes.map(n => n.id));
   const low = prepared.notes.filter(n => bassIds.has(n.id));
   const high = prepared.notes.filter(n => !bassIds.has(n.id));
+  const allCoverage: ChantRegion[] = [];
   const anchors: ChantAnchor[] = [], breaths: Array<{ start: number; end: number }> = [];
   const control = structuredClone(source);
   const template = source.parts.find(p => selection.accompanimentIds.includes(p.id))!;
@@ -99,10 +102,12 @@ export function createSourceChant(
       if (tail && start - tail.end < .5 - EPS) tail.end = Math.max(tail.end, end);
       else coverage.push({ start, end });
     }
+    allCoverage.push(...coverage);
     for (let i = 0; i < local.length; i++) {
       const g = local[i]; g.duration = (local[i + 1]?.start ?? b) - g.start;
       anchors.push(g);
     }
+    if (options.rhythm === 'phrase-pulse') continue;
     // Breath budget is explicit, not inherited from the piano's reattacks.
     // Prefer an existing Solo gap before a bar line; otherwise release half a
     // beat at a bar line after at most two measures of continuous humming.
@@ -147,8 +152,21 @@ export function createSourceChant(
       });
     }
   }
+  const phrase = options.rhythm === 'phrase-pulse' ? planPhraseChant(anchors, allCoverage,
+    spans.map(s => ({ start: (s.first - 1) * bar, end: s.last * bar })), bar, source.tempo, options.blockBars) : undefined;
+  if (phrase) {
+    breaths.push(...phrase.breaths);
+    for (const r of phrase.events) {
+      const g = r.anchor;
+      let bassMidi = 36 + g.bass;
+      while (bassMidi >= Math.min(...g.upper)) bassMidi -= 12;
+      for (const midi of [bassMidi, ...g.upper]) controlNotes.push({
+        id: `chant-pulse-${r.start}-${midi}`, start: r.start, duration: r.end - r.start, midi, velocity: .48,
+      });
+    }
+  }
   const result = transferSourceToSatb(scaffold, control, ['chant-source-reduction'], spans, {
-    connectCommonTones: true, voiceRanges: [[64, 76], [57, 69], [50, 64], [40, 55]],
+    connectCommonTones: options.rhythm !== 'phrase-pulse', voiceRanges: [[64, 76], [57, 69], [50, 64], [40, 55]],
   });
-  return { ...result, anchors, breaths, preprocessing: { rolls: prepared.rolls, ornaments: prepared.ornaments } };
+  return { ...result, anchors, breaths, phraseBlocks: phrase?.blocks, preprocessing: { rolls: prepared.rolls, ornaments: prepared.ornaments } };
 }

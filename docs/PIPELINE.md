@@ -8,6 +8,37 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: phrase-stable chant audition
+
+The previous source chant still varied rhythm too often. New opt-in
+`rhythm: 'phrase-pulse'` adds `phraseChant.ts` between harmonic reduction and
+SATB allocation. It chooses a shared pulse over at least four measures, based
+on the whole-beat harmonic arrivals of that block. Source harmony and bass
+arrivals remain unchanged; a real off-grid change is an explicit exception.
+
+```mermaid
+flowchart LR
+  SOURCE[Selected reliable accompaniment] -.-> HARMONY[Existing source harmony reduction]
+  HARMONY -.-> BLOCK[Four-or-more-bar pulse and breath contract]
+  BLOCK -.-> VOICES[Same SATB ranges and source-supported pitches]
+  VOICES -.-> REVIEW[Original / previous chant / stable pulse audition]
+  REFERENCES[Development score study] -.-> POLICY[Role persistence and bounded exceptions]
+  POLICY -.-> BLOCK
+  HOLDOUT[Unread holdout scores] -.-> LATER[Future independent evaluation]
+```
+
+A pulse can be one bar, half a bar, or one beat, selected from source constraints;
+there is no borrowed reference-song cell. Common tones now rearticulate on the
+same clock. Breathing repeats at a tempo-dependent interval; it never deletes
+an entire short harmonic arrival. Source silence overrides the pulse. This is a
+quiet chant policy, not a general arrangement model or a musical acceptance claim.
+It may sound too regular; more repeated notes is an intentional tradeoff to test.
+
+Private entry: `tests/private-phrase-chant-review.html`; artifacts in
+`output/arranger-phrase-chant/`. Only the two verse excerpts change; Solo, ensemble,
+approved 21–28 and all old auditions stay intact. Production defaults and PRs
+remain unchanged. Study scope and curriculum: [audition learning](ARRANGEMENT_AUDITION_LEARNINGS.md).
+
 ## 2026-11-16: source harmony chant, not piano-note transfer
 
 Bobby rejected literal transfer of piano figures into all four voices. The new
