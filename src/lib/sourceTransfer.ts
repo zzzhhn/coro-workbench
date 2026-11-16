@@ -22,6 +22,8 @@ export interface SourceTransferOptions {
   voiceRanges?: Array<[number, number]>;
   /** Optional register allocation against a fixed melody; never rewrites it. */
   melodyPartId?: string;
+  /** Optional absolute-beat repair window inside the context spans. */
+  editWindow?: { start: number; end: number };
 }
 
 export function prepareSourceNotes(source: ScoreProject, accompanimentIds: string[], options: SourceTransferOptions = {}) {
@@ -83,13 +85,27 @@ export function transferSourceToSatb(
   const ranges = options.voiceRanges ?? RANGES;
   const melody = options.melodyPartId ? scaffold.parts.find(p => p.id === options.melodyPartId) : undefined;
   if (options.melodyPartId && !melody) throw Error('Selected melody part is missing');
+  if (options.editWindow && (!Number.isFinite(options.editWindow.start) || !Number.isFinite(options.editWindow.end)
+    || options.editWindow.start < 0 || options.editWindow.end <= options.editWindow.start
+    || options.editWindow.end > Math.min(project.measures, source.measures) * bar)) throw Error('Invalid edit window');
   if (ranges.length !== 4 || ranges.some(([lo, hi]) => !Number.isInteger(lo) || !Number.isInteger(hi) || lo < 0 || hi > 127 || lo > hi)) throw Error('Invalid SATB ranges');
   const { notes, rolls, ornaments } = prepareSourceNotes(source, accompanimentIds, options);
   const slices: TransferSlice[] = [];
   const sortedSpans = [...spans].sort((a, b) => a.first - b.first);
   if (sortedSpans.some((s, i) => !Number.isInteger(s.first) || !Number.isInteger(s.last) || s.first < 1 || s.last < s.first || s.last > Math.min(project.measures, source.measures) || (i > 0 && s.first <= sortedSpans[i - 1].last))) throw Error('Invalid or overlapping spans');
   for (const span of sortedSpans) {
-    const a = (span.first - 1) * bar, b = span.last * bar;
+    const a = Math.max((span.first - 1) * bar, options.editWindow?.start ?? -Infinity);
+    const b = Math.min(span.last * bar, options.editWindow?.end ?? Infinity);
+    if (b <= a) continue;
+    // Frozen adjacent notes are boundary conditions, not regenerated context.
+    const edgePitches = (time: number, before: boolean) => IDS.map(id => options.editWindow
+      ? scaffold.parts.find(p => p.id === id)!.notes.find(n => n.midi !== null && (before
+        ? n.start < time - EPS && n.start + n.duration >= time - EPS
+        : n.start <= time + EPS && n.start + n.duration > time + EPS))?.midi
+      : undefined);
+    const entry = edgePitches(a, true), exit = edgePitches(b, false);
+    const edgeMotion = (voicing: number[], edge: Array<number | null | undefined>) => voicing.reduce((sum, m, v) =>
+      sum + (edge[v] == null ? 0 : Math.abs(m - edge[v]!)), 0);
     const relevant = notes.filter(n => n.start < b && n.start + n.duration > a);
     const boundaries = [...new Set([a, b, ...relevant.flatMap(n => [Math.max(a, n.start), Math.min(b, n.start + n.duration)])])].sort((x, y) => x - y);
     const output: NoteEvent[][] = IDS.map(() => []);
@@ -158,7 +174,9 @@ export function transferSourceToSatb(
         let bestPath = paths[0], cost = Infinity;
         for (const path of paths) {
           const previous = connected ? path.history.at(-1) : undefined;
-          const total = path.cost + choice.cost + (previous ? choice.voicing.reduce((sum, m, v) => sum + Math.abs(m - previous[v]), 0) : 0);
+          const total = path.cost + choice.cost + (previous ? choice.voicing.reduce((sum, m, v) => sum + Math.abs(m - previous[v]), 0) : 0)
+            + (index === 0 && Math.abs(frame.start - a) < EPS ? edgeMotion(choice.voicing, entry) : 0)
+            + (index === frames.length - 1 && Math.abs(frame.end - b) < EPS ? edgeMotion(choice.voicing, exit) : 0);
           if (total < cost) { cost = total; bestPath = path; }
         }
         return { cost, history: [...bestPath.history, choice.voicing] };
@@ -184,6 +202,18 @@ export function transferSourceToSatb(
         ...(n.start + n.duration > b ? [{ ...n, id: n.id + '-outside', start: b, duration: n.start + n.duration - b }] : []),
       ]);
       part.notes = [...outside, ...output[v]].sort((x, y) => x.start - y.start);
+      if (options.editWindow && options.connectCommonTones) {
+        const joined: NoteEvent[] = [];
+        for (const n of part.notes) {
+          const tail = joined.at(-1);
+          if (tail && n.midi !== null && tail.midi === n.midi && tail.velocity === n.velocity
+            && (Math.abs(n.start - a) < EPS || (Math.abs(n.start - b) < EPS
+              && scaffold.parts.find(p => p.id === id)!.notes.some(old => old.midi === n.midi && old.start < b - EPS && old.start + old.duration > b + EPS)))
+            && Math.abs(tail.start + tail.duration - n.start) < EPS) tail.duration += n.duration;
+          else joined.push(n);
+        }
+        part.notes = joined;
+      }
     });
   }
   return { project, slices, rolls, ornaments };

@@ -8,6 +8,40 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: two-beat repair with frozen boundary voices
+
+Bobby now reports that the three audition excerpts are essentially satisfactory
+except bar 17 beats 3 and 4. Preserve `d99644a` and its private audio as the
+user-reviewed baseline. This is acceptance of those excerpts, not the full song.
+
+```mermaid
+flowchart LR
+  S[Reliable source and context bars] --> H[Source harmonic arrivals]
+  H --> B[Distinguish continuing pedal from independent new bass]
+  B --> V[Vocal-core reduction and Solo-aware SATB]
+  F[Frozen voices before and after selection] --> V
+  V --> W[Replace only selected beat window]
+  W --> A[Old/new scores and matched piano or choir audio]
+  A --> U[User listening approval pending for two beats]
+```
+
+In `vocal-core`, a lone high left-hand arrival no longer inherits the old bass
+solely because of register. Retention needs a continuing written pedal or a
+left-hand chord block; a bass ending at the arrival is not a continuing pedal.
+Legacy `sustained-bass` remains reproducible. This remains a role heuristic.
+
+Optional `editWindow` uses full context for harmonic analysis but replaces only
+the selected beats. Frozen incoming/outgoing pitches constrain voicing; common
+tones can join at the boundary while an existing reattack outside it survives.
+The current private audition selects beats 66 to 68; no song or bar rule exists
+inside the shared algorithm. The other reviewed excerpts are not regenerated.
+
+Private page: `tests/private-held-note-review.html`. New piano/choir mixes and
+SATB stems are normalized to −23 LUFS. No production default or merge.
+See [the arranging method](ACAPPELLA_ARRANGING_METHOD.md) for lessons, counterexamples,
+scope of acceptance, and the distinction between bass-relative heuristics and
+actual root/function analysis.
+
 ## 2026-11-16: quiet vocal-core audition, frozen earlier excerpts
 
 Bobby reported relative improvement in 13–28 but rejected 47–48, while confirming

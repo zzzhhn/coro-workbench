@@ -68,7 +68,7 @@ export function createSourceChant(
   scaffold: ScoreProject, source: ScoreProject,
   selection: { accompanimentIds: string[]; bassPartId: string },
   spans: Array<{ first: number; last: number }>,
-  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' | 'vocal-core' } = {},
+  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' | 'vocal-core'; editWindow?: { start: number; end: number } } = {},
 ) {
   const bar = beatsPerBar(source);
   if (!selection.accompanimentIds.includes(selection.bassPartId)) throw Error('Bass staff must belong to selected accompaniment');
@@ -106,11 +106,18 @@ export function createSourceChant(
       // a genuine bass move, not an upper-voicing replacement.
       const confirmedBassMove = lowArrival && low.some(n => n.start > t + EPS && n.start <= t + 1 + EPS
         && n.duration >= .45 && pc(n.midi) === pc(lowArrival.midi) && n.midi <= lowArrival.midi - 12);
+      // Register alone cannot turn an independent left-hand note into comping.
+      // Prefer the written new bass unless a continuing pedal or a left-hand
+      // block supports retaining the old foundation. Ending exactly at t is
+      // not a continuing pedal. Keep historical audition mode reproducible.
+      const foundation = bass;
+      const supportedComping = options.harmony !== 'vocal-core' || blockLow || (foundation && low.some(n =>
+        n.start < t - EPS && n.start + n.duration > t + EPS && n.midi <= foundation.midi && pc(n.midi) === pc(foundation.midi)));
       // A piano's left hand is not a monophonic bass part. A large upward
       // leap into the chord register inside a continuous measure can complete
       // the upper structure without replacing its low foundation. This opt-in
       // inference is logged; bar starts and genuinely low moves remain anchors.
-      const comping = options.harmony !== undefined && !confirmedBassMove && bass && lowArrival && upper.length > 0
+      const comping = options.harmony !== undefined && supportedComping && !confirmedBassMove && bass && lowArrival && upper.length > 0
         && Math.abs(t / bar - Math.round(t / bar)) > EPS
         && lowArrival.midi - bass.midi >= 10 && lowArrival.midi >= Math.min(...upper.map(n => n.midi)) - 12
         && (blockHigh || blockLow) && ns.some(n => n.start < t && n.start + n.duration >= t - EPS);
@@ -211,6 +218,7 @@ export function createSourceChant(
   const result = transferSourceToSatb(scaffold, control, ['chant-source-reduction'], spans, {
     connectCommonTones: options.rhythm !== 'phrase-pulse', voiceRanges: [[64, 76], [57, 69], [50, 64], [40, 55]],
     melodyPartId: options.harmony === 'vocal-core' ? 'solo' : undefined,
+    editWindow: options.editWindow,
   });
   return { ...result, anchors, breaths, bassRoleDecisions, phraseBlocks: phrase?.blocks, preprocessing: { rolls: prepared.rolls, ornaments: prepared.ornaments } };
 }

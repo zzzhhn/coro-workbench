@@ -28,6 +28,22 @@ function fixture(pitches: number[], lead = 64) {
 }
 const selection = { accompanimentIds: ['upper', 'low'], bassPartId: 'low' };
 const spans = [{ first: 1, last: 1 }];
+it('follows an independent new left-hand bass after the previous bass releases, in every key', () => {
+  for (let shift = 0; shift < 12; shift++) {
+    const { source, scaffold } = fixture([44, 54, 58, 62]);
+    source.parts[0].notes = [...[54, 58, 62].map(m => n(m + shift, 0, 2)),
+      ...[70, 74, 78].map(m => n(m + shift, 2, 2))];
+    source.parts[1].notes = [n(44 + shift, 0, 2), n(60 + shift, 2, 2)];
+    const r = createSourceChant(scaffold, source, selection, spans, { harmony: 'vocal-core' });
+    expect(r.anchors[1].bass).toBe(shift % 12);
+    expect(r.bassRoleDecisions).toHaveLength(0);
+    // A genuinely continuing pedal is evidence for the opposite decision.
+    source.parts[1].notes[0].duration = 4;
+    const pedal = createSourceChant(scaffold, source, selection, spans, { harmony: 'vocal-core' });
+    expect(pedal.anchors[1].bass).toBe((8 + shift) % 12);
+    expect(pedal.bassRoleDecisions).toHaveLength(1);
+  }
+});
 it('reduces source ninth and thirteenth colors only when a supported harmonic core survives', () => {
   for (let shift = 0; shift < 12; shift++)
     for (const [pitches, expected] of [
@@ -115,4 +131,28 @@ it('does not let previous voicing lock an exposed tritone above the next held me
   expect(r.slices[1].voicing[0] - 64).not.toBe(6);
   expect(r.slices[1].voicing[0] - 64).toBeLessThanOrEqual(7);
   expect(new Set(r.slices[1].voicing.map((m) => m % 12))).toEqual(new Set([6, 10, 4]));
+});
+it('repairs only the selected beats and retains frozen neighboring attacks', () => {
+  const { source, scaffold } = fixture([36, 60, 64, 67], 72);
+  const originalVoicing = [67, 64, 60, 48];
+  scaffold.parts.slice(1).forEach((p, i) => {
+    p.notes = [n(originalVoicing[i], 0, 3), n(originalVoicing[i], 3, 1), n(60, 8, 4)];
+  });
+  const r = transferSourceToSatb(scaffold, source, ['upper', 'low'], spans, {
+    melodyPartId: 'solo', connectCommonTones: true, editWindow: { start: 1, end: 3 },
+  });
+  expect(r.slices.map(s => [s.start, s.duration])).toEqual([[1, 2]]);
+  expect(r.slices[0].voicing).toEqual(originalVoicing);
+  r.project.parts.slice(1).forEach((p, i) => {
+    // The new region can join the incoming held note, but the explicit
+    // reattack outside the selection at beat 3 must survive.
+    expect(p.notes.find(n => n.start === 3)).toEqual(scaffold.parts[i + 1].notes[1]);
+    expect(p.notes.find(n => n.start === 8)).toEqual(scaffold.parts[i + 1].notes[2]);
+    expect(p.notes[0].start).toBe(0);
+    expect(p.notes[0].midi).toBe(originalVoicing[i]);
+  });
+  expect(r.project.parts[0]).toEqual(scaffold.parts[0]);
+  for (const window of [{ start: -1, end: 2 }, { start: 2, end: 2 }, { start: 1, end: Infinity }]) {
+    expect(() => transferSourceToSatb(scaffold, source, ['upper', 'low'], spans, { editWindow: window })).toThrow('Invalid edit window');
+  }
 });
