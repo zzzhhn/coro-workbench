@@ -8,6 +8,30 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-17: interlude form before note-level arrangement
+
+The full-song candidate inherited the source interlude's length. A separate,
+opt-in form layer now proposes internal lead-free cutdowns, keeping entry/return
+material, pickups and protected excerpts. It compares sustained-note crossings
+and voice motion at the splice; those costs do not imply musical approval.
+
+```mermaid
+flowchart LR
+  S[Reliable score and frozen excerpts] --> F[Choose vocal form and retained source spans]
+  F --> M[Source-to-arrangement timeline map]
+  M --> H[Source harmony and singable SATB]
+  H --> G[Protect content and inspect seams]
+  G --> A[Original-length vs compact-form auditions]
+  A --> U[Listening decision]
+```
+
+This A/B applies `arrangementForm.ts` to the previous score without rerunning
+harmony or voicing, isolating form length. Source bars 39–42 are omitted by the
+generic proposal, producing 66 bars from 70; Solo content and approved excerpts
+are unchanged under the time map. Private review supports the interlude with
+context and the whole song, piano and sampled choir. Formal defaults are not
+changed. See [research, scope and acceptance](INTERLUDE_FORM.md).
+
 ## 2026-11-16: accepted excerpt baseline, full-song candidate
 
 Bobby accepted the final two-beat repair and requested expansion. Preserve
