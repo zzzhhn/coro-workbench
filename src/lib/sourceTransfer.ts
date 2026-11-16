@@ -20,6 +20,8 @@ export interface SourceTransferOptions {
   reducePerformedGraceNotes?: boolean;
   connectCommonTones?: boolean;
   voiceRanges?: Array<[number, number]>;
+  /** Optional register allocation against a fixed melody; never rewrites it. */
+  melodyPartId?: string;
 }
 
 export function prepareSourceNotes(source: ScoreProject, accompanimentIds: string[], options: SourceTransferOptions = {}) {
@@ -79,6 +81,8 @@ export function transferSourceToSatb(
   const project = structuredClone(scaffold), bar = beatsPerBar(source);
   if (beatsPerBar(project) !== bar || !IDS.every(id => project.parts.some(p => p.id === id))) throw Error('SATB scaffold/meter mismatch');
   const ranges = options.voiceRanges ?? RANGES;
+  const melody = options.melodyPartId ? scaffold.parts.find(p => p.id === options.melodyPartId) : undefined;
+  if (options.melodyPartId && !melody) throw Error('Selected melody part is missing');
   if (ranges.length !== 4 || ranges.some(([lo, hi]) => !Number.isInteger(lo) || !Number.isInteger(hi) || lo < 0 || hi > 127 || lo > hi)) throw Error('Invalid SATB ranges');
   const { notes, rolls, ornaments } = prepareSourceNotes(source, accompanimentIds, options);
   const slices: TransferSlice[] = [];
@@ -89,12 +93,13 @@ export function transferSourceToSatb(
     const relevant = notes.filter(n => n.start < b && n.start + n.duration > a);
     const boundaries = [...new Set([a, b, ...relevant.flatMap(n => [Math.max(a, n.start), Math.min(b, n.start + n.duration)])])].sort((x, y) => x - y);
     const output: NoteEvent[][] = IDS.map(() => []);
-    let previous: number[] | undefined;
+    const frames: Array<{ start: number; end: number; active: Pitched[]; pitches: number[]; kept: number[];
+      choices: Array<{ voicing: number[]; cost: number }> }> = [];
     for (let i = 0; i + 1 < boundaries.length; i++) {
       const start = boundaries[i], end = boundaries[i + 1];
       if (end - start < EPS) continue;
       const active = relevant.filter(n => n.start <= start + EPS && n.start + n.duration >= end - EPS).sort((x, y) => x.midi - y.midi);
-      if (!active.length) { previous = undefined; continue; }
+      if (!active.length) continue;
       const pitches = [...new Set(active.map(n => pc(n.midi)))];
       // More than four pitch classes cannot fit four monophonic singers. Keep
       // the actual bass and uppermost source tones; expose every omitted class.
@@ -102,15 +107,65 @@ export function transferSourceToSatb(
       for (const n of [...active].reverse()) if (!kept.includes(pc(n.midi)) && kept.length < 4) kept.push(pc(n.midi));
       const choices = ranges.map(([lo, hi], v) => Array.from({ length: hi - lo + 1 }, (_, k) => lo + k)
         .filter(m => v === 3 ? pc(m) === pc(active[0].midi) : kept.includes(pc(m))));
-      let best: number[] | undefined, cost = Infinity;
+      const leadDwell = new Map<number, number>();
+      for (const n of melody?.notes ?? []) if (n.midi !== null && n.start < end && n.start + n.duration > start) {
+        leadDwell.set(n.midi, (leadDwell.get(n.midi) ?? 0) + Math.min(end, n.start + n.duration) - Math.max(start, n.start));
+      }
+      // Brief turns should not drive a register change in a long backing note.
+      // Repeated melody attacks on one pitch still contribute to its dwell.
+      const lead = [...leadDwell].filter(([, duration]) => duration >= Math.min(.25, (end - start) / 2) - EPS)
+        .map(([midi, duration]) => ({ midi, weight: duration / (end - start) }));
+      const voicings: Array<{ voicing: number[]; cost: number; clash: number }> = [];
       for (const s of choices[0]) for (const alto of choices[1]) for (const t of choices[2]) for (const bass of choices[3]) {
         const v = [s, alto, t, bass];
         if (s < alto || alto < t || t < bass || s - alto > 12 || alto - t > 12 || !kept.every(p => v.some(n => pc(n) === p))) continue;
-        const c = v.reduce((sum, n, voice) => sum + Math.abs(n - CENTRES[voice]) * .35 + (previous ? Math.abs(n - previous[voice]) : 0), 0)
-          + (s === alto ? 2 : 0) + (alto === t ? 2 : 0);
-        if (c < cost) { cost = c; best = v; }
+        // Piano colors tolerated in a decaying chord can become exposed next
+        // to Solo in sustained voices. Prefer another legal octave allocation,
+        // weighted by actual overlap, rather than deleting a melody/chord tone.
+        const leadCost = lead.reduce((sum, l) => sum + l.weight * v.slice(0, 3).reduce((cost, m, voice) => {
+          const gap = Math.abs(m - l.midi);
+          return cost + (gap === 1 ? 8 : gap === 13 ? 4 : 0)
+            // Quiet backing may take a fourth-sized step rather than expose
+            // a held tritone above Solo just to minimize melodic movement.
+            + (voice === 0 && m - l.midi === 6 ? 8 : 0)
+            // Use the register-centering scale here too: moving a clash an
+            // octave above Solo must not become a nearly free workaround.
+            + Math.max(0, m - l.midi - 7) * .35;
+        }, 0), 0);
+        const lowCluster = melody && t < 55 && t - bass <= 2 ? 4 : 0;
+        const clash = lead.reduce((sum, l) => sum + l.weight * v.slice(0, 3).filter(m =>
+          [1, 13].includes(Math.abs(m - l.midi))).length, 0);
+        const c = v.reduce((sum, n, voice) => sum + Math.abs(n - CENTRES[voice]) * .35, 0)
+          + (s === alto ? 2 : 0) + (alto === t ? 2 : 0) + leadCost + lowCluster;
+        voicings.push({ voicing: v, cost: c, clash });
       }
-      if (!best) throw Error(`No source-faithful SATB allocation at beat ${start}`);
+      if (!voicings.length) throw Error(`No source-faithful SATB allocation at beat ${start}`);
+      // In quiet humming, do not buy a sustained minor-second/minor-ninth
+      // collision merely to save motion when the same chord has a clear
+      // allocation. If every allocation conflicts, keep the least exposed ones;
+      // never resolve that situation by silently changing source pitch classes.
+      const leastClash = Math.min(...voicings.map(v => v.clash));
+      frames.push({ start, end, active, pitches, kept,
+        choices: melody ? voicings.filter(v => v.clash <= leastClash + EPS) : voicings });
+    }
+    // Keep several possible registers until the phrase is evaluated. Greedy
+    // octave choices otherwise lock the next chord into an exposed Solo clash.
+    // The historical path remains width one when melody-aware allocation is off.
+    let paths: Array<{ cost: number; history: number[][] }> = [{ cost: 0, history: [] }];
+    frames.forEach((frame, index) => {
+      const connected = index > 0 && Math.abs(frames[index - 1].end - frame.start) < EPS;
+      paths = frame.choices.map(choice => {
+        let bestPath = paths[0], cost = Infinity;
+        for (const path of paths) {
+          const previous = connected ? path.history.at(-1) : undefined;
+          const total = path.cost + choice.cost + (previous ? choice.voicing.reduce((sum, m, v) => sum + Math.abs(m - previous[v]), 0) : 0);
+          if (total < cost) { cost = total; bestPath = path; }
+        }
+        return { cost, history: [...bestPath.history, choice.voicing] };
+      }).sort((a, b) => a.cost - b.cost).slice(0, melody ? 32 : 1);
+    });
+    frames.forEach(({ start, end, active, pitches, kept }, i) => {
+      const best = paths[0].history[i];
       slices.push({ start, duration: end - start, sourceNoteIds: active.map(n => n.id), sourcePitches: pitches, kept,
         omitted: pitches.filter(p => !kept.includes(p)), voicing: best });
       best.forEach((midi, v) => {
@@ -121,8 +176,7 @@ export function transferSourceToSatb(
           lyric: !tail || start - tail.start - tail.duration >= .5 - EPS ? 'Hmm' : '',
           ...(!tail ? { dynamic: 'p' as const } : {}), origin: 'arranged' });
       });
-      previous = best;
-    }
+    });
     IDS.forEach((id, v) => {
       const part = project.parts.find(p => p.id === id)!;
       const outside = part.notes.flatMap(n => n.start >= b || n.start + n.duration <= a ? [n] : [

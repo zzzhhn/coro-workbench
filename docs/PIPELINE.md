@@ -8,6 +8,43 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: quiet vocal-core audition, frozen earlier excerpts
+
+Bobby reported relative improvement in 13–28 but rejected 47–48, while confirming
+that source piano A is normal there. New opt-in `harmony: 'vocal-core'` changes
+only the later verse. It does not replace the accepted input with inferred chords.
+
+```mermaid
+flowchart LR
+  SCORE[Selected reliable accompaniment] -.-> ROLES[Existing bass and upper-structure separation]
+  ROLES -.-> CORE[Supported third and seventh or suspension before piano extensions]
+  CORE -.-> REGISTER[Legal SATB voicings using the same retained pitch classes]
+  SOLO[Unchanged Solo dwell notes] -.-> REGISTER
+  REGISTER -.-> PHRASE[Bounded joint register search across the excerpt]
+  PHRASE -.-> HOLD[Common-tone continuity and existing rests]
+  HOLD -.-> REVIEW[Previous / candidate with synchronized piano or choir sampling]
+```
+
+A ninth is optional only when a third plus fifth/seventh, or a suspension/altered
+fifth plus seventh, remains. A thirteenth is optional when the third and seventh
+remain. Sixth chords without sevenths and unsupported sparse harmony stay intact.
+All reductions are logged. These are bass-relative quiet-chant heuristics, not
+complete inversion analysis or a universal ban on extensions and dissonance.
+
+`sourceTransfer.ts` can use `melodyPartId` for octave allocation. Repeated attacks
+contribute to pitch dwell; fleeting turns do not drive register changes. Sustained
+minor-second/minor-ninth conflicts are minimized before movement when the same
+chord permits alternatives. A 32-path beam compares the complete selected span;
+the historical path retains width-one behavior when melody awareness is absent.
+No Solo pitches or retained harmonic pitch classes are rewritten by this search.
+
+Private entry: `tests/private-vocal-core-review.html`, artifacts in
+`output/arranger-vocal-core/`. A remains source piano; B/C switch together between
+piano and choir samples, with two-bar preview and normalized mix/stem files.
+13–28, Solo, ensemble and everything outside 45–52 remain exact. Choir sampling
+is not real sung articulation. Musical acceptance remains pending; no merge or
+production-default change is authorized by this audition.
+
 ## 2026-11-16: legato source-chant diagnostic candidate
 
 Bobby confirmed that A (source piano plus Solo) sounds normal and B/C do not.
@@ -96,7 +133,7 @@ a triad already present in the upper structure plus bass, with a preference agai
 extra seconds above bass when alternatives exist. Log all omitted colors; do not
 invent pitches or call the result an exact copy of every original chord color.
 
-SATB ranges for this audition are E4–C5, A3–A4, D3–E4, E2–G3. Common tones can
+SATB ranges for this audition are E4–E5, A3–A4, D3–E4, E2–G3. Common tones can
 continue, but source silence and breaths break them. A Solo pickup after a gap can
 lead into a shared downbeat restart. Continuous humming has a two-measure breath
 budget; placement must leave a genuine short harmonic event audible, rather than

@@ -12,8 +12,21 @@ export interface ChantAnchor {
   sourceNoteIds: string[]; reason: 'chord-arrival' | 'bass-arrival';
 }
 
-function reduceUpper(upper: number[], bass: number, preserveGuideTones = false) {
+function reduceUpper(upper: number[], bass: number, preserveGuideTones = false, vocalCore = false): { upper: number[]; omitted: number[] } {
   const distinct = [...new Map([...upper].sort((a, b) => b - a).map(m => [pc(m), m])).values()];
+  if (vocalCore) {
+    const intervals = new Set(distinct.map(m => pc(m - bass)));
+    const third = intervals.has(3) || intervals.has(4), seventh = intervals.has(10) || intervals.has(11);
+    const supportedNinth = (third && (intervals.has(7) || seventh))
+      || (seventh && (intervals.has(5) || intervals.has(6)));
+    // Sustained humming need not expose every piano extension. Retain the
+    // source shell; do not turn sixth chords into triads or guess absent tones.
+    const core = distinct.filter(m => !(pc(m - bass) === 2 && supportedNinth)
+      && !(pc(m - bass) === 9 && third && seventh));
+    const reduced = reduceUpper(core, bass, true);
+    return { upper: reduced.upper, omitted: distinct.filter(m => pc(m) !== bass
+      && !reduced.upper.some(kept => pc(kept) === pc(m))).map(pc) };
+  }
   if (new Set([bass, ...distinct.map(pc)]).size <= 4) return { upper: distinct, omitted: [] as number[] };
   const candidates: number[][] = [];
   const nonBass = distinct.filter(m => pc(m) !== bass);
@@ -55,7 +68,7 @@ export function createSourceChant(
   scaffold: ScoreProject, source: ScoreProject,
   selection: { accompanimentIds: string[]; bassPartId: string },
   spans: Array<{ first: number; last: number }>,
-  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' } = {},
+  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' | 'vocal-core' } = {},
 ) {
   const bar = beatsPerBar(source);
   if (!selection.accompanimentIds.includes(selection.bassPartId)) throw Error('Bass staff must belong to selected accompaniment');
@@ -97,7 +110,7 @@ export function createSourceChant(
       // leap into the chord register inside a continuous measure can complete
       // the upper structure without replacing its low foundation. This opt-in
       // inference is logged; bar starts and genuinely low moves remain anchors.
-      const comping = options.harmony === 'sustained-bass' && !confirmedBassMove && bass && lowArrival && upper.length > 0
+      const comping = options.harmony !== undefined && !confirmedBassMove && bass && lowArrival && upper.length > 0
         && Math.abs(t / bar - Math.round(t / bar)) > EPS
         && lowArrival.midi - bass.midi >= 10 && lowArrival.midi >= Math.min(...upper.map(n => n.midi)) - 12
         && (blockHigh || blockLow) && ns.some(n => n.start < t && n.start + n.duration >= t - EPS);
@@ -120,7 +133,7 @@ export function createSourceChant(
       const last = local.at(-1);
       if (last && last.bass === pc(bass.midi) && pitches.every(m => last.sourceUpper.some(old => pc(old) === pc(m)))
         && last.sourceUpper.every(m => pitches.some(old => pc(old) === pc(m)))) continue;
-      const reduction = reduceUpper(pitches, pc(bass.midi), options.harmony === 'sustained-bass');
+      const reduction = reduceUpper(pitches, pc(bass.midi), options.harmony !== undefined, options.harmony === 'vocal-core');
       local.push({ start: t, duration: 0, bass: pc(bass.midi), ...reduction, sourceUpper: pitches,
         sourceNoteIds: [...new Set([bass.id, ...upper.map(n => n.id)])], reason: chordArrival ? 'chord-arrival' : 'bass-arrival' });
     }
@@ -197,6 +210,7 @@ export function createSourceChant(
   }
   const result = transferSourceToSatb(scaffold, control, ['chant-source-reduction'], spans, {
     connectCommonTones: options.rhythm !== 'phrase-pulse', voiceRanges: [[64, 76], [57, 69], [50, 64], [40, 55]],
+    melodyPartId: options.harmony === 'vocal-core' ? 'solo' : undefined,
   });
   return { ...result, anchors, breaths, bassRoleDecisions, phraseBlocks: phrase?.blocks, preprocessing: { rolls: prepared.rolls, ornaments: prepared.ornaments } };
 }
