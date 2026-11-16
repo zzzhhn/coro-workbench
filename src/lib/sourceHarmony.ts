@@ -7,6 +7,10 @@ export interface SourceHarmony {
   pitches: number[];
   bass: number;
   sourceNoteIds: string[];
+  /** Only an interpreted harmonic plan supplies these; bass is not root. */
+  root?: number;
+  quality?: string;
+  required?: number[];
 }
 const pc = (n: number) => ((n % 12) + 12) % 12;
 const pitched = (n: NoteEvent): n is NoteEvent & { midi: number } => n.midi !== null;
@@ -33,7 +37,7 @@ function attacks(notes: NoteEvent[]) {
  * This is a voiced-score reduction, not chord-name recognition. It neither
  * supplies missing thirds nor treats Solo ornaments as harmonic evidence.
  * Unknown/unvoiced regions remain gaps for the caller to review. */
-export function extractSourceHarmony(source: ScoreProject, leadPartId: string) {
+export function extractSourceHarmony(source: ScoreProject, leadPartId: string, options: { mergeOmissions?: boolean; includeDyads?: boolean } = {}) {
   if (!source.parts.some(p => p.id === leadPartId)) throw Error('Unknown Solo part');
   const parts = source.parts.filter(p => p.id !== leadPartId && p.role !== 'percussion');
   const ranked = parts.map(part => ({ part, groups: attacks(part.notes) })).sort((a, b) => b.groups.length - a.groups.length);
@@ -69,12 +73,12 @@ export function extractSourceHarmony(source: ScoreProject, leadPartId: string) {
     else if (Math.abs(end - Math.round(end * 2) / 2) < .1) end = Math.round(end * 2) / 2;
     const lowerChord = bassPart.notes.filter(pitched).filter(n => n.start <= group.start + .06 && n.start + n.duration >= group.start + .4);
     const pitches = [...new Set([...group.notes, ...lowerChord, bass].map(n => pc(n.midi)))].sort((a, b) => a - b);
-    if (pitches.length < 3) continue;
+    if (pitches.length < (options.includeDyads ? 2 : 3)) continue;
     const last = guides.at(-1);
     const sourceNoteIds = [...new Set([...group.notes, ...lowerChord, bass].map(n => n.id))];
     // Dropping a member on the next accompaniment pulse is not by itself a
     // different harmony. Retain the supported palette until a new tone/bass arrives.
-    if (last && last.start + last.duration >= group.start - 1e-6 && last.bass === pc(bass.midi) && pitches.every(p => last.pitches.includes(p))) {
+    if (options.mergeOmissions !== false && last && last.start + last.duration >= group.start - 1e-6 && last.bass === pc(bass.midi) && pitches.every(p => last.pitches.includes(p))) {
       last.duration = end - last.start;
       last.sourceNoteIds = [...new Set([...last.sourceNoteIds, ...sourceNoteIds])];
     } else if (end > group.start) guides.push({ start: group.start, duration: end - group.start, pitches, bass: pc(bass.midi), sourceNoteIds });

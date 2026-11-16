@@ -2,6 +2,7 @@ import type { NoteEvent, ScoreProject } from './types';
 import { beatsPerBar, validateProject } from './music';
 import { extractSourceHarmony } from './sourceHarmony';
 import { realizeJointVoicing } from './jointVoicing';
+import { interpretSourceHarmony } from './harmonicPlan';
 
 const IDS = ['voice-s', 'voice-a', 'voice-t', 'voice-b'];
 const CENTRES = [69, 64, 57, 45];
@@ -13,9 +14,10 @@ const EPS = 1e-6;
 export function createChordChant(
   scaffold: ScoreProject, source: ScoreProject, leadPartId: string,
   spans: Array<{ first: number; last: number }>,
-  options: { sourceStructure?: boolean; leadPhrasing?: boolean; register?: 'original' | 'raised' } = {},
+  options: { sourceStructure?: boolean; leadPhrasing?: boolean; register?: 'original' | 'raised'; harmonicPlan?: boolean } = {},
 ) {
-  const evidence = extractSourceHarmony(source, leadPartId);
+  const plan = options.harmonicPlan ? interpretSourceHarmony(source, leadPartId) : undefined;
+  const evidence = plan ?? extractSourceHarmony(source, leadPartId);
   let project = structuredClone(scaffold);
   const bar = beatsPerBar(project), trace = [];
   if (!IDS.every(id => project.parts.some(p => p.id === id))) throw Error('Chant requires Solo + SATB');
@@ -86,7 +88,16 @@ export function createChordChant(
         ...(n.start < start ? [{ ...n, duration: start - n.start }] : []),
         ...(n.start + n.duration > end ? [{ ...n, id: n.id + '-outside', start: end, duration: n.start + n.duration - end }] : []),
       ]);
-      part.notes = [...outside, ...realized.project.parts.find(p => p.id === id)!.notes].sort((a, b) => a.start - b.start);
+      // An unresolved interpretation must not manufacture silence. Keep that
+      // region's previous candidate verbatim in pitch/rhythm, with review evidence;
+      // it is not presented as an interpreted or accepted new result.
+      const unresolved = plan?.decisions.filter(d => !d.selected && d.start < end && d.start + d.duration > start) ?? [];
+      const retained = unresolved.flatMap(d => part.notes.flatMap(n => {
+        const a = Math.max(start, d.start, n.start), b = Math.min(end, d.start + d.duration, n.start + n.duration);
+        return b > a + EPS ? [{ ...n, id: `${n.id}-unresolved-${a}`, start: a, duration: b - a,
+          ...(a > n.start ? { lyric: '', dynamic: undefined } : {}) }] : [];
+      }));
+      part.notes = [...outside, ...realized.project.parts.find(p => p.id === id)!.notes, ...retained].sort((a, b) => a.start - b.start);
     });
     trace.push({ span, phrases, guides, decisions: realized.decisions });
   }

@@ -54,6 +54,7 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
   let beam: State[] = [{ cost: 0, current: [null, null, null, null], last: initial, path: [] }];
   frames.forEach((frame, frameIndex) => {
     const { chord, notes, solo, duration, start: t } = frame;
+    const interpretation = harmony?.find(g => g.start <= t + EPS && g.start + g.duration > t + EPS && g.root !== undefined);
     const chordPcs = new Set(chord?.pitches.map(pc) ?? []);
     const newNote = notes.map((n, v) => !!n && (frameIndex === 0 || frames[frameIndex - 1].notes[v] !== n));
     const targets = notes.map(n => n?.note.midi ?? null);
@@ -111,6 +112,9 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
         }
         let vertical = 0;
         const active = current.filter((p): p is number => p !== null), pcs = new Set(active.map(pc));
+        // Interpreted core is a contract, not a bonus that register or smoothness
+        // can outweigh. Keep the actual bass separate from the harmonic root.
+        if (interpretation && active.length === 4 && interpretation.required?.some(p => !pcs.has(p))) return;
         if (options.tessitura) current.forEach((pitch, v) => {
           if (pitch !== null) {
             const band = options.tessitura![v];
@@ -123,7 +127,7 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
             if (distance <= 2) vertical += distance === 1 ? 18 : 8;
             // Wide sevenths/ninths can be intentional colors, low close seconds
             // and exposed semitone clusters are not equivalent to those colors.
-            if ((interval === 1 || interval === 11) && !(chordPcs.has(pc(current[i]!)) && chordPcs.has(pc(current[j]!)))) vertical += 5;
+            if ((interval === 1 || interval === 11) && (interpretation || !(chordPcs.has(pc(current[i]!)) && chordPcs.has(pc(current[j]!))))) vertical += 5;
             if (j === 3 && distance < 7) vertical += (7 - distance) * 2;
             if (j === i + 1 && j < 3 && distance > 12) vertical += (distance - 12) * 0.7;
           }
@@ -134,7 +138,7 @@ export function realizeJointVoicing(source: ScoreProject, span: { first: number;
           }
         }
         if (chord && active.length >= 3) {
-          if (options.sourceStructure && harmony) {
+          if (options.sourceStructure && harmony && !interpretation) {
             const bass = bassClass(chord);
             const upper = new Set(current.slice(0, 3).filter((p): p is number => p !== null).map(pc));
             // Preserve supported upper harmony before doubling an existing tone.

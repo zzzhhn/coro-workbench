@@ -8,6 +8,42 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-16: explicit harmonic interpretation before chant voicing
+
+Bobby still rejects the harmony in the previous candidates. `harmonicPlan.ts` is
+an opt-in interpretation layer, not another accepted arranging baseline. It keeps
+root distinct from bass, enumerates a bounded tonal chord vocabulary, and reports
+core tones, optional colors, excluded tones, alternative interpretations and review
+reasons. A named candidate does not establish musical correctness.
+
+```mermaid
+flowchart LR
+  NOTES[Source accompaniment attacks and bass] -.-> OBS[Reobserve actual notes on beats]
+  SOLO[Unchanged stable Solo evidence] -.-> CAND[Supported root and quality candidates]
+  OBS -.-> CAND
+  CAND -.-> PATH[Sequence selection with continuity and root motion]
+  PATH -.-> CORE[Explicit core and bass contract]
+  CORE -.-> SATB[Joint SATB voicing with existing register and breath settings]
+  PATH -.-> REVIEW[Expose ambiguity and unsupported regions]
+  SATB -.-> AB[Old chant / prior candidate / interpreted candidate]
+  REVIEW -.-> AB
+```
+
+The source adapter can retain dyads for interpretation instead of discarding them.
+It no longer treats all notes later in a held guide as available at its start.
+Only one missing core tone may be inferred from an adjacent same-bass candidate,
+with no conflicting new evidence and no chain of inherited omissions. Optional
+colors are not carried by that rule. Such inferences remain review items. Possible
+passing/neighbor/suspension labels are local timing heuristics, not verified voice
+analysis. Ambiguous choices use a bounded dynamic-programming path, not a trained
+harmonic model or globally complete tonal analysis.
+
+The voicer must retain the interpreted core when all four backing voices sound;
+range/smoothness scores cannot trade it away. Unsupported regions retain the prior
+candidate with explicit review evidence rather than becoming artificial silence.
+The two verse excerpts are regenerated. Solo, ensemble, and accepted excerpt are
+unchanged; defaults remain legacy. Private review: `tests/private-harmonic-plan-review.html`.
+
 ## 2026-11-16: chant structure, Solo pickups and register audition
 
 Bobby reports that simple chant is substantially better, but identifies remaining
