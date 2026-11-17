@@ -6,6 +6,7 @@ import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { parseMidi, writeMidi } from 'midi-file';
 import type { AbcRenderResult, ChordEvent, NoteEvent, ScorePart, ScoreProject } from './types';
 import { createEngravingPlan } from './engraving';
+import { layoutOf, planSystems, validateLayout } from './layout';
 import { noteGateRatio, notePlaybackLevel } from './dynamics';
 import { performanceNotes } from './performance';
 import type { MeasureRange } from './scoreWindow';
@@ -447,6 +448,8 @@ export function validateProject(project: ScoreProject): string[] {
     if (pageCount !== undefined && project.source.omrReview?.pages?.some?.((page) => page.page >= pageCount))
       problems.push('识谱对照数据无效：页码超出原始谱页数量');
   }
+  const layoutProblem = validateLayout(project.layout, project.measures);
+  if (layoutProblem) problems.push(layoutProblem);
   if (project.source?.analysisStartSeconds !== undefined && (!Number.isFinite(project.source.analysisStartSeconds) || project.source.analysisStartSeconds < 0)) problems.push('分析起点无效。');
   const uncertain = project.source?.analysis?.uncertaintyIntervals;
   if (uncertain !== undefined && (!Array.isArray(uncertain) || uncertain.length > 10000 || uncertain.some(item => !item || typeof item.partId !== 'string' || typeof item.reason !== 'string' || !Number.isFinite(item.startSeconds) || !Number.isFinite(item.endSeconds) || item.startSeconds < 0 || item.endSeconds <= item.startSeconds || item.alternatives !== undefined && (!Array.isArray(item.alternatives) || item.alternatives.some(value => typeof value !== 'string'))))) problems.push('待核对时间区间无效。');
@@ -770,14 +773,21 @@ export function toAbc(
   const beamUnit = meterUnit === 8 && meterBeats >= 6 && meterBeats % 3 === 0 ? 1.5 : 4 / meterUnit;
   const hasPercussion = parts.some((part) => part.role === 'percussion' || part.clef === 'percussion');
   const systemMeasures: number[] = [];
-  for (let firstBar = firstMeasure - 1; firstBar < lastMeasure;) {
-    const firstSystem = firstBar === firstMeasure - 1;
+  // Forced system/page starts come from the project layout; between them, automatic
+  // systems of barsPerSystem bars (one bar for extremely dense bars).
+  const systemPlan = planSystems(layoutOf(project), firstMeasure, lastMeasure, (bar) => {
+    const firstBar = bar - 1;
     const peakAttacks = Math.max(0, ...voices.flatMap(staff => staff.lanes.flatMap(({ lane }) =>
       Array.from({ length: barsPerSystem }, (_, offset) => lane.filter(group =>
         group.start >= (firstBar + offset) * barLength
         && group.start < (firstBar + offset + 1) * barLength).length))));
-    const systemBars = peakAttacks > 24 ? 1 : barsPerSystem;
-    const systemEnd = Math.min(firstBar + systemBars, lastMeasure);
+    return peakAttacks > 24 ? 1 : barsPerSystem;
+  });
+  for (const [systemIndex, systemStart] of systemPlan.starts.entries()) {
+    const firstBar = systemStart - 1;
+    const firstSystem = firstBar === firstMeasure - 1;
+    // 0-based exclusive end bar of this system.
+    const systemEnd = Math.min((systemPlan.starts[systemIndex + 1] ?? lastMeasure + 1) - 1, lastMeasure);
     systemMeasures.push(firstBar + 1);
     voices.forEach(({ part, clef, lanes }, staffIndex) => {
       lanes.forEach(({ lane, id }, laneIndex) => {
@@ -935,10 +945,11 @@ export function toAbc(
         abc += '\n';
       }
     });
-    firstBar += systemBars;
   }
   return {
     abc,
+    pageStarts: systemPlan.pageStarts,
+    ...(project.layout ? { repeat: layoutOf(project).repeat } : {}),
     noteMap,
     harmonyVoiceId,
     noteSegments,
@@ -1172,7 +1183,13 @@ export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
             : '';
         if (bar === 0 && partIndex === 0)
           content += `<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${project.tempo}</per-minute></metronome></direction-type><sound tempo="${project.tempo}"/></direction>`;
-        if (bar > 0 && bar % (plan.dense ? 2 : 4) === 0) content += '<print new-system="yes"/>';
+        // Explicit page/system starts when the layout has them; otherwise the reading default.
+        if (bar > 0) {
+          const layout = layoutOf(project);
+          if (layout.pageBreaks.includes(bar + 1)) content += '<print new-page="yes"/>';
+          else if (layout.systemBreaks.includes(bar + 1) || (!project.layout && bar % (plan.dense ? 2 : 4) === 0))
+            content += '<print new-system="yes"/>';
+        }
         if (partIndex === 0)
           content += displayedHarmony
             .filter((chord) => chord.start >= start - EPSILON && chord.start < start + barLength - EPSILON)
@@ -1334,6 +1351,8 @@ export function fromMusicXml(xml: string): ScoreProject {
   let meterFound = false;
   let keyFound = false;
   let maxEnd = 0;
+  const sourceSystems: number[] = [];
+  const sourcePages: number[] = [];
   for (const [partIndex, partNode] of allNamed(children, 'part').entries()) {
     if (partIndex >= 32) throw new Error('暂不支持超过 32 个声部的乐谱。');
     const originalId = attrs(partNode)['@_id'];
@@ -1364,6 +1383,13 @@ export function fromMusicXml(xml: string): ScoreProject {
     const pendingDynamics = new Map<string, NoteEvent['dynamic']>();
     const openTies = new Map<string, NoteEvent>();
     for (const measure of allNamed(kids(partNode), 'measure')) {
+      // Printed line / page starts of the source (first part only; all parts share them).
+      if (partIndex === 0 && measureStart > EPSILON) {
+        const print = named(kids(measure), 'print');
+        const bar = Math.round(measureStart / beatsPerBar(project)) + 1;
+        if (attrs(print)['@_new-page'] === 'yes') sourcePages.push(bar);
+        else if (attrs(print)['@_new-system'] === 'yes') sourceSystems.push(bar);
+      }
       let cursor = 0;
       let previousOnset = 0;
       let extent = 0;
@@ -1635,6 +1661,14 @@ export function fromMusicXml(xml: string): ScoreProject {
     project.chords = project.chords.filter((chord) => chord.symbol !== 'N.C.');
     project.source.analysis = { transforms: ['保留 MusicXML 中的 N.C. 无和弦区间。'], quality: { 'harmony.preserveGaps': true } };
   }
+  // Keep the source's line and page starts so the edited score reads like the original page.
+  const within = (bars: number[]) => [...new Set(bars)].filter((bar) => bar >= 2 && bar <= project.measures).sort((a, b) => a - b);
+  if (sourceSystems.length || sourcePages.length)
+    project.layout = {
+      systemBreaks: within(sourceSystems),
+      pageBreaks: within(sourcePages),
+      repeat: { clef: 'every', key: 'every', labels: 'every' },
+    };
   project.source.warnings = [...warnings];
   assertValid(project);
   return project;

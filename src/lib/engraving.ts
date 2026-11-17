@@ -1,5 +1,6 @@
 import type { TuneObject } from 'abcjs';
 import type { AbcRenderResult, Clef, NoteEvent, ScorePart, ScoreProject } from './types';
+import { repeatsOn } from './layout';
 
 export interface EngravingGroup {
   start: number;
@@ -201,7 +202,32 @@ export function createEngravingPlan(
 
 // abcjs 6.7.2 matches partial chord ties by array position rather than pitch.
 // The canonical event IDs identify the actual continuation before engraving.
+/**
+ * Apply the layout's repeat rules to later systems: drop the clef (abcjs type
+ * 'none'), the key signature (no accidentals drawn) and the staff names where the
+ * rule says they are not repeated. Musical content is untouched; a real clef or
+ * key change inside the music is still drawn because it is a separate element.
+ */
+function applyRepeatRules(tune: TuneObject, result: AbcRenderResult): void {
+  const rules = result.repeat;
+  if (!rules) return;
+  const pageStarts = result.pageStarts ?? [0];
+  let system = -1;
+  for (const line of tune.lines) {
+    if (!line.staff) continue;
+    system++;
+    for (const staff of line.staff as Array<Record<string, unknown>>) {
+      if (!repeatsOn(rules.clef, system, pageStarts) && staff.clef && (staff.clef as { type: string }).type !== 'perc')
+        staff.clef = { ...(staff.clef as object), type: 'none' };
+      if (!repeatsOn(rules.key, system, pageStarts) && staff.key)
+        staff.key = { ...(staff.key as object), accidentals: [] };
+      if (!repeatsOn(rules.labels, system, pageStarts)) delete staff.title;
+    }
+  }
+}
+
 export function prepareEngravingTune(tune: TuneObject, result: AbcRenderResult): TuneObject {
+  applyRepeatRules(tune, result);
   if (!result.noteSegments) return tune;
   for (const line of tune.lines) {
     if (!line.staff || line.staff.length !== result.staffLayout?.length) continue;

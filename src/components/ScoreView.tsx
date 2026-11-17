@@ -4,6 +4,7 @@ import type { TuneObject } from 'abcjs';
 import type { ScoreProject } from '../lib/types';
 import type { Selection } from '../lib/editor';
 import { beatsPerBar, pitchName, toAbc } from '../lib/music';
+import { layoutOf } from '../lib/layout';
 import { beatAtX, pitchAtStep, stepAtY, type BeatAnchor } from '../lib/mouseEntry';
 import type { Clef } from '../lib/types';
 import { alignEngravingArpeggios, alignEngravingStaffNames, fitEngravingSystems, prepareEngravingTune } from '../lib/engraving';
@@ -188,7 +189,15 @@ export default function ScoreView({
       alignEngravingArpeggios(systems);
       const boxes = fitEngravingSystems(systems);
       setEngravedWidth(Math.ceil(Math.max(0, ...boxes.map((box) => box.width))));
+      // Mark systems that start because of a forced line or page break.
+      const layout = layoutOf(project);
       for (const [index, svg] of [...container.current.querySelectorAll('svg')].entries()) {
+        const startBar = abcResult.systemMeasures?.[index];
+        svg.dataset.break = startBar && layout.pageBreaks.includes(startBar)
+          ? 'page'
+          : startBar && layout.systemBreaks.includes(startBar)
+            ? 'system'
+            : '';
         svg.setAttribute(
           'aria-label',
           `${project.title}，第 ${abcResult.systemMeasures?.[index] ?? (firstMeasure ?? 1) + index * (mobile ? 2 : 4)} 小节起`,

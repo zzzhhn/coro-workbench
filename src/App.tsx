@@ -5,6 +5,7 @@ import {
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowDown,
+  ArrowElbowDownLeft,
   ArrowRight,
   CaretDown,
   CaretLeft,
@@ -16,6 +17,7 @@ import {
   DotsThree,
   FilePlus,
   Cursor,
+  FileArrowDown,
   FileText,
   FolderOpen,
   Headphones,
@@ -97,6 +99,8 @@ import SourceRegionPanel from './components/SourceRegionPanel';
 import ChordInlineEditor from './components/ChordInlineEditor';
 import { measureOfBeat } from './lib/sourceMap';
 import { parseChord, setChordAt } from './lib/chordSymbols';
+import { layoutOf, setRepeatRule, togglePageBreak, toggleSystemBreak } from './lib/layout';
+import type { RepeatRule } from './lib/types';
 import { placeNote } from './lib/mouseEntry';
 import { deleteMeasures, insertMeasures, type MeasureChange } from './lib/measures';
 import {
@@ -838,6 +842,20 @@ export default function App() {
       notify(cleanError(error), true);
     }
   };
+  /** Bar a break applies to: start of the selected range, else the selected note's bar, else the playhead bar. */
+  const breakBar = () =>
+    range ? range.startBar : selectedNote ? measureOfBeat(project, selectedNote.start) : currentBar;
+  const toggleBreak = (kind: 'system' | 'page') => {
+    const bar = breakBar();
+    try {
+      const next = kind === 'system' ? toggleSystemBreak(project, bar) : togglePageBreak(project, bar);
+      updateProject(next, true, false);
+      const on = (kind === 'system' ? layoutOf(next).systemBreaks : layoutOf(next).pageBreaks).includes(bar);
+      notify(`第 ${bar} 小节${on ? '起' : '不再强制'}${kind === 'system' ? '换行' : '换页'}。`);
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
   const issues = useMemo(() => reviewIssues(project), [project]);
   const verticalAnchor = useRef<(Selection & { beat: number }) | undefined>(undefined);
   const applyDuration = (change: DurationChange) => {
@@ -1174,6 +1192,11 @@ export default function App() {
       if (command && tab === 'workbench' && (event.key === 'Backspace' || event.key === 'Delete')) {
         event.preventDefault();
         deleteBars();
+        return;
+      }
+      if (event.altKey && !command && tab === 'workbench' && event.key === 'Enter') {
+        event.preventDefault();
+        toggleBreak(event.shiftKey ? 'page' : 'system');
         return;
       }
       if (command && event.key.toLowerCase() === 'z') {
@@ -2041,6 +2064,26 @@ export default function App() {
             <Plus size={15} />
           </button>
           <button
+            className={`icon-button measure-edit-action ${layoutOf(project).systemBreaks.includes(breakBar()) ? 'active-tool' : ''}`}
+            aria-label="从此小节换行"
+            aria-pressed={layoutOf(project).systemBreaks.includes(breakBar())}
+            title="从当前小节（或所选范围起点）开始新的一行 (⌥↵)"
+            disabled={breakBar() < 2}
+            onClick={() => toggleBreak('system')}
+          >
+            <ArrowElbowDownLeft size={15} />
+          </button>
+          <button
+            className={`icon-button measure-edit-action ${layoutOf(project).pageBreaks.includes(breakBar()) ? 'active-tool' : ''}`}
+            aria-label="从此小节换页"
+            aria-pressed={layoutOf(project).pageBreaks.includes(breakBar())}
+            title="从当前小节开始新的一页（PDF 导出）(⌥⇧↵)"
+            disabled={breakBar() < 2}
+            onClick={() => toggleBreak('page')}
+          >
+            <FileArrowDown size={15} />
+          </button>
+          <button
             className="icon-button measure-edit-action"
             aria-label="删除小节"
             title="删除当前小节或所选范围的小节（全部声部，⌘⌫）"
@@ -2422,10 +2465,12 @@ export default function App() {
                   onChange={(event) => {
                     const meter = event.target.value.split('/').map(Number) as [number, number];
                     const length = (meter[0] * 4) / meter[1];
+                    // Re-barring moves every bar line, so bar-number breaks would point at other music.
                     updateProject({
                       ...project,
                       timeSignature: meter,
                       measures: Math.max(1, Math.ceil(totalBeats / length)),
+                      layout: project.layout && { ...project.layout, systemBreaks: [], pageBreaks: [] },
                     });
                   }}
                 >
@@ -2437,8 +2482,35 @@ export default function App() {
             </div>
             <p className="subtle-note">
               修改调号不改变实际音高；如要整体移调，请使用工具栏 ♭ /
-              ♯。修改拍号会重新分小节，音符的绝对时间不变。
+              ♯。修改拍号会重新分小节，音符的绝对时间不变（换行 / 换页位置随之清除）。
             </p>
+            <fieldset className="layout-settings">
+              <legend>排版：后续各行是否重复</legend>
+              {(
+                [
+                  ['clef', '谱号'],
+                  ['key', '调号'],
+                  ['labels', '声部名'],
+                ] as const
+              ).map(([what, label]) => (
+                <label key={what} className="field-label">
+                  {label}
+                  <select
+                    aria-label={`${label}重复`}
+                    value={layoutOf(project).repeat[what]}
+                    onChange={(event) => updateProject(setRepeatRule(project, what, event.target.value as RepeatRule))}
+                  >
+                    <option value="every">每一行</option>
+                    <option value="page">每页第一行</option>
+                    <option value="first">仅第一行</option>
+                  </select>
+                </label>
+              ))}
+              <p className="subtle-note">
+                换行 {layoutOf(project).systemBreaks.length} 处 · 换页 {layoutOf(project).pageBreaks.length} 处。
+                在小节栏或范围条用 ↵ / ⇞ 按钮设置；识谱导入时保留原谱的换行换页。
+              </p>
+            </fieldset>
             <div className="settings-actions">
               <button
                 className="secondary-button"
@@ -2653,6 +2725,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
               ['⌘ B · ⇧ ⌘ B', '在当前小节（或所选范围）后 / 前插入空小节'],
               ['K · 点击和弦', '在选中音符上方加 / 改和弦；Tab / ⇧Tab 下一个 / 上一个，清空删除，N.C. 无和弦'],
               ['⌘ ⌫', '删除当前小节或所选范围的小节（全部声部）'],
+              ['⌥ ↵ · ⌥ ⇧ ↵', '从当前小节起换行 / 换页（再按取消）；重复规则在乐谱设置'],
               ['⌥ 点击 · ⌥ ← →', '选同一声部的音符段（首音到末音）'],
               ['T · ⌥ T · ⌥ R', '音符段：做成 3:2 三连音 / 还原普通时值 / 首尾相接重排起拍'],
               ['P · ⇧ P', '鼠标放音：点谱表按位置放音（按调号，吸附到拍点） / 改为放休止符'],

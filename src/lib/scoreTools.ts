@@ -336,6 +336,12 @@ export function reinterpretBeatUnit(project: ScoreProject, factor: 0.5 | 2): Rep
     chord.duration *= factor;
   }
   if (next.originalAudio) next.originalAudio.tempo = originalTempo;
+  // Bar lines move with the new beat unit; line/page breaks follow their music.
+  if (next.layout) {
+    const scale = (list: number[]) =>
+      [...new Set(list.map((bar) => Math.round((bar - 1) * factor) + 1))].filter((bar) => bar >= 2 && bar <= next.measures);
+    next.layout = { ...next.layout, systemBreaks: scale(next.layout.systemBreaks), pageBreaks: scale(next.layout.pageBreaks) };
+  }
   const warnings = [
     '拍点、时值及 BPM 同比例重解释，所有音符的实际起止秒数保持不变；这不是把音频加速或减速。',
   ];
