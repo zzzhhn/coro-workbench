@@ -6,9 +6,19 @@ import type { ScoreProject, OmrJob } from './types';
 
 const MAX_SCORE_BYTES = 30 * 1024 * 1024;
 
-export function projectFromOmr(job: OmrJob): ScoreProject {
+/** Whether the recognized MusicXML itself states a tempo (metronome or sound@tempo). */
+export function omrHasWrittenTempo(job: OmrJob): boolean {
+  return /<sound\b[^>]*\btempo="[\d.]+"|<per-minute>/.test(job.musicxml ?? '');
+}
+
+export function projectFromOmr(job: OmrJob, confirmedTempo?: number): ScoreProject {
   if (job.status !== 'complete' || !job.musicxml) throw new Error('光学识谱还没有返回可读取的乐谱。');
   const project = fromMusicXml(job.musicxml);
+  if (confirmedTempo !== undefined) {
+    if (!Number.isFinite(confirmedTempo) || confirmedTempo < 10 || confirmedTempo > 500)
+      throw new Error('速度需在 10–500 BPM 之间。');
+    project.tempo = confirmedTempo;
+  }
   project.title = job.source?.filename.replace(/\.[^.]+$/, '') ?? project.title;
   const counts = new Map<string, number>();
   for (const part of project.parts) counts.set(part.name, (counts.get(part.name) ?? 0) + 1);
@@ -24,7 +34,9 @@ export function projectFromOmr(job: OmrJob): ScoreProject {
     kind: 'omr',
     filename: job.source?.filename,
     engine: job.source?.engine,
-    warnings: [...new Set([...(job.warnings ?? []), ...project.source.warnings])],
+    warnings: [...new Set([...(job.warnings ?? []), ...project.source.warnings])].filter(
+      (warning) => confirmedTempo === undefined || !warning.includes('没有写入速度'),
+    ),
     pages: job.pageUrls?.filter((url) => /^\/api\/omr\/jobs\/[a-f0-9]{32}\/pages\/\d+$/.test(url)),
   };
   if (job.review) {

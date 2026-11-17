@@ -8,6 +8,22 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-17: confirm tempo after OMR when the score states none
+
+A printed score without a metronome mark (Kong Er's PDF has none; 65 BPM exists
+only in its MIDI) used to open silently at 100 BPM. When the recognized MusicXML
+has no `<sound tempo>` or `<per-minute>`, the import dialog now stops at
+「识谱完成，请确认速度」: the user enters BPM, or chooses 「稍后再改（暂用 100）」.
+A confirmed value replaces the import warning; scores that state a tempo are
+unaffected.
+
+Reading printed marks (`♩ = 72`) was built and tested, and is **not shipped**.
+On a pre-registered held-out set of 40 EWLD pages, clean exact was 82% (gate
+≥ 90%) and simulated photo 12% (gate ≥ 70%). False tempo on 80 unmarked pages was 0.
+A browser run also showed the note-glyph classifier fails at the 3,500-px page
+size OMR actually uses. Code, fixtures and results are kept locally for a redo
+with a development set at production resolution and a fresh confirmation set.
+
 ## 2026-11-17: OMR accepts up to 30 pages per job
 
 `MAX_PAGES` 12 → 30 (server and import dialog share the value; the dialog
