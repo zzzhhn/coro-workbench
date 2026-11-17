@@ -125,12 +125,12 @@
    "box": [
     1381,
     91,
-    1636,
+    1640,
     151
    ],
    "edges": [
     "barline",
-    "estimated"
+    "barline"
    ]
   },
   {
@@ -157,12 +157,12 @@
    "box": [
     352,
     274,
-    569,
+    573,
     334
    ],
    "edges": [
     "barline",
-    "estimated"
+    "barline"
    ]
   }
  ],

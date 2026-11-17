@@ -7,6 +7,7 @@ score; issues only state facts that can be checked on the page.
 """
 from __future__ import annotations
 
+import statistics
 from fractions import Fraction
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -44,7 +45,7 @@ def _staff_coverage(ink, box) -> "object":
     return np.maximum.reduce([np.roll(coverage, -1), coverage, np.roll(coverage, 1)])
 
 
-def _barline_columns(ink, system_boxes) -> list[int]:
+def _barline_columns(ink, system_boxes, margin: float = 3) -> list[int]:
     """Columns dark across the staff lines of most staves of a system.
 
     A barline crosses every staff of a system at the same x; a stem or a slur does
@@ -57,8 +58,10 @@ def _barline_columns(ink, system_boxes) -> list[int]:
         return []
     needed = 1 if len(covers) == 1 else max(2, -(-2 * len(covers) // 3))
     votes = np.sum(covers, axis=0)
-    left = int(min(box[0] for box in system_boxes)) - 3
-    right = int(max(box[2] for box in system_boxes)) + 3
+    # homr's staff box can stop a little short of the printed lines, so look a
+    # little beyond it for the barlines that open and close the system.
+    left = int(min(box[0] for box in system_boxes) - margin)
+    right = int(max(box[2] for box in system_boxes) + margin)
     return [int(c) for c in np.flatnonzero(votes >= needed) if left <= c <= right]
 
 
@@ -68,6 +71,31 @@ def _snap_barline(columns: list[int] | None, x: float, reach: float) -> tuple[fl
     if not near:
         return x, "estimated"
     return float(min(near, key=lambda c: abs(c - x))), "barline"
+
+
+def _system_end(columns: list[int] | None, after: float, staff_ends: list[float], space: float) -> tuple[float, str]:
+    """Right edge of a system's last measure: the printed barline that closes the system.
+
+    It lies right of the measure's last note and near where homr's staff box ends
+    (the box can stop a little short of or past the lines). Of the candidate columns
+    the rightmost is taken, so a thin-thick final barline closes on its thick stroke.
+    """
+    near = [c for c in columns or [] if c > after + 0.5 * space and any(abs(c - end) <= 3 * space for end in staff_ends)]
+    if not near:
+        return staff_ends[0], "estimated"
+    return float(max(near)), "barline"
+
+
+def _system_start(columns: list[int] | None, before: float, staff_starts: list[float], space: float) -> tuple[float, str]:
+    """Left edge of a system's first measure: the system barline joining its staves.
+
+    Only multi-staff systems (and some single staves) print one; it sits at the start
+    of the staff lines, left of clef and key. The leftmost candidate is taken.
+    """
+    near = [c for c in columns or [] if c < before - 0.5 * space and any(abs(c - start) <= 2 * space for start in staff_starts)]
+    if not near:
+        return staff_starts[0], "estimated"
+    return float(min(near)), "barline"
 
 
 def label_page(xml: str, page: int) -> tuple[str, int]:
@@ -152,14 +180,22 @@ def page_review(xml: str, page: int, staves_text: str, size: tuple[int, int], cr
     if ink is not None:
         for system in {g.system for g in groups}:
             boxes = [(g.staff.x0, g.staff.y0, g.staff.x1, g.staff.y1, g.staff.grand) for g in groups if g.system == system]
-            system_columns[system] = _barline_columns(ink, boxes)
+            system_columns[system] = _barline_columns(ink, boxes, margin=3 * space)
     for (part_index, system), columns in by_group.items():
         group = next(g for g in groups if g.part_index == part_index and g.system == system)
         bars = system_columns.get(system)
+        # A system opens and closes at the same x on every staff, so look near each
+        # staff's own box end and near the system's typical one (homr's box for one
+        # staff can be off, e.g. stretched over a part name).
+        # The staff's own box end comes first: it is the estimate when no barline is found.
+        starts = [group.staff.x0, statistics.median(g.staff.x0 for g in groups if g.system == system)]
+        ends = [group.staff.x1, statistics.median(g.staff.x1 for g in groups if g.system == system)]
         order = sorted(columns)
         for position, number in enumerate(order):
-            left, left_edge = group.staff.x0, "estimated"
-            right, right_edge = group.staff.x1, "estimated"
+            if position == 0:
+                left, left_edge = _system_start(bars, min(columns[number]), starts, space)
+            if position == len(order) - 1:
+                right, right_edge = _system_end(bars, max(columns[number]), ends, space)
             if position > 0:
                 # Whole-bar rests leave the estimate far from the barline, so allow
                 # up to half the gap between the neighbouring anchors.

@@ -30,6 +30,8 @@ def test_page_review_reports_real_underfull_bars_with_boxes_and_no_confidence():
     # Interior measure edges were found on real barlines on this clean page.
     interior = [e for m in review["measures"] for e in m["edges"][1:]][:-1]
     assert interior.count("barline") >= len(interior) - 3
+    # Every system closes on its printed barline (the thick stroke of the final double bar).
+    assert all(m["edges"][1] == "barline" for m in review["measures"])
 
 
 def test_missing_anchor_and_overfull_bar_are_flagged():
@@ -103,3 +105,19 @@ def test_recognize_attaches_review_and_writes_ids(tmp_path, monkeypatch):
     assert "review" not in json.loads((tmp_path / "result-evidence.json").read_text())
     # homr's raw page is left untouched; ids live on a copy.
     assert 'id="omr-' not in (tmp_path / "recognized-homr" / "page-001.musicxml").read_text()
+
+
+def test_system_ends_snap_to_closing_and_opening_barlines_only_near_the_staff_ends():
+    from server.omr_review import _system_end, _system_start
+
+    space = 10.0
+    columns = [100, 400, 795, 801]  # system barline, an inner barline, thin + thick final bar
+    assert _system_end(columns, 700, [790.0], space) == (801.0, "barline")
+    # The staff box may stop short of the lines; the system's typical end still finds it.
+    assert _system_end(columns, 700, [700.0, 798.0], space) == (801.0, "barline")
+    # Nothing near the staff end (a bar ending mid-line) -> keep the box end, estimated.
+    assert _system_end([400], 300, [790.0], space) == (790.0, "estimated")
+    # A barline left of the last note is not the closing one.
+    assert _system_end([795], 796, [790.0], space) == (790.0, "estimated")
+    assert _system_start(columns, 150, [105.0], space) == (100.0, "barline")
+    assert _system_start([400], 450, [105.0], space) == (105.0, "estimated")
