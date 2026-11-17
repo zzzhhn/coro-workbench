@@ -231,8 +231,9 @@ def test_retry_total_pixel_budget_is_checked_before_allocating_resized_pages(tmp
 
 
 def test_recognition_no_low_interline_means_no_retry(tmp_path, monkeypatch):
-    request = make_job(tmp_path, image_bytes())
+    request = make_job(tmp_path, image_bytes(), engine="audiveris")
     monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True})
+    monkeypatch.setattr(omr, "audiveris_ready", lambda: True)
     calls = []
 
     def fail_once(directory, input_path, output, log_path, page_count, read_text, status, **kwargs):
@@ -248,8 +249,9 @@ def test_recognition_no_low_interline_means_no_retry(tmp_path, monkeypatch):
 
 
 def test_recognition_stops_after_one_evidence_based_retry(tmp_path, monkeypatch):
-    request = make_job(tmp_path, image_bytes(size=(990, 1400)))
+    request = make_job(tmp_path, image_bytes(size=(990, 1400)), engine="audiveris")
     monkeypatch.setattr(omr, "omr_health", lambda: {"ready": True})
+    monkeypatch.setattr(omr, "audiveris_ready", lambda: True)
     calls = []
 
     def low_resolution(directory, input_path, output, log_path, page_count, read_text, status, **kwargs):

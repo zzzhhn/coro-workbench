@@ -10,8 +10,9 @@ Each folder has:
   note ids `id="omr-{page}-{k}"` added in document order. Notes are otherwise as recognized.
 - `staves.txt` — homr's `--write-staff-positions` output for that page (input to the generator).
 - `review.json` — the review data, as `server/omr_review.py` produces it: page size, staff boxes, measure boxes (an edge is `barline` when an ink column crosses the staff lines of most
-  staves of the system near the estimate, else `estimated`; the first and last edge of each
-  system are always `estimated`),
+  staves of the system near the estimate, else `estimated`; a system's last edge is the
+  barline that closes it, its first edge the system barline where one is printed — a single
+  staff usually has none, so its first edge stays `estimated`),
   approximate note anchors (homr's attention centres, not glyph boxes) and review issues.
   No confidence scores.
 

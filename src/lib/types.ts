@@ -1,5 +1,5 @@
 export type PartRole = 'lead' | 'harmony' | 'bass' | 'percussion' | 'instrument';
-export type Clef = 'treble' | 'bass' | 'alto' | 'percussion';
+export type Clef = 'treble' | 'treble8' | 'bass' | 'alto' | 'percussion';
 export type NoteOrigin = 'transcribed' | 'arranged' | 'manual' | 'demo';
 
 export interface NoteEvent {
@@ -199,6 +199,18 @@ export interface ArrangementReport {
   }>;
 }
 
+export type RepeatRule = 'first' | 'page' | 'every';
+
+/** Printed layout: forced system / page starts and what each new system repeats. */
+export interface ScoreLayout {
+  /** 1-based bars that begin a new system (bar 1 always does). */
+  systemBreaks: number[];
+  /** 1-based bars that begin a new page (implies a new system). */
+  pageBreaks: number[];
+  /** Clef, key signature and part names: first system only, first system of each page, or every system. */
+  repeat: { clef: RepeatRule; key: RepeatRule; labels: RepeatRule };
+}
+
 export interface ScoreProject {
   version: 1;
   id: string;
@@ -222,6 +234,7 @@ export interface ScoreProject {
   arrangement?: { options: ArrangementOptions; report: ArrangementReport; plan?: ArrangementPlan };
   createdAt: string;
   updatedAt: string;
+  layout?: ScoreLayout;
   pitchReview?: {
     checkpoints: Record<string, 'pending' | 'confirmed' | 'modified' | 'uncertain'>;
     start: number;
@@ -237,6 +250,10 @@ export interface AbcRenderResult {
   harmonyVoiceId?: string;
   staffMap?: Array<{ partId: string; staffNumber: number; clef: Clef; voiceIds: string[] }>;
   systemMeasures?: number[];
+  /** Index into systemMeasures of each system that starts a printed page (always includes 0). */
+  pageStarts?: number[];
+  /** Clef / key / part-name repeat rules for later systems (absent = print on every system). */
+  repeat?: { clef: RepeatRule; key: RepeatRule; labels: RepeatRule };
   staffLayout?: Array<{ partId: string; auxiliary: boolean }>;
   warnings?: string[];
   noteSegments?: Record<

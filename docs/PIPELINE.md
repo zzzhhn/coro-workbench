@@ -8,6 +8,691 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-17: personal-computer integration
+
+PR [#59](https://github.com/zzzhhn/coro-workbench/pull/59) consolidates the current
+layered work at Bobby's request; its merge status supersedes historical
+"unmerged" notes below. Rejected divergent experiments #52/#53 and the
+work-computer OMR/editor PRs remain outside this integration. Default
+`arrangeV2` still uses its existing path. Source chant, frozen-window repairs,
+full-song support and form cutdowns remain explicit candidate APIs; merging
+them does not wire private audition output into the ordinary generation flow.
+Listening acceptance remains limited to the documented excerpts. Private
+source assets, comparison pages and audio are not shipped by this PR.
+
+## 2026-11-17: interlude form before note-level arrangement
+
+The full-song candidate inherited the source interlude's length. A separate,
+opt-in form layer now proposes internal lead-free cutdowns, keeping entry/return
+material, pickups and protected excerpts. It compares sustained-note crossings
+and voice motion at the splice; those costs do not imply musical approval.
+
+```mermaid
+flowchart LR
+  S[Reliable score and frozen excerpts] --> F[Choose vocal form and retained source spans]
+  F --> M[Source-to-arrangement timeline map]
+  M --> H[Source harmony and singable SATB]
+  H --> G[Protect content and inspect seams]
+  G --> A[Original-length vs compact-form auditions]
+  A --> U[Listening decision]
+```
+
+This A/B applies `arrangementForm.ts` to the previous score without rerunning
+harmony or voicing, isolating form length. Source bars 39–42 are omitted by the
+generic proposal, producing 66 bars from 70; Solo content and approved excerpts
+are unchanged under the time map. Private review supports the interlude with
+context and the whole song, piano and sampled choir. Formal defaults are not
+changed. See [research, scope and acceptance](INTERLUDE_FORM.md).
+
+## 2026-11-16: accepted excerpt baseline, full-song candidate
+
+Bobby accepted the final two-beat repair and requested expansion. Preserve
+`eea5cd8` and its private score as the accepted **excerpt** baseline. The accepted
+scope is 13–20, 21–28 and 45–52, not the entire archived score outside those spans.
+
+```mermaid
+flowchart LR
+  B[Accepted score snapshot and hashes] --> L[Lock approved spans and whole Solo]
+  S[Reliable original accompaniment] --> H[Harmony arrivals and limited arpeggio evidence]
+  H --> V[Vocal-core SATB with frozen boundary context]
+  L --> V
+  V --> C[Generate only complement of locked spans]
+  C --> E[Exact frozen-note and ensemble checks]
+  E --> R[Full-song piano and sampled choir comparisons]
+  R --> U[Section-by-section listening review]
+```
+
+Full-song audition covers 70 source-score measures. Opt-in
+`recoverInstrumentalArpeggios` recovers complete, continuous, monotonic source
+arpeggios when no explicit block arrival exists; scalar runs are excluded.
+This can replace a stale upper structure inherited at a bass-only arrival.
+An exposed octave unison stays unison instead of acquiring invented chord tones.
+`joinWindowEdges: false` preserves frozen note objects exactly while retaining
+common-tone joins inside newly generated regions.
+
+Private review: `tests/private-full-song-review.html`. Baseline manifest and
+artifact hashes live in `output/arranger-full-song/`; public source contains no
+private score. A is original piano + Solo; B is the prior snapshot (only its
+locked excerpts are accepted); C is the full candidate. B/C use identical timbre
+choices and full-song loudness normalization. Production defaults and merge
+remain unchanged until a separate adoption decision.
+
+The review defaults to **whole song, measures 1–70**, with continuous playback,
+eight section choices and two-measure score paging. Piano and sampled choir
+share the same notes. A final octave-unison release within one eighth beat of
+the barline may close at the barline in the new arrangement; source notes and
+all frozen excerpt note objects remain untouched.
+
+## 2026-11-16: two-beat repair with frozen boundary voices
+
+Bobby now reports that the three audition excerpts are essentially satisfactory
+except bar 17 beats 3 and 4. Preserve `d99644a` and its private audio as the
+user-reviewed baseline. This is acceptance of those excerpts, not the full song.
+
+```mermaid
+flowchart LR
+  S[Reliable source and context bars] --> H[Source harmonic arrivals]
+  H --> B[Distinguish continuing pedal from independent new bass]
+  B --> V[Vocal-core reduction and Solo-aware SATB]
+  F[Frozen voices before and after selection] --> V
+  V --> W[Replace only selected beat window]
+  W --> A[Old/new scores and matched piano or choir audio]
+  A --> U[User listening approval pending for two beats]
+```
+
+In `vocal-core`, a lone high left-hand arrival no longer inherits the old bass
+solely because of register. Retention needs a continuing written pedal or a
+left-hand chord block; a bass ending at the arrival is not a continuing pedal.
+Legacy `sustained-bass` remains reproducible. This remains a role heuristic.
+
+Optional `editWindow` uses full context for harmonic analysis but replaces only
+the selected beats. Frozen incoming/outgoing pitches constrain voicing; common
+tones can join at the boundary while an existing reattack outside it survives.
+The current private audition selects beats 66 to 68; no song or bar rule exists
+inside the shared algorithm. The other reviewed excerpts are not regenerated.
+
+Private page: `tests/private-held-note-review.html`. New piano/choir mixes and
+SATB stems are normalized to −23 LUFS. No production default or merge.
+See [the arranging method](ACAPPELLA_ARRANGING_METHOD.md) for lessons, counterexamples,
+scope of acceptance, and the distinction between bass-relative heuristics and
+actual root/function analysis.
+
+## 2026-11-16: quiet vocal-core audition, frozen earlier excerpts
+
+Bobby reported relative improvement in 13–28 but rejected 47–48, while confirming
+that source piano A is normal there. New opt-in `harmony: 'vocal-core'` changes
+only the later verse. It does not replace the accepted input with inferred chords.
+
+```mermaid
+flowchart LR
+  SCORE[Selected reliable accompaniment] -.-> ROLES[Existing bass and upper-structure separation]
+  ROLES -.-> CORE[Supported third and seventh or suspension before piano extensions]
+  CORE -.-> REGISTER[Legal SATB voicings using the same retained pitch classes]
+  SOLO[Unchanged Solo dwell notes] -.-> REGISTER
+  REGISTER -.-> PHRASE[Bounded joint register search across the excerpt]
+  PHRASE -.-> HOLD[Common-tone continuity and existing rests]
+  HOLD -.-> REVIEW[Previous / candidate with synchronized piano or choir sampling]
+```
+
+A ninth is optional only when a third plus fifth/seventh, or a suspension/altered
+fifth plus seventh, remains. A thirteenth is optional when the third and seventh
+remain. Sixth chords without sevenths and unsupported sparse harmony stay intact.
+All reductions are logged. These are bass-relative quiet-chant heuristics, not
+complete inversion analysis or a universal ban on extensions and dissonance.
+
+`sourceTransfer.ts` can use `melodyPartId` for octave allocation. Repeated attacks
+contribute to pitch dwell; fleeting turns do not drive register changes. Sustained
+minor-second/minor-ninth conflicts are minimized before movement when the same
+chord permits alternatives. A 32-path beam compares the complete selected span;
+the historical path retains width-one behavior when melody awareness is absent.
+No Solo pitches or retained harmonic pitch classes are rewritten by this search.
+
+Private entry: `tests/private-vocal-core-review.html`, artifacts in
+`output/arranger-vocal-core/`. A remains source piano; B/C switch together between
+piano and choir samples, with two-bar preview and normalized mix/stem files.
+13–28, Solo, ensemble and everything outside 45–52 remain exact. Choir sampling
+is not real sung articulation. Musical acceptance remains pending; no merge or
+production-default change is authorized by this audition.
+
+## 2026-11-16: legato source-chant diagnostic candidate
+
+Bobby confirmed that A (source piano plus Solo) sounds normal and B/C do not.
+The shared beat-pulse candidate below was rejected: stable backing does not mean
+all four voices rearticulate together. New opt-in `harmony: 'sustained-bass'`
+keeps the existing legato path instead of enabling `phrase-pulse`.
+
+```mermaid
+flowchart LR
+  SOURCE[Selected reliable piano staves] -.-> ROLES[Low foundation vs left-hand upper comping]
+  ROLES -.-> REDUCE[Source third and seventh or suspension before extra colors]
+  REDUCE -.-> SATB[Existing SATB allocation]
+  SATB -.-> HOLD[Join same pitches; retain source rests and breath budget]
+  HOLD -.-> REVIEW[Source piano / rejected pulse / legato candidate]
+```
+
+Two reproducible reduction defects were found: high left-hand comping could
+replace the bass foundation, and a register-dependent upper-triad preference
+could remove a source seventh. The candidate logs comping decisions and all
+capacity omissions. An octave-down confirmation on the next beat protects a
+real high-register bass approach. Four-or-fewer pitch classes remain intact;
+no new pitch classes are supplied. Bass-relative guide-tone priority is a
+bounded heuristic, not complete root/inversion recognition.
+
+Private entry: `tests/private-legato-review.html`; output in `output/arranger-legato/`.
+Only verses 13–20 and 45–52 change. Solo, ensemble, approved 21–28 and all other
+notes remain exact. Original and old auditions remain available. Ten new mix/stem
+clips use piano backgrounds at −23 LUFS. Actual engraving is reviewed separately
+from tests; there is no direct auditory acceptance. Defaults remain unchanged,
+and the arranging branch must not be merged until Bobby accepts it.
+
+## 2026-11-16: phrase-stable chant audition (subsequently rejected)
+
+The previous source chant still varied rhythm too often. New opt-in
+`rhythm: 'phrase-pulse'` adds `phraseChant.ts` between harmonic reduction and
+SATB allocation. It chooses a shared pulse over at least four measures, based
+on the whole-beat harmonic arrivals of that block. Source harmony and bass
+arrivals remain unchanged; a real off-grid change is an explicit exception.
+
+```mermaid
+flowchart LR
+  SOURCE[Selected reliable accompaniment] -.-> HARMONY[Existing source harmony reduction]
+  HARMONY -.-> BLOCK[Four-or-more-bar pulse and breath contract]
+  BLOCK -.-> VOICES[Same SATB ranges and source-supported pitches]
+  VOICES -.-> REVIEW[Original / previous chant / stable pulse audition]
+  REFERENCES[Development score study] -.-> POLICY[Role persistence and bounded exceptions]
+  POLICY -.-> BLOCK
+  HOLDOUT[Unread holdout scores] -.-> LATER[Future independent evaluation]
+```
+
+A pulse can be one bar, half a bar, or one beat, selected from source constraints;
+there is no borrowed reference-song cell. Common tones now rearticulate on the
+same clock. Breathing repeats at a tempo-dependent interval; it never deletes
+an entire short harmonic arrival. Source silence overrides the pulse. This is a
+quiet chant policy, not a general arrangement model or a musical acceptance claim.
+It may sound too regular; more repeated notes is an intentional tradeoff to test.
+
+Private entry: `tests/private-phrase-chant-review.html`; artifacts in
+`output/arranger-phrase-chant/`. Only the two verse excerpts change; Solo, ensemble,
+approved 21–28 and all old auditions stay intact. Production defaults and PRs
+remain unchanged. Study scope and curriculum: [audition learning](ARRANGEMENT_AUDITION_LEARNINGS.md).
+
+## 2026-11-16: source harmony chant, not piano-note transfer
+
+Bobby rejected literal transfer of piano figures into all four voices. The new
+opt-in `sourceChant.ts` separates harmonic arrivals from instrumental events.
+It uses the explicitly selected accompaniment/bass staves and the previous MIDI
+notation preprocessing. Solo never supplies replacement harmony.
+
+```mermaid
+flowchart LR
+  SOURCE[Selected reliable accompaniment staves] -.-> ARRIVALS[Block chord arrivals and structural bass arrivals]
+  ARRIVALS -.-> HOLD[Hold through single-note fills and repeated pulses]
+  HOLD -.-> REDUCE[Source-supported upper structure plus actual bass]
+  REDUCE -.-> SATB[Comfort-range octave allocation and common-tone continuity]
+  SOLO[Unchanged Solo pickups] -.-> BREATH[Safe breath placement]
+  SATB -.-> BREATH
+  BREATH -.-> REVIEW[Original piano / literal transfer / simple chant]
+```
+
+New sustained blocks and on-beat bass landmarks can change harmony; a single-note
+fill or octave-up bass figure does not automatically do so. Repeated pulses that
+omit a member preserve the previous source harmony. This is an explicit reduction
+heuristic, not proven chord/function recognition. Above four pitch classes, prefer
+a triad already present in the upper structure plus bass, with a preference against
+extra seconds above bass when alternatives exist. Log all omitted colors; do not
+invent pitches or call the result an exact copy of every original chord color.
+
+SATB ranges for this audition are E4–E5, A3–A4, D3–E4, E2–G3. Common tones can
+continue, but source silence and breaths break them. A Solo pickup after a gap can
+lead into a shared downbeat restart. Continuous humming has a two-measure breath
+budget; placement must leave a genuine short harmonic event audible, rather than
+erase it with a rest. There are no note-count quotas or song/bar-specific rules.
+
+Only the two verse excerpts change. Solo, ensemble and accepted excerpt remain
+exact. Private review: `tests/private-source-chant-review.html`. Formal defaults,
+old candidates and unmerged arranging PRs are unchanged; Bobby listening pending.
+
+## 2026-11-16: literal source accompaniment transfer audition
+
+Bobby rejected the harmonic-interpretation audition. PR #58 remains unmerged.
+The new opt-in `sourceTransfer.ts` bypasses chord naming and `jointVoicing`.
+Selected accompaniment staves, not Solo or generated backgrounds, supply every
+pitch class. Actual note starts and releases delimit the source sonorities.
+
+```mermaid
+flowchart LR
+  SCORE[Explicitly selected reliable accompaniment staves] -.-> EVENTS[Actual sounding notes and bass]
+  EVENTS -.-> FOUR[Keep all pitch classes up to four; disclose capacity omissions]
+  FOUR -.-> RANGE[Octave allocation into SATB ranges]
+  RANGE -.-> OUT[Source-faithful candidate with note provenance]
+  SCORE -.-> REF[Original piano playback]
+  OUT -.-> REVIEW[Original / rejected previous / direct transfer audition]
+  REF -.-> REVIEW
+```
+
+The actual lowest sounding source pitch class stays in Bass. All source pitch
+classes are required when there are at most four. With more than four, retain
+the lowest pitch and the highest remaining distinct classes; explicitly report
+omissions. This is a deterministic capacity reduction, not harmonic importance
+analysis. Motion/register preferences can choose octaves but cannot add tones.
+No extension through source silence, no invented breaths, no Solo-led correction.
+Source figures and reattacks remain; this is not yet a complete vocal arrangement.
+An optional, logged preprocessing step makes tightly staggered ascending,
+overlapping MIDI rolled chords simultaneous. It is an inference, not literal
+timing preservation, and is off by default.
+
+Another default-off, logged reduction recognizes isolated very short on-beat
+MIDI attacks immediately followed by a sustained event as possible performed
+grace notes. It omits that ornament only from the backing reduction and moves the
+main event to the beat. It does not remove short runs. Original playback retains
+all ornaments; this inference still needs listening review.
+
+Private audition enables both MIDI notation options, retains Solo and the approved excerpt,
+and changes only the two verse excerpts. A is original piano plus the same Solo;
+B is the rejected interpretation; C is direct allocation. Production default is
+unchanged. Private entry: `tests/private-source-transfer-review.html`.
+
+## 2026-11-16: explicit harmonic interpretation before chant voicing
+
+Bobby still rejects the harmony in the previous candidates. `harmonicPlan.ts` is
+an opt-in interpretation layer, not another accepted arranging baseline. It keeps
+root distinct from bass, enumerates a bounded tonal chord vocabulary, and reports
+core tones, optional colors, excluded tones, alternative interpretations and review
+reasons. A named candidate does not establish musical correctness.
+
+```mermaid
+flowchart LR
+  NOTES[Source accompaniment attacks and bass] -.-> OBS[Reobserve actual notes on beats]
+  SOLO[Unchanged stable Solo evidence] -.-> CAND[Supported root and quality candidates]
+  OBS -.-> CAND
+  CAND -.-> PATH[Sequence selection with continuity and root motion]
+  PATH -.-> CORE[Explicit core and bass contract]
+  CORE -.-> SATB[Joint SATB voicing with existing register and breath settings]
+  PATH -.-> REVIEW[Expose ambiguity and unsupported regions]
+  SATB -.-> AB[Old chant / prior candidate / interpreted candidate]
+  REVIEW -.-> AB
+```
+
+The source adapter can retain dyads for interpretation instead of discarding them.
+It no longer treats all notes later in a held guide as available at its start.
+Only one missing core tone may be inferred from an adjacent same-bass candidate,
+with no conflicting new evidence and no chain of inherited omissions. Optional
+colors are not carried by that rule. Such inferences remain review items. Possible
+passing/neighbor/suspension labels are local timing heuristics, not verified voice
+analysis. Ambiguous choices use a bounded dynamic-programming path, not a trained
+harmonic model or globally complete tonal analysis.
+
+The voicer must retain the interpreted core when all four backing voices sound;
+range/smoothness scores cannot trade it away. Unsupported regions retain the prior
+candidate with explicit review evidence rather than becoming artificial silence.
+The two verse excerpts are regenerated. Solo, ensemble, and accepted excerpt are
+unchanged; defaults remain legacy. Private review: `tests/private-harmonic-plan-review.html`.
+
+## 2026-11-16: chant structure, Solo pickups and register audition
+
+Bobby reports that simple chant is substantially better, but identifies remaining
+harmonic, phrase-boundary and register problems. This is partial acceptance only.
+Two opt-in comparisons retain the previous chant: B adds source-structure costs and
+Solo-informed breaths; C additionally changes register preferences. Production
+defaults and the accepted excerpt are unchanged. This does not demonstrate that
+the new algorithm would regenerate the accepted excerpt equally well.
+
+```mermaid
+flowchart LR
+  SOURCE[Reliable source notes and actual bass] -.-> STRUCTURE[Prefer supported upper structure over redundant doubling]
+  SOLO[Unchanged Solo rests and pickups] -.-> BREATH[Background release and rearticulation]
+  STRUCTURE -.-> VOICING[Joint SATB voicing]
+  BREATH -.-> VOICING
+  REGISTER[Optional register preference] -.-> VOICING
+  VOICING -.-> REVIEW[A previous chant / B structure and phrasing / C register]
+  REVIEW -.-> LISTEN[Matched piano mix and individual stems; Bobby acceptance]
+```
+
+The structure option never adds a pitch absent from source harmony. It penalizes
+redundant bass/upper doubling, retains supported third/seventh intervals relative
+to the actual bass, and favors a supported upper triad. These are soft heuristics,
+not a definitive chord analysis, especially with inversions or ambiguous palettes.
+Solo gaps of at least half a beat can release the background; a late pickup can
+lead into a shared beat restart instead of an automatic common-tone tie.
+
+Private entry: `tests/private-chant-refine-review.html` on existing 5174. Twenty
+new piano mix/stem clips are matched to −23 LUFS (maximum deviation 0.03 LU).
+Both rewritten excerpts were visually reviewed in B and C. Default replay, Solo
+and untouched regions match their saved baseline. Twenty focused tests and
+TypeScript pass. Audio playback validation is not listening acceptance.
+
+## 2026-11-16: plain chord chant, following rejection of melodic backgrounds
+
+Bobby rejected the rebuild: repeated verse melodies received unnecessarily complex
+background lines. `chordChant.ts` is a deliberately simpler opt-in path. It bypasses
+foundation/motif/dialogue planning entirely, sustains source-supported harmony with
+Hmm, and uses joint voicing only to connect those sustained voices. Source events
+shorter than one beat are omitted from this reduction, leaving explicit gaps;
+continuous regions have a shared half-beat breath after at most two bars. This is
+a limited harmonic chant candidate, not a claim of skilled full-song arranging.
+
+```mermaid
+flowchart LR
+  SCORE[Reliable source accompaniment] -.-> HARMONY[Supported sustained harmony and bass]
+  HARMONY -.-> HOLD[Shared sustained Hmm regions with breath gaps]
+  HOLD -.-> VOICE[Joint SATB voice leading; no melodic dialogue]
+  SOLO[Unchanged Solo] -.-> VOICE
+  VOICE -.-> REVIEW[Piano mix and individual stems; Bobby listening]
+  OLD[Approved passage and rejected candidates preserved] -.-> REVIEW
+```
+
+The voicer starts independently of prior experimental background notes. Identical
+source/Solo passages at different locations produce the same chant; this is not a
+fuzzy repeated-section detector. Actual accompaniment differences can change voicing.
+Only the two rejected verse excerpts are regenerated; the accepted excerpt, Solo
+and ensemble are unchanged. No song title, bar-specific notes or reference template
+enters the algorithm. Source extraction and joint-voicing heuristics still apply.
+
+Private entry: `tests/private-chant-review.html`, existing 5174 service. A is the
+partially accepted original, B the rejected rebuild, C plain chant. Ten new mix/stem
+clips use piano backing and static-gain loudness matching. All 16 rewritten bars
+were visually inspected. Eighteen focused tests and TypeScript pass; these do not
+constitute listening acceptance. Production defaults are unchanged.
+
+## 2026-11-16: rebuild from the partially accepted joint-voicing implementation
+
+Bobby rejected the subsequent anchor/structural-voicing experiments (#52/#53).
+This branch starts at `15e1a5b`, not those experiments. Replaying the original
+joint-voicing implementation against the saved input reproduces its parts exactly.
+The accepted bars 21 to 28 are frozen in the private audition; this is preservation,
+not evidence that the new algorithm passes that region. Only 13 to 20 and 45 to 52
+are regenerated. Solo and ensemble remain identical.
+
+```mermaid
+flowchart LR
+  INPUT[Reliable accompaniment score] -.-> SOURCE[Shared sounding notes and actual low-register arrivals]
+  SOURCE -.-> CONTEXT[Explicit pitch palettes and bass with source note IDs]
+  CONTEXT -.-> FOUNDATION[Background foundation and phrase tasks]
+  SOLO[Unchanged Solo] -.-> DIALOGUE[Accepted conversation and motif mechanism]
+  FOUNDATION -.-> DIALOGUE
+  CONTEXT -.-> DIALOGUE
+  DIALOGUE -.-> JOINT[Accepted joint SATB beam search]
+  CONTEXT -.-> JOINT
+  JOINT -.-> REVIEW[New rewritten excerpts: score, piano mix and stems]
+  FROZEN[Approved excerpt and rejected candidates preserved] -.-> REVIEW
+  REVIEW -.-> HUMAN[Bobby listening; no default rollout yet]
+```
+
+`sourceHarmony.ts` reduces a voiced accompaniment, without completing guessed
+chord names with unheard thirds. Rolled arrivals and held common tones contribute;
+Solo ornaments do not. `sourceArrangement.ts` supplies the same context to the
+foundation, dialogue planner and joint realization. Previously, an override could
+reach pitch selection while foundation planning still read old project chords.
+All rewritten excerpts use the accepted conversation path; section labels no longer
+raise the background register through `lift`. The joint voicer's default path and
+weights remain unchanged. With explicit source palettes it skips guessed-scale
+passing tones and root-relative third/seventh completion.
+
+This is an opt-in experimental composition path. It changes background pitches and
+rhythms; it is not a pitch-only A/B. The half-beat arrival grid, chordal-part selection,
+low-register heuristic and two-bar maximum context are limitations, not general
+musical truth. Unvoiced regions can remain evidence gaps. The implementation is
+oriented to reliable block/rolled accompaniment; it does not replace audio inference.
+No reference arrangement, song title or bar-specific pitch rule enters generation.
+
+Private review: `tests/private-rebuild-review.html` on the existing 5174 server.
+A is the version containing the approved passage, B the rejected anchor experiment,
+C the rebuild. C's protected passage reuses A's score notes and audio exactly.
+Ten newly rendered piano clips (mix plus SATB for each rewritten excerpt) use static
+gain to -23 LUFS, measured within 0.02 LU. Solo timbre, tempo and mix settings stay
+fixed. Stem normalization is independent and does not represent mix balance.
+All 16 rewritten bars were visually inspected in-browser; 25 relevant tests and
+TypeScript pass. No direct listening acceptance is claimed. Private input, rendered
+scores, clips, feedback, provenance and scripts remain local, never in Git.
+
+## 2026-11-16: listening feedback and selectable background audition timbre
+
+Bobby gave positive listening feedback on joint-voicing bars 21 to 28, but rejected
+17/18 and all of 45 to 52. This is partial acceptance, not whole-arrangement quality.
+See [audition learnings](ARRANGEMENT_AUDITION_LEARNINGS.md) for observations,
+counterexamples and the next harmonic-segmentation hypothesis.
+
+This iteration changes timbre only. `auditionTimbre.ts` builds a non-mutating
+playback view: vocal harmony/bass defaults to piano, with an original-timbre option.
+Musical Solo, source instruments and percussion remain unchanged. The App uses the
+view for score playback, sample priming and note audition; written instruments and
+exports retain the project data. Transport controls pause before changing timbre.
+
+```mermaid
+flowchart LR
+  SCORE[Unchanged written score] --> VIEW[Playback view: piano backing or original]
+  VIEW --> ENGINE[Existing PlaybackEngine and audio renderer]
+  SCORE --> EXPORT[Unchanged score and export instrumentation]
+  ENGINE --> COMPARE[Same timbre for all compared versions]
+```
+
+The private joint review defaults to piano and retains the original audio option.
+Forty-five new piano clips use static gain to -23 LUFS within 0.04 LU; all forty-five
+original clips and score hashes are unchanged. Eight playback/timbre tests and the
+TypeScript check pass. Production TransportBar was exercised in an isolated browser
+harness at desktop and narrow width; this does not claim a production deployment.
+The new App playback control is on the audition branch, not canonical main.
+
+## 2026-11-16: isolated joint-voicing audition
+
+The next controlled layer realizes the four background voices together, using the
+previous harmonic hypotheses and rhythmic gestures. `jointVoicing.ts` performs a
+bounded beam search over simultaneous sounding notes, with whole-duration costs for
+spacing, close dissonance, missing chord identity and Solo collision. Bass arrivals
+follow the supplied root or slash bass; short prepared/resolved connections remain
+possible. Existing contours and smooth transitions are soft preferences.
+
+```mermaid
+flowchart LR
+  OLD[Previous harmonic candidate and background gestures] -.-> JOINT[Joint SATB search over sounding intervals]
+  SOLO[Fixed Solo and Solo silence] -.-> JOINT
+  JOINT -.-> HOLD[Retune at new chord starts only; rejoin unchanged common tones]
+  HOLD -.-> REVIEW[Three unchanged excerpt ranges; previous versions retained]
+  REVIEW -.-> MEDIA[Score inspection plus matched mix and S A T B audio]
+  MEDIA -.-> HUMAN[Bobby listens for benefit and regression]
+```
+
+Solo, ensemble, chord hypotheses, tempo, samples, mix settings and sounding coverage
+remain unchanged. Background pitches may change; a held note may turn at a new chord
+start, but an annotation ending without a new chord is not permission to reset its
+pitch. Common-tone pieces are rejoined. No song, bar or reference-score exceptions
+are embedded in the solver. Only bars 13 to 20, 21 to 28 and 45 to 52 are auditioned.
+
+The reported bars 27/28 illustrate the defect: the previous bass held D through an
+Am9 segment, while an upper neighbor introduced Bb. The candidate moves the bass to
+A at the supplied Am9 boundary and removes the unsupported chromatic neighbor.
+This is a structural diagnosis, not proof that the inherited harmony or arrangement
+is musically correct. Bars 21/22 have five changed background events and require an
+explicit regression listen; they are not hard-coded or claimed preserved in quality.
+
+Private review: `tests/private-joint-review.html` on port 5174. It retains the earlier
+dialogue and previous harmonic versions, offers mixes and each background voice,
+and displays source-score images. Fifteen new clips and thirty unchanged old clips
+measure -23 LUFS within 0.03 LU. Stem normalization is independent and does not
+represent full-mix balance. The 24 candidate bars were visually inspected; 76 related
+tests and TypeScript checking passed. Listening acceptance remains Bobby's task.
+
+This is an isolated heuristic candidate, not the production default. Harmony remains
+unverified; original rhythmic gestures and sample articulation still limit quality.
+Nine previously read reference arrangements remain development material, not holdout.
+
+## 2026-11-15: isolated harmonic-evidence audition
+
+Bobby reported that the dialogue candidate was pleasant around bars 21 and 22 but
+inconsistent elsewhere. The first controlled experiment changes harmonic evidence
+only. It does not claim that the entire arrangement is improved or accepted.
+
+`harmonyEvidence.ts` excludes the selected Solo and percussion, integrates the
+accompaniment's sounding pitch classes and lowest notes, and pools broken-chord
+members across segments. Its hypotheses include sixths, added ninths and ninths,
+with possible inversions. A bounded approximate segment search penalizes unsupported
+changes; actual silent evidence gaps remain unassigned. This is rule-based harmonic
+analysis, not a trained model or a calibrated confidence estimate. Per-beat alternatives
+are diagnostics, not the same objective as the pooled segment decision.
+
+```mermaid
+flowchart LR
+  INPUT[Fixed reliable score] -.-> BACKING[Accompaniment evidence excluding Solo]
+  BACKING -.-> HARMONY[Segment-level harmonic hypotheses and review reasons]
+  OLD[Previous background schedule and pitch search] -.-> REALIZE[Same realizer with explicit harmonic context]
+  HARMONY -.-> REALIZE
+  REALIZE -.-> COMPARE[Previous dialogue versus harmonic candidate]
+  REF[Original score image and MIDI playback] -.-> COMPARE
+  COMPARE -.-> LISTEN[Matched mixes and S A T B stems]
+  LISTEN -.-> BOBBY[Bobby judges benefit and regression before promotion]
+```
+
+`createMelodicDialogue` accepts an optional harmonic context without changing its
+schedule, seed material or default behavior. The experiment preserves Solo, ensemble,
+all attacks, durations, syllables, velocities, tempo, samples and mix. Only background
+pitches and displayed harmonic hypotheses change inside bars 13 to 20, 21 to 28 and
+45 to 52. Bars 21 and 22 are a regression case, not a song-specific exception.
+All other notes retain the previous candidate. No reference arrangement is read by
+the generator; the nine studied arrangements remain development material.
+
+Private review: `tests/private-harmony-review.html` on port 5174. It offers the
+original hand-transcribed score's MIDI playback, unchanged previous dialogue and new
+candidate, with expandable source-score images. The reference uses its original
+instrumentation and is not the equal-timbre arrangement A/B. Eighteen new audio files
+and fifteen unchanged previous files are available: all 33 measure -23 LUFS within
+0.01 LU. Stem gains are independent diagnostic gains, not the full-mix balance.
+
+The 24 candidate bars were visually inspected. Sixty-nine related synthetic tests
+and TypeScript checking passed; private assertions verify exact Solo, schedule and
+outside-span notes, plus hashes of retained audio. These checks do not establish
+harmonic correctness, singability or hearing acceptance.
+
+Known limitation: the fixed sequential pitch search can still choose an unsuitable
+bass or keep a long note across a harmony change. A better chord hypothesis does not
+guarantee that the generated vertical voicing realizes it. Joint voice realization,
+whole-duration dissonance handling and phrase-level musical judgment remain later,
+separate layers. The default production generator is unchanged.
+
+## 2026-11-15: melodic dialogue audition and vocal tenor clef
+
+Bobby found the bounded ensemble sketches still sounded like chord padding. This
+revision remains an audition, not an accepted or production arrangement. Solo and
+Solo+SATB stay fixed; flexible divisions such as SSATTB are a future requirement,
+not a reason to silently change this comparison's ensemble.
+
+`melodicDialogue.ts` extracts one short moving cell from stable Solo notes, retains
+its rhythmic/contour identity across phrase windows, and assigns statement,
+imitation or contrary answer, phrase-end Solo harmony and harmonic support to
+different singers. Bass connects actual harmonic destinations. Horizontal pitch
+search balances contour with range, chord context, collisions and voice ordering;
+chromatic connections need evidence in the input melody or current chord. The
+composed Solo harmony is not a transcription of original backing vocals.
+
+```mermaid
+flowchart LR
+  INPUT[Fixed Solo, SATB, harmony and mix] -.-> CELL[Input-derived melodic cell]
+  INPUT -.-> PHRASE[Breaths and short phrase windows]
+  CELL -.-> TASK[Statement, answer, Solo harmony and support]
+  PHRASE -.-> TASK
+  TASK -.-> LINES[Horizontal pitch realization with harmonic context]
+  LINES -.-> SCORE[Inspect actual scores, including vocal tenor clef]
+  SCORE -.-> AB[Old v2, previous sketch and new short candidate]
+  AB -.-> LISTEN[Matched mix and separate S A T B auditions]
+  LISTEN -.-> BOBBY[Bobby judges melodic identity and ensemble interaction]
+```
+
+Only bars 13 to 20, 21 to 28 and 45 to 52 are rewritten. All other bars remain the
+previous candidate. The private review page retains existing audio unchanged and
+adds 15 new renders. Each excerpt offers a full mix and four background stems.
+Post-render normalization uses static gain to the same -23 LUFS target; individually
+normalized stems are diagnostic, not the balance heard in the full mix.
+
+Reference study revisited development scores for imitative handoff, moving inner
+parts and distinct bass arrivals. No reference notes enter generation. All nine
+already-read scores remain development material, not an unseen holdout set.
+The 24 newly arranged bars were visually inspected. Automated checks protect Solo,
+outside-span notes, ensemble and octave semantics; listening approval remains Bobby's.
+
+The separate tenor correction adds `treble8`: ABC displays the written octave and
+compensates playback; MusicXML keeps sounding pitches with clef-octave-change -1;
+MIDI stays unchanged. New arrangeV2 tenor parts use this clef. Existing projects can
+select it in the inspector, without forced migration of saved notes.
+
+Limitations: source harmony is inherited and unverified; phonetic playback uses
+choir samples; role scheduling and motif development remain rule-based and may
+still feel repetitive. No claim of learned arrangement competence or listening
+acceptance. The default arrangement algorithm is unchanged apart from tenor clef.
+
+## 2026-11-15: bounded ensemble sketches after continuity rejection
+
+Bobby rejected the continuity candidate: some singers had no meaningful contribution
+for long stretches. Its Alto had only 12 notes. Tests and the earlier score inspection
+did not establish musical acceptance. Do not promote that candidate as an accepted baseline.
+
+`ensembleSketch.ts` is an audition-only, bounded rewrite of an existing Solo+SATB
+project. Three explicit musical intentions (flow, conversation, lift) guide group
+gestures from harmonic arrivals and Solo phrase evidence. A joint voicing search
+considers horizontal movement, spacing, pitch-class coverage and Solo collisions.
+Common tones can continue; phrase-end gaps can release the group. There is no
+per-singer attendance quota, song-name dispatch or reference-note input.
+
+```mermaid
+flowchart LR
+  INPUT[Fixed Solo + SATB, harmony and mix] -.-> INTENT[Human-selected short-span intention]
+  INTENT -.-> GROUP[Harmonic arrivals and phrase-based group gestures]
+  GROUP -.-> VOICE[Joint voicing and horizontal line search]
+  VOICE -.-> SCORE[Score inspection and revision]
+  SCORE -.-> AUDIO[Matched full mixes and individual background auditions]
+  AUDIO -.-> BOBBY[Bobby judges musical benefit before expansion]
+```
+
+The experiment retains old v2 and rejected continuity output. It changes background
+pitches, rhythms and syllable allocation together as a musical-sketch layer; this is
+not a rhythm-only ablation. Solo, ensemble, source harmony, tempo, samples and part
+mix stay fixed. Only three eight-bar spans are newly arranged. Other bars in the
+private project remain the rejected candidate, not a new complete arrangement.
+
+Five synthetic tests and TypeScript checking passed. The 24 excerpt bars were
+visually inspected in the actual review page; the first draft's missing cadence
+breaths were revised and rerendered. The private audition has 45 selections:
+43 non-silent clips at -23 LUFS within 0.03 LU and two explicitly marked silent old
+stems. Same renderer as earlier comparisons; normalization applies static gain
+after that shared rendering chain. Individual stems are normalized for diagnosis,
+not to represent their level inside the mix. No direct hearing acceptance is claimed.
+
+Limitations: high-level intentions are manually selected, source harmony is inherited
+and unverified, flow remains simple, phonetic playback uses choir samples, and
+motivic development is still rudimentary. The production generator is unchanged.
+
+## 2026-11-15: cross-phrase background continuity (personal-computer candidate, subsequently rejected)
+
+One rhythm/participation layer, after the earlier phrase candidate. The default
+Solo+SATB generator remains unchanged until Bobby reviews the audition.
+
+```mermaid
+flowchart LR
+  INPUT[Same reviewed source and Solo] --> PLAN[Same section and harmony plan]
+  PLAN -.-> TASK[Candidate: cross-phrase background tasks]
+  TASK -.-> MOTIF[Input-derived motif memory and independent rhythm clock]
+  MOTIF -.-> ENTRY[Entrances, responses, long-gap exits]
+  ENTRY -.-> REALIZE[Existing pitch and syllable realizer]
+  REALIZE -.-> REVIEW[Score inspection and loudness-matched comparison]
+  REVIEW -.-> HUMAN[Bobby listening acceptance]
+```
+
+- `planBackgroundContinuity` builds a complete-song timeline before section
+  rendering. Short Solo breaths do not restart motifs; long silence or a changed
+  motion policy begins another episode. Identical rhythm motifs can recur.
+- Motifs come from the input melody, never a reference-score template or song
+  name. Upper-voice tasks use register clearance; support can enter after the
+  first phrase, and responses occupy actual Solo gaps. Bass retains its own
+  harmonic landmarks. This is a deterministic candidate, not a trained model.
+- Generated backgrounds use a half-beat clock. A sixteenth Solo pickup must not
+  permanently offset a repeated background and cause short chord-edge pieces.
+  Solo itself is not quantized or edited by this layer.
+- Frozen comparison: old v2, previous phrase candidate, new continuity candidate;
+  same input, Solo, Solo+SATB, harmony, plan, pitch allocator, syllable mapping,
+  tempo, sample renderer and part mix. Private files stay outside Git.
+- Limits: the existing section plan still uses heuristic eight-bar blocks;
+  chord-boundary articulation, independent pitch-line development and phonetic
+  rendering are not redesigned here. Static constraints are not musical approval.
+  All nine newly studied references are development material, not blind holdouts.
+
 ## 2026-11-15: OMR text layer v9 — performance marks (D4), confirmation test C4 passes; on by default
 
 Text layer only; notes still never edited. v9 (`657c723`) was developed on a new dev set D4 and frozen by file hash; C4 is fresh public data with the C3 gates unchanged, written before any D4 or C4 item was opened, run once. C3 was not used for tuning.
@@ -54,6 +739,7 @@ Implements the interface decision of 2026-11-15. The score itself is unchanged; 
 
 - **What the server writes.** Each recognized `<note>` gets `id="omr-{page}-{k}"` (on a copy; homr's raw page MusicXML stays as written). `OmrJob.review` carries page sizes, staff boxes, measure boxes, approximate note anchors and review issues; it is also saved as `review.json` in the job folder.
 - **Measure boxes.** Boundaries start halfway between neighbouring measures' note anchors and snap to an ink column that crosses the staff lines of most staves of the system (a barline, not a stem). Edges that found one are `barline`; the first and last edge of every system stay `estimated`.
+- **System ends (2026-11-15, later).** The last edge of a system now snaps to the barline that closes it (rightmost ink column right of the last note, within three staff spaces of the staff's or the system's typical box end, so a final double bar closes on its thick stroke); the first edge snaps to the system barline when one is printed (multi-staff systems), else stays `estimated`. Full upload path: public two pages 42 → 47 of 52 edges on barlines (the 5 left are single-staff system starts, which print no barline); Kong Er pages 1–6 66 → 138 of 144. Visual check on these and on 9 SLUB scans (overlays kept locally): closing edges sit on the printed line; scan edges on barlines 308 → 391 of 503 per side across all 17 pages. Still estimated: interior edges next to whole-bar rests, faint or broken scanned barlines (a choral page keeps 25 of 55), and one skewed Bach fugue scan where no column crosses the staves at all.
 - **Issues (no confidence scores).** `measure-overfull` / `measure-underfull` (beats read vs. meter, with a note that pick-ups and repeat halves are legitimate), `no-anchor`, `page-part-mismatch`, and, when the text layer runs, `text-discarded` (check) and `text-attached` (info) from its evidence.
 - **Measured.** Two public pages (tests/fixtures/omr-review): 112/112 notes anchored, 42 of 52 edges on barlines, the 10 estimated ones are system ends, four real underfull bars (pick-up, repeat halves, last bar). Kong Er pages 1–6 (private, local check only): 604/604 notes anchored; 66 of 72 inner edges on barlines, all 72 system-end edges estimated; one underfull bar.
 - Anchors are attention centres, often half to two staff spaces off the note head; the editor must say so.
@@ -138,6 +824,32 @@ One layer changed: which recognizer reads PDF/images. Raw output of every engine
   - Cross-engine disagreement as a confidence score: on TEST, bars where homr and Audiveris agree were still wrong 2–10% of the time, so it is not a confidence. Not shown as one.
 - **Known gaps of homr.** No lyrics, chord symbols or part names (0 in every output); about 0.7 of the reference's ties; parts named Voice/Piano. Audiveris remains the choice when you want it to try lyrics.
 - Test pass and these scores are not musical acceptance. Compare against the source page before rehearsal.
+
+## 2026-11-15: score input and editor status
+
+```mermaid
+flowchart LR
+  PDF[PDF / image] --> HOMR[homr notes, Audiveris fallback]
+  HOMR --> TXT[Text layer v8, off by default]
+  HOMR --> REV[Review data: page boxes, bar boxes, note anchors, issues]
+  REV --> UI[Source-image review panel and unified review queue]
+  TXT --> UI
+  UI --> ED[Keyboard and mouse editor: pitch, duration, tuplets, voices, ranges, bars]
+  ED --> SCORE[Reviewed editable score]
+```
+
+- **Production:** homr OMR; experimental text layer v8 (off by default); per-note
+  `sourceRef` and `source.omrReview`; source-image review panel with two-way
+  jumps; one review queue filtered by reason.
+- **Editor layers merged:** keyboard proof-reading (#27), source review (#31),
+  range select/copy/paste and voices 1-4 (#33), tuplets and onset repair (#34),
+  mouse note entry (#36), insert/delete bars (#37).
+- **Verified:** a formal homr upload of Kong Er pages 1-6 mapped 604/604 notes to
+  the page; clicking a score note opened the matching page region, and `]`
+  moved to the next review item.
+- **Open:** bar edges at the start and end of each line are estimated. The text
+  layer failed its confirmation tests on instrumental scan pages (performance
+  terms read as lyrics). Real phone photos remain untested.
 
 ## 2026-11-14: work-computer priority moves to score input and editing
 

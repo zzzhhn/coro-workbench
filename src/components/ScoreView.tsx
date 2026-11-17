@@ -3,7 +3,10 @@ import abcjs from 'abcjs';
 import type { TuneObject } from 'abcjs';
 import type { ScoreProject } from '../lib/types';
 import type { Selection } from '../lib/editor';
-import { beatsPerBar, toAbc } from '../lib/music';
+import { beatsPerBar, pitchName, toAbc } from '../lib/music';
+import { layoutOf } from '../lib/layout';
+import { beatAtX, pitchAtStep, stepAtY, type BeatAnchor } from '../lib/mouseEntry';
+import type { Clef } from '../lib/types';
 import { alignEngravingArpeggios, alignEngravingStaffNames, fitEngravingSystems, prepareEngravingTune } from '../lib/engraving';
 import type { MeasureRange } from '../lib/scoreWindow';
 import { overlapsUncertainSource } from './workspaceView';
@@ -19,10 +22,31 @@ interface Props {
   readingMode?: boolean;
   measureRange?: MeasureRange;
   onSelect: (selection: Selection, beat?: number, extend?: boolean, span?: boolean) => void;
+  /** Click on an engraved chord symbol: its beat and its box on the surface, for an inline editor. */
+  onChordClick?: (beat: number, box: { x: number; y: number; width: number; height: number }) => void;
+  /** Absolutely positioned content drawn over the paper (surface coordinates), e.g. an inline editor. */
+  overlay?: React.ReactNode;
   /** Note ids (part\0note) inside the active range, highlighted as a block. */
   rangeKeys?: Set<string>;
   /** Rubber-band selection: glyphs whose boxes intersect the dragged rectangle. */
   onRubberBand?: (hits: Array<{ partId: string; start: number }>) => void;
+  /** Click-to-place entry: when set, clicks on empty staff space place a note there. */
+  placement?: {
+    grid: number;
+    onPlace: (target: { partId: string; staffNumber: number; clef: Clef; midi: number; beat: number }) => void;
+  };
+}
+
+export interface StaffHit {
+  partId: string;
+  staffNumber: number;
+  clef: Clef;
+  step: number;
+  midi: number;
+  beat: number;
+  /** Ghost marker position in surface pixels. */
+  x: number;
+  y: number;
 }
 
 export default function ScoreView({
@@ -38,6 +62,9 @@ export default function ScoreView({
   onSelect,
   rangeKeys,
   onRubberBand,
+  placement,
+  onChordClick,
+  overlay,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const tune = useRef<TuneObject | null>(null);
@@ -48,6 +75,8 @@ export default function ScoreView({
   const altDown = useRef(false);
   const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number }>();
   const bandStart = useRef<{ x: number; y: number; active: boolean }>(undefined);
+  const [ghost, setGhost] = useState<StaffHit>();
+  const chordPress = useRef<{ el: SVGElement; x: number; y: number }>(undefined);
   const [error, setError] = useState('');
   const [renderVersion, setRenderVersion] = useState(0);
   const lastScrolledSystem = useRef(-1);
@@ -160,7 +189,15 @@ export default function ScoreView({
       alignEngravingArpeggios(systems);
       const boxes = fitEngravingSystems(systems);
       setEngravedWidth(Math.ceil(Math.max(0, ...boxes.map((box) => box.width))));
+      // Mark systems that start because of a forced line or page break.
+      const layout = layoutOf(project);
       for (const [index, svg] of [...container.current.querySelectorAll('svg')].entries()) {
+        const startBar = abcResult.systemMeasures?.[index];
+        svg.dataset.break = startBar && layout.pageBreaks.includes(startBar)
+          ? 'page'
+          : startBar && layout.systemBreaks.includes(startBar)
+            ? 'system'
+            : '';
         svg.setAttribute(
           'aria-label',
           `${project.title}，第 ${abcResult.systemMeasures?.[index] ?? (firstMeasure ?? 1) + index * (mobile ? 2 : 4)} 小节起`,
@@ -227,6 +264,35 @@ export default function ScoreView({
           }
         }
       }
+      // Chord symbols live in the silent harmony lane; tag each with its beat so a click can edit it.
+      if (abcResult.harmonyVoiceId && abcResult.staffMap) {
+        const lane = abcResult.staffMap.flatMap((staff) => staff.voiceIds).indexOf(abcResult.harmonyVoiceId);
+        const bar = beatsPerBar(project);
+        const systems = [...container.current.querySelectorAll<SVGSVGElement>('svg')];
+        systems.forEach((svg, system) => {
+          const first = (abcResult.systemMeasures?.[system] ?? (firstMeasure ?? 1) + system * (mobile ? 2 : 4)) - 1;
+          // abcjs gives each chord text's measure (m) but not its beat inside the bar; take
+          // the chords of that bar in order, the same order abcjs draws them.
+          const perBar = new Map<number, SVGElement[]>();
+          for (const text of svg.querySelectorAll<SVGElement>(`.abcjs-chord.abcjs-v${lane}`)) {
+            const m = Number(/abcjs-m(\d+)/.exec(text.getAttribute('class') ?? '')?.[1]);
+            perBar.set(m, [...(perBar.get(m) ?? []), text]);
+          }
+          for (const [m, texts] of perBar) {
+            const from = (first + m) * bar;
+            const here = project.chords.filter((chord) => chord.start >= from - 1e-6 && chord.start < from + bar - 1e-6);
+            texts
+              .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
+              .forEach((text, index) => {
+                if (!here[index]) return;
+                text.dataset.chordBeat = String(here[index].start);
+                text.setAttribute('data-testid', 'score-chord');
+                text.setAttribute('role', 'button');
+                text.setAttribute('aria-label', `和弦 ${here[index].symbol}，点击编辑`);
+              });
+          }
+        });
+      }
       // A new part/layout changes scroll coordinates even at the same beat.
       lastScrolledSystem.current = -1;
       setRenderVersion((value) => value + 1);
@@ -289,15 +355,90 @@ export default function ScoreView({
     };
   }, []);
 
+  // Click-to-place: find the staff under the pointer (with ledger room) and the beat from
+  // the x positions of engraved attacks and barlines in the same system.
+  const staffHit = (clientX: number, clientY: number, surface: DOMRect): StaffHit | undefined => {
+    if (!placement || !container.current || !abcResult?.staffMap) return undefined;
+    const voiceOwner: Array<{ partId: string; staffNumber: number; clef: Clef }> = [];
+    for (const staff of abcResult.staffMap)
+      for (const _ of staff.voiceIds) voiceOwner.push({ partId: staff.partId, staffNumber: staff.staffNumber, clef: staff.clef });
+    const systems = [...container.current.querySelectorAll<SVGSVGElement>('svg')];
+    let best: { distance: number; svg: SVGSVGElement; index: number; top: number; bottom: number; owner: (typeof voiceOwner)[number] } | undefined;
+    systems.forEach((svg, index) => {
+      for (const staff of svg.querySelectorAll<SVGGElement>('.abcjs-staff')) {
+        const voice = Number(/abcjs-v(\d+)/.exec(staff.getAttribute('class') ?? '')?.[1]);
+        const owner = voiceOwner[voice];
+        const lines = [...staff.querySelectorAll('path')].map((line) => line.getBoundingClientRect());
+        if (!owner || lines.length < 2) continue;
+        const top = lines[0].top + lines[0].height / 2;
+        const bottom = lines.at(-1)!.top + lines.at(-1)!.height / 2;
+        const left = Math.min(...lines.map((line) => line.left));
+        const right = Math.max(...lines.map((line) => line.right));
+        const reach = ((bottom - top) / 8) * 7; // up to three ledger lines
+        if (clientX < left || clientX > right || clientY < top - reach || clientY > bottom + reach) continue;
+        const distance = clientY < top ? top - clientY : clientY > bottom ? clientY - bottom : 0;
+        if (!best || distance < best.distance) best = { distance, svg, index, top, bottom, owner };
+      }
+    });
+    if (!best || best.owner.clef === 'percussion') return undefined;
+    const bar = beatsPerBar(project);
+    const firstBar = (abcResult.systemMeasures?.[best.index] ?? (firstMeasure ?? 1) + best.index * (mobile ? 2 : 4)) - 1;
+    const anchors: BeatAnchor[] = [];
+    for (const node of best.svg.querySelectorAll<SVGElement>('[data-note-id]')) {
+      const head = node.querySelector('.abcjs-notehead, .abcjs-rest') ?? node;
+      const r = head.getBoundingClientRect();
+      if (r.width) anchors.push({ x: r.left + r.width / 2, beat: Number(node.dataset.start) });
+    }
+    for (const line of best.svg.querySelectorAll<SVGElement>('.abcjs-bar')) {
+      const m = Number(/abcjs-m(\d+)/.exec(line.getAttribute('class') ?? '')?.[1]);
+      const r = line.getBoundingClientRect();
+      if (Number.isFinite(m) && r.height) anchors.push({ x: r.left + r.width / 2, beat: (firstBar + m + 1) * bar });
+    }
+    // System start: after the clef / key / time signature (abcjs "staff-extra"), at the first bar's start.
+    const extras = [...best.svg.querySelectorAll<SVGElement>('.abcjs-staff-extra')].map((item) => item.getBoundingClientRect().right);
+    if (extras.length) anchors.push({ x: Math.max(...extras) + 4, beat: firstBar * bar });
+    const beat = beatAtX(anchors, clientX, placement.grid);
+    if (beat === undefined) return undefined;
+    const step = stepAtY(clientY, best.top, best.bottom);
+    const half = (best.bottom - best.top) / 8;
+    return {
+      ...best.owner,
+      step,
+      midi: pitchAtStep(best.owner.clef, step, project.key),
+      beat,
+      x: clientX - surface.left,
+      y: best.top + step * half - surface.top,
+    };
+  };
+
   // Rubber band: drag on empty paper (not on a note) to select whole bars of the staves crossed.
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     shiftDown.current = event.shiftKey;
     altDown.current = event.altKey;
+    const chordText = (event.target as Element).closest<SVGElement>('[data-chord-beat]');
+    chordPress.current =
+      chordText && onChordClick && event.button === 0 ? { el: chordText, x: event.clientX, y: event.clientY } : undefined;
+    if (placement && event.button === 0 && !(event.target as Element).closest('[data-note-id]')) {
+      const hit = staffHit(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
+      if (hit) {
+        event.preventDefault();
+        placement.onPlace(hit);
+        return;
+      }
+    }
     if (!onRubberBand || event.button !== 0 || (event.target as Element).closest('[data-note-id]')) return;
     const box = event.currentTarget.getBoundingClientRect();
     bandStart.current = { x: event.clientX - box.left, y: event.clientY - box.top, active: false };
   };
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (placement && !bandStart.current) {
+      const hit = (event.target as Element).closest('[data-note-id]')
+        ? undefined
+        : staffHit(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
+      setGhost((previous) =>
+        previous?.beat === hit?.beat && previous?.midi === hit?.midi && previous?.partId === hit?.partId ? previous : hit,
+      );
+    }
     const start = bandStart.current;
     if (!start) return;
     const box = event.currentTarget.getBoundingClientRect();
@@ -413,12 +554,43 @@ export default function ScoreView({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onClick={(event) => {
+          // A chord label opens its editor on a click (no drag), so a rubber band may start on one.
+          const press = chordPress.current;
+          chordPress.current = undefined;
+          if (!press || !onChordClick || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
+          const surface = event.currentTarget.getBoundingClientRect();
+          const r = press.el.getBoundingClientRect();
+          onChordClick(Number(press.el.dataset.chordBeat), {
+            x: r.left - surface.left,
+            y: r.top - surface.top,
+            width: r.width,
+            height: r.height,
+          });
+        }}
         onPointerCancel={() => {
           bandStart.current = undefined;
           setBand(undefined);
         }}
+        onPointerLeave={() => setGhost(undefined)}
+        data-placing={placement ? 'true' : undefined}
       >
         <div className="notation" ref={container} data-testid="score" />
+        {placement && ghost && (
+          <div
+            className="placement-ghost"
+            data-testid="placement-ghost"
+            style={{ left: ghost.x, top: ghost.y }}
+            aria-hidden="true"
+          >
+            <i />
+            <span>
+              {pitchName(ghost.midi)} · 第 {Math.floor(ghost.beat / beatsPerBar(project)) + 1} 小节第{' '}
+              {+((ghost.beat % beatsPerBar(project)) + 1).toFixed(2)} 拍
+            </span>
+          </div>
+        )}
+        {overlay}
         {band && (
           <div
             className="rubber-band"

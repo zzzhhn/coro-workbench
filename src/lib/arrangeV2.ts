@@ -10,13 +10,15 @@ import type {
 import { beatsPerBar, newId, transposeChordSymbol, transposeKey, validateProject } from './music';
 import { inferChords, inspectArrangement, recommendLeadPart } from './arrange';
 import { planVocalBreaths } from './vocalBreathing';
+import { phraseTexture } from './phraseTexture';
+import { planBackgroundContinuity } from './backgroundContinuity';
 
 const EPS = 1e-6;
 const DYNAMICS = ['p', 'mp', 'mf', 'f', 'ff'] as const;
 const VOICES = {
   S: { name: 'Soprano · 女高', short: 'S.', range: [60, 79] as [number, number], comfort: [62, 74], clef: 'treble' as const, color: '#6e826e', pan: -0.3 },
   A: { name: 'Alto · 女低', short: 'A.', range: [55, 72] as [number, number], comfort: [57, 69], clef: 'treble' as const, color: '#5e8195', pan: 0.3 },
-  T: { name: 'Tenor · 男高', short: 'T.', range: [48, 67] as [number, number], comfort: [50, 64], clef: 'bass' as const, color: '#9a804e', pan: -0.12 },
+  T: { name: 'Tenor · 男高', short: 'T.', range: [48, 67] as [number, number], comfort: [50, 64], clef: 'treble8' as const, color: '#9a804e', pan: -0.12 },
   B: { name: 'Bass · 男低', short: 'B.', range: [40, 60] as [number, number], comfort: [41, 55], clef: 'bass' as const, color: '#887286', pan: 0.12 },
 };
 type Upper = 'S' | 'A' | 'T';
@@ -159,7 +161,7 @@ function attacks(pattern: string, bar: number): Array<{ start: number; duration:
   return result;
 }
 
-export function arrangeV2(source: ScoreProject, options: ArrangementOptions, suppliedPlan?: ArrangementPlan): ScoreProject {
+export function arrangeV2(source: ScoreProject, options: ArrangementOptions, suppliedPlan?: ArrangementPlan, rhythm: 'legacy' | 'phrase' | 'continuity' = 'legacy'): ScoreProject {
   const project = structuredClone(source);
   const lead = source.parts.find((part) => part.id === options.leadPartId) ?? recommendLeadPart(source);
   if (!lead) throw new Error('没有可保留的主旋律声部。');
@@ -173,6 +175,8 @@ export function arrangeV2(source: ScoreProject, options: ArrangementOptions, sup
   const barLength = beatsPerBar(project);
   const total = project.measures * barLength;
   const plan = suppliedPlan ?? defaultArrangementPlan(source);
+  const background = rhythm === 'continuity' ? planBackgroundContinuity(leadNotes, plan,
+    project.chords.map(c => ({ start: c.start, end: c.start + c.duration })), project.tempo, barLength, total) : undefined;
   const drafts: Record<'S' | 'A' | 'T' | 'B', NoteEvent[]> = { S: [], A: [], T: [], B: [] };
   const sourceBass = source.parts.find((part) => part.role === 'bass' && part.id !== lead.id);
   let previous: number[] | undefined;
@@ -197,7 +201,7 @@ export function arrangeV2(source: ScoreProject, options: ArrangementOptions, sup
       });
     };
     const active = section.texture === 'sparse' ? (['A', 'T'] as Upper[]) : UPPER;
-    for (const voice of active) {
+    for (const voice of rhythm === 'legacy' ? active : []) {
       const voiceIndex = UPPER.indexOf(voice);
       if (section.texture === 'pad' || section.texture === 'sparse') {
         slots.forEach((slot, index) => add(voice, pitchAt(voice, slot.start), slot.start, Math.max(0.5, slot.end - slot.start - (slot.end >= to - EPS ? 0.5 : 0)), section.energy <= 1 ? 'Hmm' : 'Ooh', index === 0));
@@ -247,7 +251,43 @@ export function arrangeV2(source: ScoreProject, options: ArrangementOptions, sup
       previousBass = midi;
       return midi;
     };
-    for (let bar = from, index = 0; bar < to - EPS; bar += barLength, index++) {
+    if (rhythm !== 'legacy') {
+      const hits = background ? background.attacks.filter(h => h.start < to && h.start + h.duration > from)
+        : phraseTexture(leadNotes, section, from, to, slots, project.tempo);
+      const seen = new Set<string>();
+      const hitCounts = new Map<string, number>();
+      const lastStarts = new Map<string, number>();
+      for (const hit of hits) {
+        // Clip a gesture at chord changes; use the existing pitch allocator at every boundary.
+        for (const slot of slots) {
+          const start = Math.max(hit.start, slot.start);
+          const end = Math.min(hit.start + hit.duration, slot.end);
+          if (end <= start + EPS) continue;
+          const voice = hit.voice;
+          const sourceNote = leadNotes.find(note => note.id === hit.sourceIds.at(-1));
+          const countKey = `${voice}:${Math.floor(start / barLength)}`;
+          const hitIndex = hitCounts.get(countKey) ?? 0;
+          const previousStart = lastStarts.get(voice);
+          // Reuse v2's texture vocabulary and articulation mapping, on the new onsets.
+          let lyric: string;
+          if (voice === 'B') lyric = section.bass === 'groove'
+            ? (end - start > 0.5 ? 'dm' : 'dum') : hitIndex ? 'dm' : 'Dm';
+          else if (section.texture === 'rhythm') lyric = end - start > 0.5 ? 'doo' : hitIndex % 2 ? 'da' : 'dn';
+          else if (section.texture === 'bell') lyric = 'Dn';
+          else if (section.texture === 'answer') lyric = voice === 'S' ? 'Ooh' : 'Doo';
+          else if (section.texture === 'lyric') {
+            if (voice === 'T') lyric = 'Ooh';
+            else if (sectionLead.some(note => note.lyric)) lyric = sourceNote?.lyric?.replace(/[,.?!，。？！]/g, '') || 'oo';
+            else lyric = previousStart === undefined || start - previousStart > 2 + EPS ? 'Doo' : 'oo';
+          } else lyric = section.energy <= 1 ? 'Hmm' : 'Ooh';
+          hitCounts.set(countKey, hitIndex + 1);
+          lastStarts.set(voice, start);
+          add(voice, voice === 'B' ? bassPitch(start) : pitchAt(voice, start), start, end - start, lyric, !seen.has(voice));
+          seen.add(voice);
+        }
+      }
+    }
+    for (let bar = from, index = 0; rhythm === 'legacy' && bar < to - EPS; bar += barLength, index++) {
       if (section.bass === 'sustain') add('B', bassPitch(bar), bar, barLength - 0.5, 'Dm', index === 0);
       else if (section.bass === 'pulse') {
         add('B', bassPitch(bar), bar, 1.5, 'Dm', index === 0);
@@ -278,6 +318,8 @@ export function arrangeV2(source: ScoreProject, options: ArrangementOptions, sup
   project.createdAt = project.updatedAt;
   const changes = [
     `Solo 独立保留原主旋律：${leadNotes.length} 个音的起点、时值和歌词不改${options.transpose ? `，仅随整曲移调 ${options.transpose} 个半音` : '，不移八度、不折叠'}。`,
+    ...(rhythm === 'phrase' ? ['候选：乐句级背景节奏与出入；音高分配器沿用 v2，尚待试听验收。'] : []),
+    ...(background ? [`候选：跨乐句背景任务与动机延续，${background.motifs.length} 个输入节奏动机；音高、音节映射与 Solo 沿用原实现，尚待试听验收。`] : []),
     ...plan.sections.map((section) => `${section.label} ${section.startBar}–${section.startBar + section.bars - 1} 小节：${section.texture} / bass ${section.bass} / 能量 ${section.energy}`),
   ];
   project.arrangement = { options: { ...options, preset: 'solo-satb', percussion: false, leadPartId: lead.id }, plan, report: { changes, warnings: [], ranges: [] } };

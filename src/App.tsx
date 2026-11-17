@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
+import { auditionPart, auditionProject, isVocalBacking, type BackgroundTimbre } from './lib/auditionTimbre';
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowDown,
+  ArrowElbowDownLeft,
   ArrowRight,
   CaretDown,
   CaretLeft,
@@ -14,6 +16,8 @@ import {
   Copy,
   DotsThree,
   FilePlus,
+  Cursor,
+  FileArrowDown,
   FileText,
   FolderOpen,
   Headphones,
@@ -92,7 +96,13 @@ import {
 import { getHealth } from './lib/api';
 import ScoreView from './components/ScoreView';
 import SourceRegionPanel from './components/SourceRegionPanel';
+import ChordInlineEditor from './components/ChordInlineEditor';
 import { measureOfBeat } from './lib/sourceMap';
+import { parseChord, setChordAt } from './lib/chordSymbols';
+import { layoutOf, setRepeatRule, togglePageBreak, toggleSystemBreak } from './lib/layout';
+import type { RepeatRule } from './lib/types';
+import { placeNote } from './lib/mouseEntry';
+import { deleteMeasures, insertMeasures, type MeasureChange } from './lib/measures';
 import {
   TUPLET_PRESETS,
   attacksBetween,
@@ -168,6 +178,8 @@ export default function App() {
     initial?.active === 'arrangement' && initial?.arrangement ? 'arrangement' : 'source',
   );
   const project = active === 'arrangement' && arrangement ? arrangement : source;
+  const [backgroundTimbre, setBackgroundTimbre] = useState<BackgroundTimbre>('piano');
+  const playbackProject = useMemo(() => auditionProject(project, backgroundTimbre), [project, backgroundTimbre]);
   const [selectedPartId, setSelectedPartId] = useState(project.parts[0].id);
   const [selection, setSelection] = useState<Selection>();
   const [visiblePart, setVisiblePart] = useState('all');
@@ -185,6 +197,9 @@ export default function App() {
   const [span, setSpan] = useState<{ anchor: Selection; last: Selection }>();
   const clipboard = useRef<Clip | undefined>(undefined);
   const [entryVoice, setEntryVoice] = useState<1 | 2 | 3 | 4>(1);
+  /** Click-to-place mode (Crescendo's note tool): clicks on staff space add a note there. */
+  const [placing, setPlacing] = useState(false);
+  const [placeRest, setPlaceRest] = useState(false);
   const [repairEntry, setRepairEntry] = useState<'staff' | 'beat'>('staff');
   const [pitchReviewSeconds, setPitchReviewSeconds] = useState(0);
   const [inspectorTab, setInspectorTab] = useState<'note' | 'check'>('note');
@@ -218,6 +233,9 @@ export default function App() {
   const [xmlDraft, setXmlDraft] = useState('');
   const [xmlError, setXmlError] = useState('');
   const [chordEdit, setChordEdit] = useState<number>();
+  /** Inline chord editor on the paper: the beat being edited and where to draw the field. */
+  const [chordInline, setChordInline] = useState<{ beat: number; x: number; y: number }>();
+  const [chordInlineDraft, setChordInlineDraft] = useState('');
   const [chordDraft, setChordDraft] = useState('');
   const engine = useRef<PlaybackEngine | null>(null);
   const history = useRef(newHistory());
@@ -344,10 +362,10 @@ export default function App() {
   useEffect(() => {
     // Decode this score's instrument samples in the background, so pressing
     // play (also after jumping to a bar) does not wait for a full decode.
-    const timer = setTimeout(() => engine.current?.prime(project), 400);
+    const timer = setTimeout(() => engine.current?.prime(playbackProject), 400);
     return () => clearTimeout(timer);
     // Re-warm when another score or part set is opened, not on every note edit.
-  }, [project.id, project.parts.length]);
+  }, [project.id, project.parts.length, backgroundTimbre]);
   useEffect(() => {
     engine.current?.setMetronome(metronome);
   }, [metronome]);
@@ -635,7 +653,7 @@ export default function App() {
         if (moved) engine.current?.seek(moved.start);
       }
       if (patch.midi !== undefined && patch.midi !== null)
-        void engine.current?.audition(part, patch.midi).catch((error) => notify(cleanError(error), true));
+        void engine.current?.audition(auditionPart(part, backgroundTimbre), patch.midi).catch((error) => notify(cleanError(error), true));
     } catch (error) {
       notify(cleanError(error), true);
     }
@@ -669,7 +687,7 @@ export default function App() {
       setSelection(result.selection);
       engine.current?.seek(start);
       if (midi !== null)
-        void engine.current?.audition(part, midi).catch((error) => notify(cleanError(error), true));
+        void engine.current?.audition(auditionPart(part, backgroundTimbre), midi).catch((error) => notify(cleanError(error), true));
     } catch (error) {
       notify(cleanError(error), true);
     }
@@ -768,6 +786,76 @@ export default function App() {
       notify(cleanError(error), true);
     }
   };
+  const placeAt = (target: { partId: string; staffNumber: number; midi: number; beat: number }) => {
+    try {
+      const result = placeNote(project, {
+        ...target,
+        midi: placeRest ? null : target.midi,
+        duration: entryDuration,
+        voice: entryVoice,
+      });
+      if (result.kind !== 'existing') updateProject(result.project);
+      setRange(undefined);
+      setSelection(result.selection);
+      setSelectedPartId(result.selection.partId);
+      const placedPart = result.project.parts.find((item) => item.id === target.partId)!;
+      if (!placeRest) void engine.current?.audition(auditionPart(placedPart, backgroundTimbre), target.midi).catch(() => undefined);
+      engine.current?.seek(target.beat);
+      if (result.kind === 'replaced-rest') notify('已替换该位置的休止符。');
+      else if (result.kind === 'chord') notify('与同一拍的音合成和弦（沿用其时值）。');
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
+  /** Bars the measure commands act on: the selected range, else the selected note's bar, else the playhead bar. */
+  const targetBars = (): [number, number] =>
+    range
+      ? [range.startBar, range.endBar]
+      : selectedNote
+        ? [measureOfBeat(project, selectedNote.start), measureOfBeat(project, selectedNote.start)]
+        : [currentBar, currentBar];
+  const applyMeasures = (change: MeasureChange, message: string, focusBar: number) => {
+    updateProject(change.project);
+    setSelection(undefined);
+    setRange(undefined);
+    goToMeasure(Math.min(focusBar, change.project.measures));
+    notify([message, ...change.warnings].join(' '), change.warnings.some((warning) => warning.includes('原音频')));
+  };
+  const insertBars = (after: boolean) => {
+    const [start, end] = targetBars();
+    const bar = after ? end + 1 : start;
+    try {
+      applyMeasures(insertMeasures(project, bar), `已在第 ${bar - (after ? 1 : 0)} 小节${after ? '后' : '前'}插入一个空小节。`, bar);
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
+  const deleteBars = () => {
+    const [start, end] = targetBars();
+    try {
+      applyMeasures(
+        deleteMeasures(project, start, end),
+        `已删除第 ${start}${end > start ? `–${end}` : ''} 小节（全部声部）。`,
+        start,
+      );
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
+  /** Bar a break applies to: start of the selected range, else the selected note's bar, else the playhead bar. */
+  const breakBar = () =>
+    range ? range.startBar : selectedNote ? measureOfBeat(project, selectedNote.start) : currentBar;
+  const toggleBreak = (kind: 'system' | 'page') => {
+    const bar = breakBar();
+    try {
+      const next = kind === 'system' ? toggleSystemBreak(project, bar) : togglePageBreak(project, bar);
+      updateProject(next, true, false);
+      const on = (kind === 'system' ? layoutOf(next).systemBreaks : layoutOf(next).pageBreaks).includes(bar);
+      notify(`第 ${bar} 小节${on ? '起' : '不再强制'}${kind === 'system' ? '换行' : '换页'}。`);
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
   const issues = useMemo(() => reviewIssues(project), [project]);
   const verticalAnchor = useRef<(Selection & { beat: number }) | undefined>(undefined);
   const applyDuration = (change: DurationChange) => {
@@ -780,7 +868,7 @@ export default function App() {
     try {
       updateProject(setNotePitch(project, selection, midi));
       if (midi !== null)
-        void engine.current?.audition(part, midi).catch((error) => notify(cleanError(error), true));
+        void engine.current?.audition(auditionPart(part, backgroundTimbre), midi).catch((error) => notify(cleanError(error), true));
     } catch (error) {
       notify(cleanError(error), true);
     }
@@ -876,7 +964,7 @@ export default function App() {
   ) => {
     setAudioBusy(true);
     try {
-      await engine.current?.play(project, {
+      await engine.current?.play(playbackProject, {
         mode,
         startBeat,
         loop,
@@ -996,41 +1084,58 @@ export default function App() {
   };
   const applyChord = () => {
     if (chordEdit === undefined) return;
-    const match = chordDraft
-      .trim()
-      .match(/^([A-G])([#b]?)(maj7|m7b5|m7|m6|m|7|6|dim7|dim|aug|sus2|sus4|9)?(?:\/([A-G])([#b]?))?$/);
-    if (!match) {
-      notify('请使用常见和弦，如 C、Am7、Fmaj7、Csus4、C/E。', true);
+    try {
+      const result = setChordAt(project, project.chords[chordEdit].start, chordDraft);
+      updateProject(result.project);
+      setChordEdit(undefined);
+      notify('和弦已修改；生成新编配时会采用此和声，已有音符不自动改变。');
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
+  const chordLabelBox = (beat: number) => {
+    const label = document.querySelector<SVGElement>(`[data-chord-beat="${beat}"]`);
+    const surface = document.querySelector('.notation-surface')?.getBoundingClientRect();
+    const r = label?.getBoundingClientRect();
+    return label && surface && r ? { x: r.left - surface.left, y: r.top - surface.top } : undefined;
+  };
+  const openChordInline = (beat: number, box: { x: number; y: number }) => {
+    setChordInline({ beat, x: box.x, y: box.y });
+    setChordInlineDraft(project.chords.find((chord) => Math.abs(chord.start - beat) < 1e-6)?.symbol ?? '');
+  };
+  /** Commit the inline field; Tab / ⇧Tab move to the next / previous chord change (or one beat on). */
+  const commitChordInline = (move?: 1 | -1) => {
+    if (!chordInline) return;
+    let next = project;
+    try {
+      const result = setChordAt(project, chordInline.beat, chordInlineDraft);
+      if (result.project !== project) {
+        updateProject(result.project, true, false);
+        next = result.project;
+      }
+    } catch (error) {
+      notify(cleanError(error), true);
       return;
     }
-    const roots: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-    const root = 48 + roots[match[1]] + (match[2] === '#' ? 1 : match[2] === 'b' ? -1 : 0);
-    const intervals: Record<string, number[]> = {
-      '': [0, 4, 7],
-      m: [0, 3, 7],
-      '7': [0, 4, 7, 10],
-      maj7: [0, 4, 7, 11],
-      m7: [0, 3, 7, 10],
-      m7b5: [0, 3, 6, 10],
-      '6': [0, 4, 7, 9],
-      m6: [0, 3, 7, 9],
-      dim: [0, 3, 6],
-      dim7: [0, 3, 6, 9],
-      aug: [0, 4, 8],
-      sus2: [0, 2, 7],
-      sus4: [0, 5, 7],
-      '9': [0, 4, 7, 10, 14],
-    };
-    const pitches = intervals[match[3] ?? ''].map((interval) => root + interval);
-    if (match[4]) pitches.unshift(36 + roots[match[4]] + (match[5] === '#' ? 1 : match[5] === 'b' ? -1 : 0));
-    updateProject({
-      ...project,
-      chords: project.chords.map((chord, index) =>
-        index === chordEdit ? { ...chord, symbol: chordDraft.trim(), pitches, confidence: undefined } : chord,
-      ),
-    });
-    setChordEdit(undefined);
-    notify('和弦已修改；生成新编配时会采用此和声，已有音符不自动改变。');
+    if (!move) {
+      setChordInline(undefined);
+      return;
+    }
+    const starts = [...new Set(next.chords.map((chord) => chord.start))].sort((a, b) => a - b);
+    const target =
+      move > 0
+        ? starts.find((start) => start > chordInline.beat + 1e-6)
+        : [...starts].reverse().find((start) => start < chordInline.beat - 1e-6);
+    const beat = target ?? Math.max(0, chordInline.beat + move);
+    setChordInline({ ...chordInline, beat, x: chordInline.x + move * 60 });
+    setChordInlineDraft(next.chords.find((chord) => Math.abs(chord.start - beat) < 1e-6)?.symbol ?? '');
+    // After re-engraving, snap the field onto the label of that chord if it is drawn.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const box = chordLabelBox(beat);
+        if (box) setChordInline({ beat, ...box });
+      }),
+    );
   };
 
   useEffect(() => {
@@ -1040,7 +1145,8 @@ export default function App() {
         target.isContentEditable ||
         ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) ||
         dialog ||
-        chordEdit !== undefined
+        chordEdit !== undefined ||
+        chordInline !== undefined
       )
         return;
       const command = event.metaKey || event.ctrlKey;
@@ -1077,6 +1183,22 @@ export default function App() {
         applyVoice(Number(event.code.slice(5)) as 1 | 2 | 3 | 4);
         return;
       }
+      if (command && tab === 'workbench' && event.code === 'KeyB') {
+        // Crescendo uses ⌘B to append a measure; Coro inserts after the target bar (⇧ = before).
+        event.preventDefault();
+        insertBars(!event.shiftKey);
+        return;
+      }
+      if (command && tab === 'workbench' && (event.key === 'Backspace' || event.key === 'Delete')) {
+        event.preventDefault();
+        deleteBars();
+        return;
+      }
+      if (event.altKey && !command && tab === 'workbench' && event.key === 'Enter') {
+        event.preventDefault();
+        toggleBreak(event.shiftKey ? 'page' : 'system');
+        return;
+      }
       if (command && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         if (tab === 'practice') return;
@@ -1104,6 +1226,10 @@ export default function App() {
         return;
       }
       if (event.key === 'Escape') {
+        if (placing) {
+          setPlacing(false);
+          return;
+        }
         setSelection(undefined);
         setRange(undefined);
         setSpan(undefined);
@@ -1116,6 +1242,23 @@ export default function App() {
           event.preventDefault();
           seekBeat(playingState.beat + (event.key === 'ArrowRight' ? 1 : -1) * barLength);
         }
+        return;
+      }
+      if (event.code === 'KeyK' && !command && tab === 'workbench' && selectedNote) {
+        // K: chord symbol above the selected note (edit the change that starts there).
+        event.preventDefault();
+        const surface = document.querySelector('.notation-surface')?.getBoundingClientRect();
+        const glyph = document.querySelector<SVGElement>('.notation .selected-note')?.getBoundingClientRect();
+        const box = chordLabelBox(selectedNote.start) ?? (surface && glyph ? { x: glyph.left - surface.left, y: glyph.top - surface.top - 46 } : undefined);
+        if (box) openChordInline(selectedNote.start, box);
+        return;
+      }
+      if (event.code === 'KeyP' && !command && !event.altKey) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          setPlacing(true);
+          setPlaceRest((value) => !value);
+        } else setPlacing((value) => !value);
         return;
       }
       if (event.key.toLowerCase() === 'n' && !command) {
@@ -1147,7 +1290,11 @@ export default function App() {
         event.preventDefault();
         const value = DURATION_KEYS[digit];
         setEntryDuration(value);
-        if (event.shiftKey) {
+        if (placing && !event.shiftKey) setPlaceRest(false);
+        if (event.shiftKey && placing) {
+          // In click-to-place mode ⇧digit picks the rest tool of that value.
+          setPlaceRest(true);
+        } else if (event.shiftKey) {
           // Shift+digit: rest of that value (Crescendo's rest tool shortcuts).
           if (stepEntry || !selection) addNote(null, value);
           else if (selection) {
@@ -1158,7 +1305,7 @@ export default function App() {
               notify(cleanError(error), true);
             }
           }
-        } else if (selection && !stepEntry) {
+        } else if (selection && !stepEntry && !placing) {
           try {
             applyDuration(setNoteDuration(project, selection, value));
           } catch (error) {
@@ -1614,6 +1761,15 @@ export default function App() {
             <span className="tool-divider" />
             <div className="tool-group entry-tools">
               <button
+                className={`icon-button ${placing ? 'active-tool' : ''}`}
+                aria-label="鼠标放音"
+                title="鼠标放音 (P)：在谱表上点击放置当前时值的音符；⇧P 切换为放休止符；Esc 退出"
+                aria-pressed={placing}
+                onClick={() => setPlacing((value) => !value)}
+              >
+                <Cursor size={18} />
+              </button>
+              <button
                 className={`icon-button ${stepEntry ? 'active-tool' : ''}`}
                 aria-label="逐步输入音符"
                 title="逐步输入 (N)，再按 A–G"
@@ -1773,6 +1929,13 @@ export default function App() {
           </div>
         )}
 
+        {placing && tab === 'workbench' && (
+          <div className="step-entry-notice placement-notice" role="status" aria-label="鼠标放音">
+            <Cursor size={15} />
+            鼠标放音 · 点击谱表放置{placeRest ? '休止符' : '音符'}（{durationOptions.find((option) => option.value === entryDuration)?.label ?? `${entryDuration} 拍`}，声部 {entryVoice}）· 1–7 换时值 · ⇧P 音符/休止 · 点在已有音上为和弦 · Esc 退出
+            <button onClick={() => setPlacing(false)}>退出</button>
+          </div>
+        )}
         {stepEntry && (
           <div className="step-entry-notice">
             <NotePencil size={15} />
@@ -1812,6 +1975,7 @@ export default function App() {
               插入粘贴 ⌘⇧V
             </button>
             <button onClick={deleteSelection}>清空</button>
+            <button onClick={deleteBars} title="连同小节一起删除，后面的小节前移（全部声部）">删除小节 ⌘⌫</button>
             <button className="range-close" aria-label="取消范围选择" onClick={() => setRange(undefined)}>
               Esc
             </button>
@@ -1893,11 +2057,40 @@ export default function App() {
           </select>
           <button
             className="icon-button measure-edit-action"
-            aria-label="添加空白小节"
-            title="末尾添加一个空白小节"
-            onClick={() => updateProject({ ...project, measures: project.measures + 1 })}
+            aria-label="在后面插入小节"
+            title="在当前小节后插入一个空小节 (⌘B；⇧⌘B 插在前面)"
+            onClick={() => insertBars(true)}
           >
             <Plus size={15} />
+          </button>
+          <button
+            className={`icon-button measure-edit-action ${layoutOf(project).systemBreaks.includes(breakBar()) ? 'active-tool' : ''}`}
+            aria-label="从此小节换行"
+            aria-pressed={layoutOf(project).systemBreaks.includes(breakBar())}
+            title="从当前小节（或所选范围起点）开始新的一行 (⌥↵)"
+            disabled={breakBar() < 2}
+            onClick={() => toggleBreak('system')}
+          >
+            <ArrowElbowDownLeft size={15} />
+          </button>
+          <button
+            className={`icon-button measure-edit-action ${layoutOf(project).pageBreaks.includes(breakBar()) ? 'active-tool' : ''}`}
+            aria-label="从此小节换页"
+            aria-pressed={layoutOf(project).pageBreaks.includes(breakBar())}
+            title="从当前小节开始新的一页（PDF 导出）(⌥⇧↵)"
+            disabled={breakBar() < 2}
+            onClick={() => toggleBreak('page')}
+          >
+            <FileArrowDown size={15} />
+          </button>
+          <button
+            className="icon-button measure-edit-action"
+            aria-label="删除小节"
+            title="删除当前小节或所选范围的小节（全部声部，⌘⌫）"
+            disabled={project.measures <= 1}
+            onClick={deleteBars}
+          >
+            <Minus size={15} />
           </button>
           <button
             className="icon-button duplicate-bar measure-edit-action"
@@ -1930,6 +2123,7 @@ export default function App() {
             onSelect={selectNote}
             readingMode={tab === 'practice'}
             rangeKeys={tab === 'workbench' ? (spanKeys ?? rangeKeys) : undefined}
+            placement={tab === 'workbench' && placing ? { grid: Math.min(entryDuration, 1), onPlace: placeAt } : undefined}
             onRubberBand={
               tab === 'workbench'
                 ? (hits) => {
@@ -1940,6 +2134,22 @@ export default function App() {
                     }
                   }
                 : undefined
+            }
+            onChordClick={tab === 'workbench' ? openChordInline : (beat) => seekBeat(beat)}
+            overlay={
+              chordInline && tab === 'workbench' ? (
+                <ChordInlineEditor
+                  x={chordInline.x}
+                  y={chordInline.y}
+                  bar={Math.floor(chordInline.beat / barLength) + 1}
+                  beat={+((chordInline.beat % barLength) + 1).toFixed(2)}
+                  value={chordInlineDraft}
+                  valid={!chordInlineDraft.trim() || Boolean(parseChord(chordInlineDraft))}
+                  onChange={setChordInlineDraft}
+                  onCommit={commitChordInline}
+                  onCancel={() => setChordInline(undefined)}
+                />
+              ) : undefined
             }
           />
         </div>
@@ -2082,7 +2292,7 @@ export default function App() {
         onDelete={removeNote}
         onDuplicate={duplicateSelected}
         onAudition={(midi) => {
-          void engine.current?.audition(part, midi).catch((error) => notify(cleanError(error), true));
+          void engine.current?.audition(auditionPart(part, backgroundTimbre), midi).catch((error) => notify(cleanError(error), true));
         }}
         onSelect={selectNote}
         onLyricStep={stepLyric}
@@ -2090,6 +2300,8 @@ export default function App() {
 
       <TransportBar
         project={project}
+        backgroundTimbre={project.parts.some(isVocalBacking) ? backgroundTimbre : undefined}
+        onBackgroundTimbre={(value) => { engine.current?.pause(); setBackgroundTimbre(value); }}
         state={playingState}
         mode={playbackMode}
         busy={audioBusy}
@@ -2253,10 +2465,12 @@ export default function App() {
                   onChange={(event) => {
                     const meter = event.target.value.split('/').map(Number) as [number, number];
                     const length = (meter[0] * 4) / meter[1];
+                    // Re-barring moves every bar line, so bar-number breaks would point at other music.
                     updateProject({
                       ...project,
                       timeSignature: meter,
                       measures: Math.max(1, Math.ceil(totalBeats / length)),
+                      layout: project.layout && { ...project.layout, systemBreaks: [], pageBreaks: [] },
                     });
                   }}
                 >
@@ -2268,8 +2482,35 @@ export default function App() {
             </div>
             <p className="subtle-note">
               修改调号不改变实际音高；如要整体移调，请使用工具栏 ♭ /
-              ♯。修改拍号会重新分小节，音符的绝对时间不变。
+              ♯。修改拍号会重新分小节，音符的绝对时间不变（换行 / 换页位置随之清除）。
             </p>
+            <fieldset className="layout-settings">
+              <legend>排版：后续各行是否重复</legend>
+              {(
+                [
+                  ['clef', '谱号'],
+                  ['key', '调号'],
+                  ['labels', '声部名'],
+                ] as const
+              ).map(([what, label]) => (
+                <label key={what} className="field-label">
+                  {label}
+                  <select
+                    aria-label={`${label}重复`}
+                    value={layoutOf(project).repeat[what]}
+                    onChange={(event) => updateProject(setRepeatRule(project, what, event.target.value as RepeatRule))}
+                  >
+                    <option value="every">每一行</option>
+                    <option value="page">每页第一行</option>
+                    <option value="first">仅第一行</option>
+                  </select>
+                </label>
+              ))}
+              <p className="subtle-note">
+                换行 {layoutOf(project).systemBreaks.length} 处 · 换页 {layoutOf(project).pageBreaks.length} 处。
+                在小节栏或范围条用 ↵ / ⇞ 按钮设置；识谱导入时保留原谱的换行换页。
+              </p>
+            </fieldset>
             <div className="settings-actions">
               <button
                 className="secondary-button"
@@ -2481,8 +2722,13 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
               ['⌘ C · ⌘ X · ⌘ A', '复制 / 剪切范围 · 全选'],
               ['⌘ V · ⌘ ⇧ V', '在选中音符所在小节覆盖粘贴 / 插入粘贴'],
               ['⌥ 1–4', '记谱声部 1–4：移入选中音符或范围，或设为输入声部'],
+              ['⌘ B · ⇧ ⌘ B', '在当前小节（或所选范围）后 / 前插入空小节'],
+              ['K · 点击和弦', '在选中音符上方加 / 改和弦；Tab / ⇧Tab 下一个 / 上一个，清空删除，N.C. 无和弦'],
+              ['⌘ ⌫', '删除当前小节或所选范围的小节（全部声部）'],
+              ['⌥ ↵ · ⌥ ⇧ ↵', '从当前小节起换行 / 换页（再按取消）；重复规则在乐谱设置'],
               ['⌥ 点击 · ⌥ ← →', '选同一声部的音符段（首音到末音）'],
               ['T · ⌥ T · ⌥ R', '音符段：做成 3:2 三连音 / 还原普通时值 / 首尾相接重排起拍'],
+              ['P · ⇧ P', '鼠标放音：点谱表按位置放音（按调号，吸附到拍点） / 改为放休止符'],
               ['N', '切换逐步输入'],
               ['Delete', '删除选中音符'],
               ['⌘ Z / ⌘ ⇧ Z', '撤销 / 重做'],
