@@ -1,5 +1,6 @@
 import * as ToneMidi from '@tonejs/midi';
 import { normalizeMidiNotation } from './midiNotation';
+import { musicXmlKind, parseChord } from './chordSymbols';
 import type { Midi as MidiType } from '@tonejs/midi';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { parseMidi, writeMidi } from 'midi-file';
@@ -1051,33 +1052,8 @@ function xmlHarmony(chord: ChordEvent, offset: number): string {
   const match = chord.symbol.match(/^([A-G])([#b]?)(.*)$/);
   if (!match) return '';
   const suffix = match[3].split('/')[0];
-  const kind = suffix === 'm7b5'
-    ? 'half-diminished'
-    : suffix === 'dim7'
-      ? 'diminished-seventh'
-      : suffix === '6'
-        ? 'major-sixth'
-        : suffix === 'm6'
-          ? 'minor-sixth'
-          : suffix === 'aug'
-            ? 'augmented'
-            : suffix === '9'
-              ? 'dominant-ninth'
-              : /^m(?!aj).*7/.test(suffix)
-    ? 'minor-seventh'
-    : /^maj7|^Δ/.test(suffix)
-      ? 'major-seventh'
-      : /^m(?!aj)/.test(suffix)
-        ? 'minor'
-        : /dim|°/.test(suffix)
-          ? 'diminished'
-          : /sus2/.test(suffix)
-            ? 'suspended-second'
-            : /sus/.test(suffix)
-              ? 'suspended-fourth'
-              : /7|9|11|13/.test(suffix)
-                ? 'dominant'
-                : 'major';
+  // The printed suffix stays in kind@text; the kind value is what other programs play.
+  const kind = musicXmlKind(suffix);
   const bass = chord.symbol.match(/\/([A-G])([#b]?)$/);
   return `<harmony><root><root-step>${match[1]}</root-step>${match[2] ? `<root-alter>${match[2] === '#' ? 1 : -1}</root-alter>` : ''}</root><kind text="${xmlText(suffix)}">${kind}</kind>${bass ? `<bass><bass-step>${bass[1]}</bass-step>${bass[2] ? `<bass-alter>${bass[2] === '#' ? 1 : -1}</bass-alter>` : ''}</bass>` : ''}<offset>${Math.round(offset * DIVISIONS)}</offset></harmony>`;
 }
@@ -1321,12 +1297,9 @@ function xmlChord(node: XmlNode, start: number, divisions: number): ChordEvent |
     const bassPc = (SHARP_NAMES.indexOf(bassStep) + bassAlter + 12) % 12;
     if (!pitches.some((pitch) => pitch % 12 === bassPc)) pitches.push(36 + bassPc);
   }
-  return {
-    start: onset,
-    duration: 4,
-    symbol: `${step}${alter === 1 ? '#' : alter === -1 ? 'b' : ''}${attrs(kindNode)['@_text'] ?? template.suffix}${bassStep ? `/${bassStep}${bassAlter === 1 ? '#' : bassAlter === -1 ? 'b' : ''}` : ''}`,
-    pitches,
-  };
+  const symbol = `${step}${alter === 1 ? '#' : alter === -1 ? 'b' : ''}${attrs(kindNode)['@_text'] ?? template.suffix}${bassStep ? `/${bassStep}${bassAlter === 1 ? '#' : bassAlter === -1 ? 'b' : ''}` : ''}`;
+  // Prefer the printed spelling's own voicing (FMaj9, C13...); fall back to the kind template.
+  return { start: onset, duration: 4, symbol, pitches: parseChord(symbol)?.pitches ?? pitches };
 }
 
 export function fromMusicXml(xml: string): ScoreProject {

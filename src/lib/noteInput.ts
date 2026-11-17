@@ -9,6 +9,7 @@ import { beatsPerBar, normalizeKey } from './music';
 import { editId, type Selection } from './editor';
 import { omrReviewOf, sourceRefOf, type OmrIssueKind } from './omrReview';
 import { scoreMeasureOf } from './sourceMap';
+import { unreadableChords } from './chordSymbols';
 
 /** Crescendo's number-key ladder: 1 whole ... 7 sixty-fourth (in quarter beats). */
 export const DURATION_KEYS: Record<string, number> = {
@@ -331,7 +332,7 @@ export function commitLyric(
   return { project: next, next: cursor };
 }
 
-export type ReviewKind = 'overlap' | 'low-confidence' | OmrIssueKind;
+export type ReviewKind = 'overlap' | 'low-confidence' | 'chord-unreadable' | OmrIssueKind;
 
 export const reviewKindLabels: Record<ReviewKind, string> = {
   overlap: '声部内重叠',
@@ -343,6 +344,7 @@ export const reviewKindLabels: Record<ReviewKind, string> = {
   'text-discarded': '文字未采用',
   'text-attached': '文字已贴附',
   'engine-warning': '识谱引擎提示',
+  'chord-unreadable': '和弦无法识别',
 };
 
 export interface ReviewIssue {
@@ -406,6 +408,16 @@ export function reviewIssues(project: ScoreProject): ReviewIssue[] {
           order,
         });
   });
+  // Chord text that is not a chord (an OMR misread such as "B66") cannot be played; list it.
+  for (const item of unreadableChords(project))
+    issues.push({
+      kind: 'chord-unreadable',
+      severity: 'check',
+      measure: item.measure,
+      message: `和弦“${item.symbol}”无法识别，播放与编配时被忽略`,
+      start: project.chords[item.index].start,
+      order: -1,
+    });
   const review = omrReviewOf(project);
   for (const item of review?.issues ?? []) {
     const part = item.partIndex === undefined ? undefined : project.parts[item.partIndex];

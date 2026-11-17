@@ -94,7 +94,9 @@ import {
 import { getHealth } from './lib/api';
 import ScoreView from './components/ScoreView';
 import SourceRegionPanel from './components/SourceRegionPanel';
+import ChordInlineEditor from './components/ChordInlineEditor';
 import { measureOfBeat } from './lib/sourceMap';
+import { parseChord, setChordAt } from './lib/chordSymbols';
 import { placeNote } from './lib/mouseEntry';
 import { deleteMeasures, insertMeasures, type MeasureChange } from './lib/measures';
 import {
@@ -227,6 +229,9 @@ export default function App() {
   const [xmlDraft, setXmlDraft] = useState('');
   const [xmlError, setXmlError] = useState('');
   const [chordEdit, setChordEdit] = useState<number>();
+  /** Inline chord editor on the paper: the beat being edited and where to draw the field. */
+  const [chordInline, setChordInline] = useState<{ beat: number; x: number; y: number }>();
+  const [chordInlineDraft, setChordInlineDraft] = useState('');
   const [chordDraft, setChordDraft] = useState('');
   const engine = useRef<PlaybackEngine | null>(null);
   const history = useRef(newHistory());
@@ -1061,41 +1066,58 @@ export default function App() {
   };
   const applyChord = () => {
     if (chordEdit === undefined) return;
-    const match = chordDraft
-      .trim()
-      .match(/^([A-G])([#b]?)(maj7|m7b5|m7|m6|m|7|6|dim7|dim|aug|sus2|sus4|9)?(?:\/([A-G])([#b]?))?$/);
-    if (!match) {
-      notify('请使用常见和弦，如 C、Am7、Fmaj7、Csus4、C/E。', true);
+    try {
+      const result = setChordAt(project, project.chords[chordEdit].start, chordDraft);
+      updateProject(result.project);
+      setChordEdit(undefined);
+      notify('和弦已修改；生成新编配时会采用此和声，已有音符不自动改变。');
+    } catch (error) {
+      notify(cleanError(error), true);
+    }
+  };
+  const chordLabelBox = (beat: number) => {
+    const label = document.querySelector<SVGElement>(`[data-chord-beat="${beat}"]`);
+    const surface = document.querySelector('.notation-surface')?.getBoundingClientRect();
+    const r = label?.getBoundingClientRect();
+    return label && surface && r ? { x: r.left - surface.left, y: r.top - surface.top } : undefined;
+  };
+  const openChordInline = (beat: number, box: { x: number; y: number }) => {
+    setChordInline({ beat, x: box.x, y: box.y });
+    setChordInlineDraft(project.chords.find((chord) => Math.abs(chord.start - beat) < 1e-6)?.symbol ?? '');
+  };
+  /** Commit the inline field; Tab / ⇧Tab move to the next / previous chord change (or one beat on). */
+  const commitChordInline = (move?: 1 | -1) => {
+    if (!chordInline) return;
+    let next = project;
+    try {
+      const result = setChordAt(project, chordInline.beat, chordInlineDraft);
+      if (result.project !== project) {
+        updateProject(result.project, true, false);
+        next = result.project;
+      }
+    } catch (error) {
+      notify(cleanError(error), true);
       return;
     }
-    const roots: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-    const root = 48 + roots[match[1]] + (match[2] === '#' ? 1 : match[2] === 'b' ? -1 : 0);
-    const intervals: Record<string, number[]> = {
-      '': [0, 4, 7],
-      m: [0, 3, 7],
-      '7': [0, 4, 7, 10],
-      maj7: [0, 4, 7, 11],
-      m7: [0, 3, 7, 10],
-      m7b5: [0, 3, 6, 10],
-      '6': [0, 4, 7, 9],
-      m6: [0, 3, 7, 9],
-      dim: [0, 3, 6],
-      dim7: [0, 3, 6, 9],
-      aug: [0, 4, 8],
-      sus2: [0, 2, 7],
-      sus4: [0, 5, 7],
-      '9': [0, 4, 7, 10, 14],
-    };
-    const pitches = intervals[match[3] ?? ''].map((interval) => root + interval);
-    if (match[4]) pitches.unshift(36 + roots[match[4]] + (match[5] === '#' ? 1 : match[5] === 'b' ? -1 : 0));
-    updateProject({
-      ...project,
-      chords: project.chords.map((chord, index) =>
-        index === chordEdit ? { ...chord, symbol: chordDraft.trim(), pitches, confidence: undefined } : chord,
-      ),
-    });
-    setChordEdit(undefined);
-    notify('和弦已修改；生成新编配时会采用此和声，已有音符不自动改变。');
+    if (!move) {
+      setChordInline(undefined);
+      return;
+    }
+    const starts = [...new Set(next.chords.map((chord) => chord.start))].sort((a, b) => a - b);
+    const target =
+      move > 0
+        ? starts.find((start) => start > chordInline.beat + 1e-6)
+        : [...starts].reverse().find((start) => start < chordInline.beat - 1e-6);
+    const beat = target ?? Math.max(0, chordInline.beat + move);
+    setChordInline({ ...chordInline, beat, x: chordInline.x + move * 60 });
+    setChordInlineDraft(next.chords.find((chord) => Math.abs(chord.start - beat) < 1e-6)?.symbol ?? '');
+    // After re-engraving, snap the field onto the label of that chord if it is drawn.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const box = chordLabelBox(beat);
+        if (box) setChordInline({ beat, ...box });
+      }),
+    );
   };
 
   useEffect(() => {
@@ -1105,7 +1127,8 @@ export default function App() {
         target.isContentEditable ||
         ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) ||
         dialog ||
-        chordEdit !== undefined
+        chordEdit !== undefined ||
+        chordInline !== undefined
       )
         return;
       const command = event.metaKey || event.ctrlKey;
@@ -1196,6 +1219,15 @@ export default function App() {
           event.preventDefault();
           seekBeat(playingState.beat + (event.key === 'ArrowRight' ? 1 : -1) * barLength);
         }
+        return;
+      }
+      if (event.code === 'KeyK' && !command && tab === 'workbench' && selectedNote) {
+        // K: chord symbol above the selected note (edit the change that starts there).
+        event.preventDefault();
+        const surface = document.querySelector('.notation-surface')?.getBoundingClientRect();
+        const glyph = document.querySelector<SVGElement>('.notation .selected-note')?.getBoundingClientRect();
+        const box = chordLabelBox(selectedNote.start) ?? (surface && glyph ? { x: glyph.left - surface.left, y: glyph.top - surface.top - 46 } : undefined);
+        if (box) openChordInline(selectedNote.start, box);
         return;
       }
       if (event.code === 'KeyP' && !command && !event.altKey) {
@@ -2060,6 +2092,22 @@ export default function App() {
                   }
                 : undefined
             }
+            onChordClick={tab === 'workbench' ? openChordInline : (beat) => seekBeat(beat)}
+            overlay={
+              chordInline && tab === 'workbench' ? (
+                <ChordInlineEditor
+                  x={chordInline.x}
+                  y={chordInline.y}
+                  bar={Math.floor(chordInline.beat / barLength) + 1}
+                  beat={+((chordInline.beat % barLength) + 1).toFixed(2)}
+                  value={chordInlineDraft}
+                  valid={!chordInlineDraft.trim() || Boolean(parseChord(chordInlineDraft))}
+                  onChange={setChordInlineDraft}
+                  onCommit={commitChordInline}
+                  onCancel={() => setChordInline(undefined)}
+                />
+              ) : undefined
+            }
           />
         </div>
         {sourceRegionOpen && hasSourcePages && tab === 'workbench' && (
@@ -2603,6 +2651,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
               ['⌘ V · ⌘ ⇧ V', '在选中音符所在小节覆盖粘贴 / 插入粘贴'],
               ['⌥ 1–4', '记谱声部 1–4：移入选中音符或范围，或设为输入声部'],
               ['⌘ B · ⇧ ⌘ B', '在当前小节（或所选范围）后 / 前插入空小节'],
+              ['K · 点击和弦', '在选中音符上方加 / 改和弦；Tab / ⇧Tab 下一个 / 上一个，清空删除，N.C. 无和弦'],
               ['⌘ ⌫', '删除当前小节或所选范围的小节（全部声部）'],
               ['⌥ 点击 · ⌥ ← →', '选同一声部的音符段（首音到末音）'],
               ['T · ⌥ T · ⌥ R', '音符段：做成 3:2 三连音 / 还原普通时值 / 首尾相接重排起拍'],

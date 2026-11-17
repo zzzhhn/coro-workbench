@@ -21,6 +21,10 @@ interface Props {
   readingMode?: boolean;
   measureRange?: MeasureRange;
   onSelect: (selection: Selection, beat?: number, extend?: boolean, span?: boolean) => void;
+  /** Click on an engraved chord symbol: its beat and its box on the surface, for an inline editor. */
+  onChordClick?: (beat: number, box: { x: number; y: number; width: number; height: number }) => void;
+  /** Absolutely positioned content drawn over the paper (surface coordinates), e.g. an inline editor. */
+  overlay?: React.ReactNode;
   /** Note ids (part\0note) inside the active range, highlighted as a block. */
   rangeKeys?: Set<string>;
   /** Rubber-band selection: glyphs whose boxes intersect the dragged rectangle. */
@@ -58,6 +62,8 @@ export default function ScoreView({
   rangeKeys,
   onRubberBand,
   placement,
+  onChordClick,
+  overlay,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const tune = useRef<TuneObject | null>(null);
@@ -69,6 +75,7 @@ export default function ScoreView({
   const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number }>();
   const bandStart = useRef<{ x: number; y: number; active: boolean }>(undefined);
   const [ghost, setGhost] = useState<StaffHit>();
+  const chordPress = useRef<{ el: SVGElement; x: number; y: number }>(undefined);
   const [error, setError] = useState('');
   const [renderVersion, setRenderVersion] = useState(0);
   const lastScrolledSystem = useRef(-1);
@@ -248,6 +255,35 @@ export default function ScoreView({
           }
         }
       }
+      // Chord symbols live in the silent harmony lane; tag each with its beat so a click can edit it.
+      if (abcResult.harmonyVoiceId && abcResult.staffMap) {
+        const lane = abcResult.staffMap.flatMap((staff) => staff.voiceIds).indexOf(abcResult.harmonyVoiceId);
+        const bar = beatsPerBar(project);
+        const systems = [...container.current.querySelectorAll<SVGSVGElement>('svg')];
+        systems.forEach((svg, system) => {
+          const first = (abcResult.systemMeasures?.[system] ?? (firstMeasure ?? 1) + system * (mobile ? 2 : 4)) - 1;
+          // abcjs gives each chord text's measure (m) but not its beat inside the bar; take
+          // the chords of that bar in order, the same order abcjs draws them.
+          const perBar = new Map<number, SVGElement[]>();
+          for (const text of svg.querySelectorAll<SVGElement>(`.abcjs-chord.abcjs-v${lane}`)) {
+            const m = Number(/abcjs-m(\d+)/.exec(text.getAttribute('class') ?? '')?.[1]);
+            perBar.set(m, [...(perBar.get(m) ?? []), text]);
+          }
+          for (const [m, texts] of perBar) {
+            const from = (first + m) * bar;
+            const here = project.chords.filter((chord) => chord.start >= from - 1e-6 && chord.start < from + bar - 1e-6);
+            texts
+              .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
+              .forEach((text, index) => {
+                if (!here[index]) return;
+                text.dataset.chordBeat = String(here[index].start);
+                text.setAttribute('data-testid', 'score-chord');
+                text.setAttribute('role', 'button');
+                text.setAttribute('aria-label', `和弦 ${here[index].symbol}，点击编辑`);
+              });
+          }
+        });
+      }
       // A new part/layout changes scroll coordinates even at the same beat.
       lastScrolledSystem.current = -1;
       setRenderVersion((value) => value + 1);
@@ -370,6 +406,9 @@ export default function ScoreView({
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     shiftDown.current = event.shiftKey;
     altDown.current = event.altKey;
+    const chordText = (event.target as Element).closest<SVGElement>('[data-chord-beat]');
+    chordPress.current =
+      chordText && onChordClick && event.button === 0 ? { el: chordText, x: event.clientX, y: event.clientY } : undefined;
     if (placement && event.button === 0 && !(event.target as Element).closest('[data-note-id]')) {
       const hit = staffHit(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
       if (hit) {
@@ -506,6 +545,20 @@ export default function ScoreView({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onClick={(event) => {
+          // A chord label opens its editor on a click (no drag), so a rubber band may start on one.
+          const press = chordPress.current;
+          chordPress.current = undefined;
+          if (!press || !onChordClick || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
+          const surface = event.currentTarget.getBoundingClientRect();
+          const r = press.el.getBoundingClientRect();
+          onChordClick(Number(press.el.dataset.chordBeat), {
+            x: r.left - surface.left,
+            y: r.top - surface.top,
+            width: r.width,
+            height: r.height,
+          });
+        }}
         onPointerCancel={() => {
           bandStart.current = undefined;
           setBand(undefined);
@@ -528,6 +581,7 @@ export default function ScoreView({
             </span>
           </div>
         )}
+        {overlay}
         {band && (
           <div
             className="rubber-band"
