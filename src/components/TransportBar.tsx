@@ -123,6 +123,22 @@ export default function TransportBar({
   const playIntent = useRef<boolean | undefined>(undefined);
   const settingsId = useId();
   const settingsTrigger = useRef<HTMLButtonElement>(null);
+  const settingsPanel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Native popovers are not focus traps: Tab can leave the last input while
+    // the panel remains open. Handle Escape for that state too, before the
+    // score editor's global keyboard shortcuts or native dismissal run.
+    const onEscape = (event: KeyboardEvent) => {
+      const panel = settingsPanel.current;
+      if (event.key !== 'Escape' || !panel?.matches(':popover-open')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      panel.hidePopover();
+      settingsTrigger.current?.focus();
+    };
+    document.addEventListener('keydown', onEscape, true);
+    return () => document.removeEventListener('keydown', onEscape, true);
+  }, []);
   const barLength = beatsPerBar(project);
   const currentBar = Math.min(project.measures, Math.floor(state.beat / barLength) + 1);
   const sourceTempo = project.originalAudio?.tempo ?? project.tempo;
@@ -249,17 +265,11 @@ export default function TransportBar({
       </button>
       <div
         id={settingsId}
+        ref={settingsPanel}
         className="playback-settings"
         popover="auto"
         aria-label="播放设置"
-        onKeyDown={(event) => {
-          event.stopPropagation();
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            event.currentTarget.hidePopover();
-            settingsTrigger.current?.focus();
-          }
-        }}
+        onKeyDown={(event) => event.stopPropagation()}
       >
         <div className="playback-settings-heading">
           <strong>播放设置</strong>
