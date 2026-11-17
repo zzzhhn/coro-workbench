@@ -17,6 +17,7 @@ import {
 } from './music';
 import { MIN_BREATH_SECONDS, planVocalBreaths, vocalPhrases } from './vocalBreathing';
 import { arrangeV2 as arrangeSoloSatb } from './arrangeV2';
+import { arrangeSourceChant } from './arrangeSourceChant';
 import { harmonyNoteDuration, minimumHarmonySeconds, planHarmonySlots } from './harmonyRhythm';
 
 const EPSILON = 0.00001;
@@ -447,7 +448,8 @@ function mergeSustains(notes: NoteEvent[]): NoteEvent[] {
 export function arrangeForVoices(source: ScoreProject, options: ArrangementOptions): ScoreProject {
   const errors = validateProject(source);
   if (errors.length) throw new Error(errors.join('\n'));
-  if (options.preset === 'solo-satb') return arrangeSoloSatb(source, options);
+  if (options.preset === 'solo-satb')
+    return options.engine === 'source-chant' ? arrangeSourceChant(source, options) : arrangeSoloSatb(source, options);
   if (
     !(options.preset in ENSEMBLES) ||
     !['pop', 'choral', 'jazz'].includes(options.style) ||

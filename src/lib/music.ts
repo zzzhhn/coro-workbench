@@ -480,7 +480,12 @@ export function validateProject(project: ScoreProject): string[] {
       typeof options.percussion !== 'boolean' ||
       !Number.isInteger(options.transpose) ||
       Math.abs(options.transpose) > 24 ||
-      !optionalText(options.leadPartId)
+      !optionalText(options.leadPartId) ||
+      (options.engine !== undefined && !['v2', 'source-chant'].includes(options.engine)) ||
+      (options.accompanimentIds !== undefined &&
+        (!Array.isArray(options.accompanimentIds) || options.accompanimentIds.length > 32 ||
+          options.accompanimentIds.some((id) => !boundedText(id)))) ||
+      !optionalText(options.bassPartId)
     )
       problems.push('编配选项无效。');
     if (

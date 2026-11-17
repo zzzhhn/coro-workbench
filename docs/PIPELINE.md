@@ -8,6 +8,34 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-17: source chant as an opt-in engine in the arrange dialog
+
+Bobby asked for the personal-computer source-chant / full-song path to be
+reachable from 「生成阿卡贝拉」 as an experiment, with the default unchanged.
+
+```mermaid
+flowchart LR
+  D[Arrange dialog: Solo + SATB] -->|默认编配, engine unset| V2[arrangeV2 unchanged]
+  D -->|源谱吟唱 实验| S[arrangeV2 scaffold: Solo and parts]
+  SRC[Selected source accompaniment parts or grand-staff staves] --> C[createSourceChant: vocal-core, arpeggio recovery, whole song]
+  S --> C
+  C --> R[Report: sources, anchors, breaths, silent bars, acceptance scope]
+```
+
+- `ArrangementOptions.engine` (`'v2' | 'source-chant'`), `accompanimentIds` and
+  `bassPartId` are optional; unset keeps the previous path bit for bit.
+- The dialog lists accompaniment candidates (a grand-staff part is offered per
+  staff; duplicate MIDI track names get a track number). Default: keyboard parts,
+  lowest one as bass. A score with no accompaniment refuses rather than inventing
+  harmony.
+- Configuration matches the full-song candidate (`harmony: 'vocal-core'`,
+  `recoverInstrumentalArpeggios`), generated for every bar in one pass. It does
+  not lock or reproduce the private accepted snapshot, so its 13–20 / 21–28 /
+  45–52 bars are regenerated, not copied. Form cutdowns are not wired.
+- Checked: Solo identical to the default engine; Kong Er MIDI generates in about
+  55 ms, 160 harmony arrivals, one silent bar reported; dialog, score and playback
+  checked in a browser. Listening acceptance is still Bobby's.
+
 ## 2026-11-17: personal-computer integration
 
 PR [#59](https://github.com/zzzhhn/coro-workbench/pull/59) consolidates the current

@@ -183,6 +183,12 @@ export interface ArrangementOptions {
   percussion: boolean;
   transpose: number;
   leadPartId?: string;
+  /** Solo + SATB only. Unset keeps the default arrangeV2 path. */
+  engine?: 'v2' | 'source-chant';
+  /** source-chant: source parts whose notes supply harmony evidence. */
+  accompanimentIds?: string[];
+  /** source-chant: part (or `partId::staff-N`) whose lowest notes are the bass. */
+  bassPartId?: string;
 }
 
 export interface ArrangementReport {
