@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   CircleNotch,
   Headphones,
@@ -8,8 +8,10 @@ import {
   Play,
   Repeat,
   SkipBack,
+  SlidersHorizontal,
   SpeakerHigh,
   Stop,
+  X,
 } from '@phosphor-icons/react';
 import type { PlaybackMode, PlaybackState } from '../lib/audio';
 import { metronomeGrid } from '../lib/audio';
@@ -119,6 +121,7 @@ export default function TransportBar({
   onRange,
 }: Props) {
   const playIntent = useRef<boolean | undefined>(undefined);
+  const settingsId = useId();
   const barLength = beatsPerBar(project);
   const currentBar = Math.min(project.measures, Math.floor(state.beat / barLength) + 1);
   const sourceTempo = project.originalAudio?.tempo ?? project.tempo;
@@ -130,7 +133,10 @@ export default function TransportBar({
   const grid = metronomeGrid(project);
   const beatIndex = Math.floor((state.beat % barLength) / grid.step);
   return (
-    <footer className={`transport ${state.playing ? 'is-playing' : ''}`} aria-label="播放与排练控制">
+    <footer
+      className={`transport transport-compact ${state.playing ? 'is-playing' : ''}`}
+      aria-label="播放与排练控制"
+    >
       <div className="transport-play">
         <button
           className="icon-button previous-button"
@@ -149,8 +155,12 @@ export default function TransportBar({
             // Preserve the action the button showed when the user pressed it.
             playIntent.current = !state.playing;
           }}
-          onPointerCancel={() => { playIntent.current = undefined; }}
-          onKeyDown={() => { playIntent.current = undefined; }}
+          onPointerCancel={() => {
+            playIntent.current = undefined;
+          }}
+          onKeyDown={() => {
+            playIntent.current = undefined;
+          }}
           onClick={() => {
             const shouldPlay = playIntent.current ?? !state.playing;
             playIntent.current = undefined;
@@ -214,57 +224,97 @@ export default function TransportBar({
           ))}
         </div>}
       </div>
-      <div className="transport-timing">
-        <button
-          className={`metronome-control ${metronome ? 'enabled' : ''}`}
-          aria-label="节拍器"
-          aria-pressed={metronome}
-          onClick={onMetronome}
-        >
-          <Metronome size={19} />
-          <span>节拍器</span>
-        </button>
-        <label className="count-in">
-          <input type="checkbox" checked={countIn} onChange={(event) => onCountIn(event.target.checked)} />
-          预备拍
-        </label>
-      </div>
-      <div className={`loop-controls ${loop ? 'enabled' : ''}`}>
-        <button
-          className="loop-toggle"
-          aria-label="小节循环"
-          aria-pressed={loop}
-          title="循环选中的小节"
-          onClick={onLoop}
-        >
-          <Repeat size={19} />
-          <span>循环</span>
-        </button>
-        <NumberSetting
-          value={loopStart}
-          min={1}
-          max={loopEnd}
-          label="循环开始小节"
-          onCommit={(value) => onRange(Math.round(value), loopEnd)}
-        />
-        <span className="range-to">至</span>
-        <NumberSetting
-          value={loopEnd}
-          min={loopStart}
-          max={project.measures}
-          label="循环结束小节"
-          onCommit={(value) => onRange(loopStart, Math.round(value))}
-        />
-      </div>
-      <div className="output-meter" aria-label="实时音频电平">
-        <div>
-          <SpeakerHigh size={17} />
-          <span>{state.playing ? '输出中' : '音频输出'}</span>
+      <button
+        className="playback-settings-trigger"
+        popoverTarget={settingsId}
+        aria-label={`播放设置${loop ? `，循环第 ${loopStart} 至 ${loopEnd} 小节` : ''}${metronome ? '，节拍器已开' : ''}${countIn ? '，预备拍已开' : ''}`}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        {loop && (
+          <span className="playback-active">
+            <Repeat size={15} />
+            {loopStart}–{loopEnd}
+          </span>
+        )}
+        {metronome && (
+          <span className="playback-active" title="节拍器已开">
+            <Metronome size={16} />
+          </span>
+        )}
+        {countIn && <span className="playback-active">预备拍</span>}
+        <SlidersHorizontal size={17} />
+        <span className="playback-settings-label">播放设置</span>
+      </button>
+      <div
+        id={settingsId}
+        className="playback-settings"
+        popover="auto"
+        aria-label="播放设置"
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <div className="playback-settings-heading">
+          <strong>播放设置</strong>
+          <button
+            className="icon-button"
+            popoverTarget={settingsId}
+            popoverTargetAction="hide"
+            aria-label="关闭播放设置"
+          >
+            <X size={17} />
+          </button>
         </div>
-        <div className="meter-bars">
-          {Array.from({ length: 12 }, (_, i) => (
-            <i key={i} className={state.peak * 28 > i ? 'lit' : ''} />
-          ))}
+        <div className="transport-timing">
+          <button
+            className={`metronome-control ${metronome ? 'enabled' : ''}`}
+            aria-label="节拍器"
+            aria-pressed={metronome}
+            onClick={onMetronome}
+          >
+            <Metronome size={19} />
+            <span>节拍器</span>
+          </button>
+          <label className="count-in">
+            <input type="checkbox" checked={countIn} onChange={(event) => onCountIn(event.target.checked)} />
+            预备拍
+          </label>
+        </div>
+        <div className={`loop-controls ${loop ? 'enabled' : ''}`}>
+          <button
+            className="loop-toggle"
+            aria-label="小节循环"
+            aria-pressed={loop}
+            title="循环选中的小节"
+            onClick={onLoop}
+          >
+            <Repeat size={19} />
+            <span>循环</span>
+          </button>
+          <NumberSetting
+            value={loopStart}
+            min={1}
+            max={loopEnd}
+            label="循环开始小节"
+            onCommit={(value) => onRange(Math.round(value), loopEnd)}
+          />
+          <span className="range-to">至</span>
+          <NumberSetting
+            value={loopEnd}
+            min={loopStart}
+            max={project.measures}
+            label="循环结束小节"
+            onCommit={(value) => onRange(loopStart, Math.round(value))}
+          />
+        </div>
+        <div className="output-meter" aria-label="实时音频电平">
+          <div>
+            <SpeakerHigh size={17} />
+            <span>{state.playing ? '输出中' : '音频输出'}</span>
+          </div>
+          <div className="meter-bars">
+            {Array.from({ length: 12 }, (_, i) => (
+              <i key={i} className={state.peak * 28 > i ? 'lit' : ''} />
+            ))}
+          </div>
         </div>
       </div>
     </footer>

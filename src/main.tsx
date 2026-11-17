@@ -11,6 +11,7 @@ import '@vexflow-fonts/bravura/index.css';
 import App from './App';
 import './styles.css';
 import './workspace.css';
+import './components/TransportBar.css';
 
 class ErrorBoundary extends React.Component<React.PropsWithChildren, { error?: Error }> {
   state: { error?: Error } = {};
