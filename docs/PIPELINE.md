@@ -8,6 +8,18 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-17: personal-computer integration
+
+PR [#59](https://github.com/zzzhhn/coro-workbench/pull/59) consolidates the current
+layered work at Bobby's request; its merge status supersedes historical
+"unmerged" notes below. Rejected divergent experiments #52/#53 and the
+work-computer OMR/editor PRs remain outside this integration. Default
+`arrangeV2` still uses its existing path. Source chant, frozen-window repairs,
+full-song support and form cutdowns remain explicit candidate APIs; merging
+them does not wire private audition output into the ordinary generation flow.
+Listening acceptance remains limited to the documented excerpts. Private
+source assets, comparison pages and audio are not shipped by this PR.
+
 ## 2026-11-17: interlude form before note-level arrangement
 
 The full-song candidate inherited the source interlude's length. A separate,
