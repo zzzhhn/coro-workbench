@@ -122,6 +122,7 @@ export default function TransportBar({
 }: Props) {
   const playIntent = useRef<boolean | undefined>(undefined);
   const settingsId = useId();
+  const settingsTrigger = useRef<HTMLButtonElement>(null);
   const barLength = beatsPerBar(project);
   const currentBar = Math.min(project.measures, Math.floor(state.beat / barLength) + 1);
   const sourceTempo = project.originalAudio?.tempo ?? project.tempo;
@@ -226,6 +227,7 @@ export default function TransportBar({
       </div>
       <button
         className="playback-settings-trigger"
+        ref={settingsTrigger}
         popoverTarget={settingsId}
         aria-label={`播放设置${loop ? `，循环第 ${loopStart} 至 ${loopEnd} 小节` : ''}${metronome ? '，节拍器已开' : ''}${countIn ? '，预备拍已开' : ''}`}
         onKeyDown={(event) => event.stopPropagation()}
@@ -250,7 +252,14 @@ export default function TransportBar({
         className="playback-settings"
         popover="auto"
         aria-label="播放设置"
-        onKeyDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.currentTarget.hidePopover();
+            settingsTrigger.current?.focus();
+          }
+        }}
       >
         <div className="playback-settings-heading">
           <strong>播放设置</strong>
