@@ -58,7 +58,7 @@ def test_rejects_unsupported_or_active_formats(client, name):
     assert transport.post("/api/omr", files={"file": (name, image_bytes())}).status_code == 415
 
 
-@pytest.mark.parametrize("data", [{"first_page": "0"}, {"first_page": "5", "last_page": "4"}, {"first_page": "1", "last_page": "13"}])
+@pytest.mark.parametrize("data", [{"first_page": "0"}, {"first_page": "5", "last_page": "4"}, {"first_page": "1", "last_page": "31"}])
 def test_page_ranges_rejected_before_work(client, data):
     transport, _, _ = client
     assert transport.post("/api/omr", data=data, files={"file": ("score.png", image_bytes())}).status_code == 422
@@ -120,8 +120,10 @@ def test_rejects_encrypted_pdf_and_large_page_selection(tmp_path):
     request = make_job(tmp_path, output.getvalue(), suffix=".pdf")
     with pytest.raises(ValueError, match="密码"):
         prepare_pages(tmp_path, request, OmrStatus(tmp_path))
-    with pytest.raises(ValueError, match="12"):
-        _check_page_selection(1, 13, 13)
+    with pytest.raises(ValueError, match="30"):
+        _check_page_selection(1, 31, 31)
+    _check_page_selection(1, 30, 30)  # 30 pages in one job is allowed (2026-11-17)
+    _check_page_selection(171, 200, 200)
 
 
 MINIMAL_XML = '<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Voice</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure></part></score-partwise>'

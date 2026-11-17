@@ -37,6 +37,9 @@ type AudioMode = 'quick' | 'separate' | 'multi';
 type VocalDecoder = 'standard' | 'legato' | 'acoustic' | 'rosvot' | 'phoneme' | 'game';
 
 export const PENDING_ANALYSIS_KEY = 'coro.pending-analysis.v1';
+/** Mirrors server/omr.py MAX_PAGES. */
+export const OMR_MAX_PAGES = 30;
+
 const stageLabels: Record<string, string> = {
   queued: '等待分析',
   decoding: '读取音频',
@@ -216,9 +219,9 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
       if (
         imageScore &&
         (firstPage < 1 ||
-          (lastPage && (Number(lastPage) < firstPage || Number(lastPage) - firstPage + 1 > 12)))
+          (lastPage && (Number(lastPage) < firstPage || Number(lastPage) - firstPage + 1 > OMR_MAX_PAGES)))
       )
-        throw new Error('请选择有效页码，每次最多识别 12 页。');
+        throw new Error(`请选择有效页码，每次最多识别 ${OMR_MAX_PAGES} 页。`);
       const created = imageScore
         ? await recognizeScore(file, {
             firstPage,
@@ -310,7 +313,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
             ? `${(file.size / 1024 / 1024).toFixed(2)} MB · 点击更换文件`
             : '音频 · PDF / PNG / JPEG 谱页 · MIDI / MusicXML · Coro 工程'}
         </span>
-        {!file && <small>音频 ≤ 100 MB；PDF/图片 ≤ 50 MB、每次 ≤ 12 页；工程包 ≤ 300 MB</small>}
+        {!file && <small>音频 ≤ 100 MB；PDF/图片 ≤ 50 MB、每次 ≤ {OMR_MAX_PAGES} 页；工程包 ≤ 300 MB</small>}
       </button>
       {!scoreFile && !imageScore && (
         <>
@@ -521,9 +524,9 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
                 type="number"
                 aria-label="识谱结束页"
                 min={firstPage}
-                max={Math.min(200, firstPage + 11)}
+                max={Math.min(200, firstPage + OMR_MAX_PAGES - 1)}
                 value={lastPage}
-                placeholder="全部，最多 12 页"
+                placeholder={`全部，最多 ${OMR_MAX_PAGES} 页`}
                 onChange={(event) => setLastPage(event.target.value)}
                 disabled={busy}
               />
@@ -567,8 +570,8 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
             尝试文字 / 歌词 OCR（实验，仅 Audiveris）
           </label>
           <p className="subtle-note">
-            默认关闭文字 OCR，避免中文标题和歌词误读造成声部串接；识别后保留原谱页供核对。PDF 若超过 12
-            页，请指定页码区间。
+            Audiveris 的文字 OCR 默认关闭，避免中文标题和歌词误读造成声部串接；识别后保留原谱页供核对。PDF 若超过{' '}
+            {OMR_MAX_PAGES} 页，请指定页码区间。
           </p>
           <div className={`engine-status ${ready('omr') ? 'ready' : ''}`}>
             <span className="status-dot" />
