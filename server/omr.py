@@ -362,7 +362,7 @@ def summarize_musicxml(xml: str, pages: int, logs: str, read_text: bool, engine:
     if not root.findall(".//time"):
         notices.append("未识别到明确拍号，导入器暂以 4/4 建谱；请先核对原谱拍号，避免节拍误读。")
     if not any(direction.get("tempo") for direction in root.findall(".//sound")):
-        notices.append("未识别到明确速度，播放使用导入默认 BPM；请按原谱指定速度。")
+        notices.append("乐谱里没有写入速度；导入时请确认或填写速度。")
     if root.findall(".//unpitched"):
         notices.append("无固定音高打击乐的鼓件映射可能不完整，需要对照原谱检查。")
     rhythm = len(re.findall(r"(?i)(?:no target duration|not enough time|excessive time|voice.*?too long|unmatched|rhythm.*?error)", logs))

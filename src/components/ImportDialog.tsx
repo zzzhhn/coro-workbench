@@ -22,7 +22,7 @@ import {
   type EngineHealth,
   type OmrEngine,
 } from '../lib/api';
-import { importScoreFile, projectFromOmr } from '../lib/import';
+import { importScoreFile, omrHasWrittenTempo, projectFromOmr } from '../lib/import';
 import type { AnalysisJob, OmrJob, ScoreProject } from '../lib/types';
 import { importProjectBundle } from '../lib/projectBundle';
 import type { WorkspaceState } from '../lib/storage';
@@ -76,6 +76,9 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
   const [readText, setReadText] = useState(false);
   const [omrEngine, setOmrEngine] = useState<OmrEngine>('auto');
   const [textLayer, setTextLayer] = useState(true);
+  // OMR result waiting for the user to confirm a tempo the score does not state.
+  const [tempoPending, setTempoPending] = useState<OmrJob>();
+  const [tempoChoice, setTempoChoice] = useState('');
   const jobKind = useRef<'audio' | 'omr'>('audio');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -165,6 +168,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
     }
     setFile(selected);
     setJob(undefined);
+    setTempoPending(undefined);
   };
   const poll = async (id: string) => {
     try {
@@ -176,7 +180,12 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
         activeJob.current = undefined;
         setBusy(false);
         if ('musicxml' in current && current.musicxml) {
-          await onImport(projectFromOmr(current));
+          if (omrHasWrittenTempo(current)) await onImport(projectFromOmr(current));
+          else {
+            // The score states no tempo: ask instead of silently playing at 100 BPM.
+            setTempoChoice('');
+            setTempoPending(current);
+          }
         } else if ('project' in current && current.project) await onImport(current.project);
         else throw new Error('任务未返回可读取的乐谱。');
       } else if (current.status === 'error' || current.status === 'cancelled') {
@@ -197,6 +206,18 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
       }
       pollTimer.current = setTimeout(() => void poll(id), 3500);
     }
+  };
+  const confirmTempo = async (useDefault = false) => {
+    if (!tempoPending) return;
+    const value = useDefault ? undefined : Number(tempoChoice);
+    if (!useDefault && (!Number.isFinite(value) || value! < 10 || value! > 500)) {
+      setError('请填写 10–500 之间的速度，或选择稍后再改。');
+      return;
+    }
+    setError('');
+    const job = tempoPending;
+    setTempoPending(undefined);
+    await onImport(projectFromOmr(job, value));
   };
   const begin = async () => {
     if (!file || busy) return;
@@ -604,6 +625,34 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
           </button>
         </div>
       )}
+      {tempoPending && (
+        <section className="tempo-confirm" aria-label="确认速度">
+          <strong>识谱完成，请确认速度</strong>
+          <p>音符与节奏已识别，但乐谱里没有写入速度，请填写每分钟多少拍。可以先参考原曲或演唱需要，之后也能在播放栏修改。</p>
+          <label>
+            速度（四分音符 / 分钟）
+            <input
+              type="number"
+              min={10}
+              max={500}
+              step={1}
+              value={tempoChoice}
+              placeholder="例如 65"
+              autoFocus
+              onChange={(event) => setTempoChoice(event.target.value)}
+              onKeyDown={(event) => event.key === 'Enter' && void confirmTempo()}
+            />
+          </label>
+          <div className="tempo-confirm-actions">
+            <button className="text-button" onClick={() => void confirmTempo(true)}>
+              稍后再改（暂用 100）
+            </button>
+            <button className="primary-button" onClick={() => void confirmTempo()} disabled={!tempoChoice}>
+              确认速度并打开乐谱
+            </button>
+          </div>
+        </section>
+      )}
       {error && (
         <div className="error-message" role="alert">
           <WarningCircle size={19} />
@@ -617,7 +666,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
         <button
           className="primary-button"
           onClick={() => void begin()}
-          disabled={!file || busy || (imageScore ? !ready('omr') : !scoreFile && !sourceReady)}
+          disabled={!file || busy || Boolean(tempoPending) || (imageScore ? !ready('omr') : !scoreFile && !sourceReady)}
         >
           {busy
             ? imageScore
