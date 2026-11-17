@@ -2002,6 +2002,28 @@
   background: var(--soft);
   border-radius: 6px;
 }
+.background-timbre-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--quiet);
+}
+.background-timbre-control select {
+  min-width: 0;
+  max-width: 85px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 3px;
+}
+@media (max-width: 750px) {
+  .background-timbre-control { font-size: 9px; gap: 3px; }
+  .background-timbre-control > span { display: none; }
+}
 .transport-mode > button {
   display: flex;
   align-items: center;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
+import { auditionPart, auditionProject, isVocalBacking, type BackgroundTimbre } from './lib/auditionTimbre';
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -171,6 +172,8 @@ export default function App() {
     initial?.active === 'arrangement' && initial?.arrangement ? 'arrangement' : 'source',
   );
   const project = active === 'arrangement' && arrangement ? arrangement : source;
+  const [backgroundTimbre, setBackgroundTimbre] = useState<BackgroundTimbre>('piano');
+  const playbackProject = useMemo(() => auditionProject(project, backgroundTimbre), [project, backgroundTimbre]);
   const [selectedPartId, setSelectedPartId] = useState(project.parts[0].id);
   const [selection, setSelection] = useState<Selection>();
   const [visiblePart, setVisiblePart] = useState('all');
@@ -350,10 +353,10 @@ export default function App() {
   useEffect(() => {
     // Decode this score's instrument samples in the background, so pressing
     // play (also after jumping to a bar) does not wait for a full decode.
-    const timer = setTimeout(() => engine.current?.prime(project), 400);
+    const timer = setTimeout(() => engine.current?.prime(playbackProject), 400);
     return () => clearTimeout(timer);
     // Re-warm when another score or part set is opened, not on every note edit.
-  }, [project.id, project.parts.length]);
+  }, [project.id, project.parts.length, backgroundTimbre]);
   useEffect(() => {
     engine.current?.setMetronome(metronome);
   }, [metronome]);
@@ -641,7 +644,7 @@ export default function App() {
         if (moved) engine.current?.seek(moved.start);
       }
       if (patch.midi !== undefined && patch.midi !== null)
-        void engine.current?.audition(part, patch.midi).catch((error) => notify(cleanError(error), true));
+        void engine.current?.audition(auditionPart(part, backgroundTimbre), patch.midi).catch((error) => notify(cleanError(error), true));
     } catch (error) {
       notify(cleanError(error), true);
     }
@@ -675,7 +678,7 @@ export default function App() {
       setSelection(result.selection);
       engine.current?.seek(start);
       if (midi !== null)
-        void engine.current?.audition(part, midi).catch((error) => notify(cleanError(error), true));
+        void engine.current?.audition(auditionPart(part, backgroundTimbre), midi).catch((error) => notify(cleanError(error), true));
     } catch (error) {
       notify(cleanError(error), true);
     }
@@ -787,7 +790,7 @@ export default function App() {
       setSelection(result.selection);
       setSelectedPartId(result.selection.partId);
       const placedPart = result.project.parts.find((item) => item.id === target.partId)!;
-      if (!placeRest) void engine.current?.audition(placedPart, target.midi).catch(() => undefined);
+      if (!placeRest) void engine.current?.audition(auditionPart(placedPart, backgroundTimbre), target.midi).catch(() => undefined);
       engine.current?.seek(target.beat);
       if (result.kind === 'replaced-rest') notify('已替换该位置的休止符。');
       else if (result.kind === 'chord') notify('与同一拍的音合成和弦（沿用其时值）。');
@@ -842,7 +845,7 @@ export default function App() {
     try {
       updateProject(setNotePitch(project, selection, midi));
       if (midi !== null)
-        void engine.current?.audition(part, midi).catch((error) => notify(cleanError(error), true));
+        void engine.current?.audition(auditionPart(part, backgroundTimbre), midi).catch((error) => notify(cleanError(error), true));
     } catch (error) {
       notify(cleanError(error), true);
     }
@@ -938,7 +941,7 @@ export default function App() {
   ) => {
     setAudioBusy(true);
     try {
-      await engine.current?.play(project, {
+      await engine.current?.play(playbackProject, {
         mode,
         startBeat,
         loop,
@@ -2198,7 +2201,7 @@ export default function App() {
         onDelete={removeNote}
         onDuplicate={duplicateSelected}
         onAudition={(midi) => {
-          void engine.current?.audition(part, midi).catch((error) => notify(cleanError(error), true));
+          void engine.current?.audition(auditionPart(part, backgroundTimbre), midi).catch((error) => notify(cleanError(error), true));
         }}
         onSelect={selectNote}
         onLyricStep={stepLyric}
@@ -2206,6 +2209,8 @@ export default function App() {
 
       <TransportBar
         project={project}
+        backgroundTimbre={project.parts.some(isVocalBacking) ? backgroundTimbre : undefined}
+        onBackgroundTimbre={(value) => { engine.current?.pause(); setBackgroundTimbre(value); }}
         state={playingState}
         mode={playbackMode}
         busy={audioBusy}

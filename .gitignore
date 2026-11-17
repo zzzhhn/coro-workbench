@@ -38,6 +38,7 @@ work/
 !/docs/MVP_STATUS.md
 !/docs/PIPELINE.md
 !/docs/CRESCENDO_INTERACTION_MAP.md
+!/docs/ARRANGEMENT_AUDITION_LEARNINGS.md
 *.coro
 *.coro.json
 *.wav
