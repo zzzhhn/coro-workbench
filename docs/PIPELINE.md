@@ -8,6 +8,15 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-17: OMR accepts up to 30 pages per job
+
+`MAX_PAGES` 12 → 30 (server and import dialog share the value; the dialog
+constant mirrors `server/omr.py`). The review-data crop pass now scales its
+timeout with page count; recognition already allowed 120 s + 90 s per page.
+Measured: Kong Er, all 19 pages in one homr job, 71.6 s, 70 bars, 268 lyric
+syllables, review data for 19 pages, imported in the browser with
+「原谱对照 · 19 页」. Previously it needed two jobs that could not be stitched.
+
 ## 2026-11-17: source chant as an opt-in engine in the arrange dialog
 
 Bobby asked for the personal-computer source-chant / full-song path to be

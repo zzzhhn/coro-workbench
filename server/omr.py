@@ -31,7 +31,7 @@ from .storage import Cancelled, JOB_ID, JobStatus, atomic_json, read_json, utc_n
 VERSION = "5.11.0"
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp"}
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-MAX_PAGES = 12
+MAX_PAGES = 30
 MAX_INPUT_PAGES = 200
 MAX_IMAGE_PIXELS = 35_000_000
 MAX_PAGE_EDGE = 3500
@@ -173,7 +173,7 @@ def prepare_pages(directory: Path, request: dict, status: OmrStatus) -> tuple[li
         except Exception as error:
             raise ValueError("PDF 已损坏或无法解析，请重新导出 PDF。") from error
         if count < 1 or count > MAX_INPUT_PAGES:
-            raise ValueError("PDF 需包含 1–200 页；每次最多识别 12 页。")
+            raise ValueError(f"PDF 需包含 1–{MAX_INPUT_PAGES} 页；每次最多识别 {MAX_PAGES} 页。")
         end = count if last_page is None else last_page
         _check_page_selection(first_page, end, count)
         for index, page in enumerate(reader.pages):
@@ -200,7 +200,7 @@ def prepare_pages(directory: Path, request: dict, status: OmrStatus) -> tuple[li
                 with Image.open(source) as image:
                     count = getattr(image, "n_frames", 1)
                     if count < 1 or count > MAX_INPUT_PAGES:
-                        raise ValueError("图片容器最多支持 200 页，每次识别最多 12 页。")
+                        raise ValueError(f"图片容器最多支持 {MAX_INPUT_PAGES} 页，每次识别最多 {MAX_PAGES} 页。")
                     end = count if last_page is None else last_page
                     _check_page_selection(first_page, end, count)
                     for page in range(first_page, end + 1):
@@ -306,7 +306,7 @@ def _check_page_selection(first: int, last: int, count: int) -> None:
     if not 1 <= first <= last <= count:
         raise ValueError(f"页码范围无效，这份文件共有 {count} 页。")
     if last - first + 1 > MAX_PAGES:
-        raise ValueError("每次最多识别 12 页，请选择较小的页码范围。")
+        raise ValueError(f"每次最多识别 {MAX_PAGES} 页，请选择较小的页码范围。")
 
 
 def read_musicxml(path: Path) -> str:
@@ -534,7 +534,7 @@ def _homr_review(directory: Path, inputs: list[Path], page_xml: list[Path], part
     source = homr_home() / "src"
     extractor = Path(__file__).with_name("omr_text_extract.py")
     result = subprocess.run([str(source / ".venv" / "bin" / "python"), str(extractor), "--crops", *map(str, inputs)], cwd=source,
-                            env=_homr_env(directory / "runtime-home"), capture_output=True, text=True, timeout=180)
+                            env=_homr_env(directory / "runtime-home"), capture_output=True, text=True, timeout=120 + len(inputs) * 30)
     crops = json.loads(result.stdout) if result.returncode == 0 else [None] * len(inputs)
     pages, extra, first = [], [], 1
     for index, (image, xml_path) in enumerate(zip(inputs, page_xml)):
@@ -813,7 +813,7 @@ def create_omr_router(data_dir: Path | None = None) -> APIRouter:
         if engine not in ENGINES:
             raise HTTPException(422, "未知识谱引擎。")
         if first_page < 1 or first_page > MAX_INPUT_PAGES or last_page is not None and (last_page < first_page or last_page > MAX_INPUT_PAGES or last_page - first_page + 1 > MAX_PAGES):
-            raise HTTPException(422, "页码范围无效；每次最多识别 12 页。")
+            raise HTTPException(422, f"页码范围无效；每次最多识别 {MAX_PAGES} 页。")
         name = Path((file.filename or "score").replace("\\", "/")).name[:240]
         suffix = Path(name).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
