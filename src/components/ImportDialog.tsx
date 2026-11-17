@@ -72,7 +72,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
   const [lastPage, setLastPage] = useState('');
   const [readText, setReadText] = useState(false);
   const [omrEngine, setOmrEngine] = useState<OmrEngine>('auto');
-  const [textLayer, setTextLayer] = useState(false);
+  const [textLayer, setTextLayer] = useState(true);
   const jobKind = useRef<'audio' | 'omr'>('audio');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -555,7 +555,7 @@ export default function ImportDialog({ onClose, onImport, onDemo, onWorkspace }:
               onChange={(event) => setTextLayer(event.target.checked)}
               disabled={busy || omrEngine === 'audiveris'}
             />
-            实验：读取歌词、和弦与声部名（确认测试未通过：钢琴踏板、版权行等会被误当歌词，需逐句校对）
+            读取歌词、和弦与声部名（homr，默认开启；照片和扫描仍可能读错字或错位，请对照原图校对）
           </label>
           <label className="check-option">
             <input

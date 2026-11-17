@@ -148,3 +148,13 @@ def test_ocr_parser_survives_empty_and_placeholder_word_results():
     assert boxes == [{"text": "Hi", "box": [0.0, 0.0, 10.0, 5.0], "conf": 0.9}]
     words = parse_ocr_result([line], ["a b"], [0.9], [[("a", 0.8, [[0, 0], [3, 0], [3, 5], [0, 5]]), ("", 1.0, None), ("b", 0.7, [[5, 0], [8, 0], [8, 5], [5, 5]])]])
     assert [w["text"] for w in words] == ["a", "b"]
+
+
+def test_performance_marks_and_ocr_spellings_are_not_lyrics_but_sung_words_are():
+    from server.omr_text import is_mark
+
+    # D4: abbreviations and OCR spellings found under keyboard staves of real scans.
+    for word in ["Poc", "PocP", "dol", "dol.", "f'z", "fz", "Volti.", "cresc.", "M.D.", "Ped.", "rallent.", "Una corda", "pp."]:
+        assert is_mark(word), word
+    for word in ["Ach", "die", "Lied", "Pferde", "Sonne", "Prima", "Dolor", "Pedro", "Fin", "mit"]:
+        assert not is_mark(word), word

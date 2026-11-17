@@ -693,6 +693,26 @@ flowchart LR
   rendering are not redesigned here. Static constraints are not musical approval.
   All nine newly studied references are development material, not blind holdouts.
 
+## 2026-11-15: OMR text layer v9 — performance marks (D4), confirmation test C4 passes; on by default
+
+Text layer only; notes still never edited. v9 (`657c723`) was developed on a new dev set D4 and frozen by file hash; C4 is fresh public data with the C3 gates unchanged, written before any D4 or C4 item was opened, run once. C3 was not used for tuning.
+
+- **D4 (development only).** 24 new SLUB scans (6 instrumental / 18 vocal, labelled from thumbnails before recognition) and the 16 OLiMPiC scanned piano systems whose reference prints words (rit., poco riten., mit Ped., M.D.). Change kept: performance marks, dynamics and their abbreviations and OCR spellings below a staff ("Poc", "PocP", "dol.", "f'z", "Volti.", "M.D.", "Ped.", "rallent.") are not lyrics, word by word after dropping dots and apostrophes; a row of mostly such marks is dropped. Words that are also sung ("ten", "tempo", "dolce", "poco", "sempre") stay lyrics when alone. D4 instrumental pages 4 → 0 false syllables; vocal pages lost 3 syllables, all marks on inspection ("dol.", "fz", "SPb2"). All earlier dev sets and Kong Er unchanged.
+- **C4 result.**
+
+  | Gate | Result | |
+  |---|---|---|
+  | Notes unchanged | 168 / 168 pages | pass |
+  | 40 new lead sheets, clean: lyrics, chords ≥ .85 and ≥ Audiveris | .859, .853 (Audiveris .626, .597) | pass |
+  | Same, simulated photo: ≥ .70 and ≥ Audiveris | .788, .828 (Audiveris .287, .210) | pass |
+  | 25 further OpenScore Lieder (train split) re-rendered: verse-1 sequence F ≥ .75 and ≥ Audiveris | .857 (Audiveris .644) | pass |
+  | 24 new SLUB scans: failure ≤ 15 %; instrumental pages (≥ 4) ≥ 80 % with no false lyric, ≤ 2 per page | 1 / 24 failed (a c. 1600 blackletter part book, homr gives no output); 10 / 11 instrumental pages clean, 0.09 per page | pass |
+  | Vocal scan pages with no lyrics ≤ 20 % | 1 / 13 (the same failed page) | pass |
+  | Kong Er: 268 syllables in verse 1, OCR agrees ≥ .95, part names on all pages | 268, .992, all 人声 / 钢琴 / 弦乐合奏 | pass |
+  | Report only: 40 OLiMPiC scanned piano systems, false lyrics | 0 | — |
+
+  The one false lyric was "scherz" (cut-off scherzando) under a clarinet piece.
+- **Decision.** Every gate passed, so the text layer now runs by default with homr (upload default, API client, import dialog box ticked; it can be turned off). Real phone photos remain unmeasured until Bobby takes them; scanned and photographed lyrics still need proof-reading against the source image.
 
 ## 2026-11-15: OMR text layer v8 — chord fix on D3, third confirmation test C3 (still off by default)
 

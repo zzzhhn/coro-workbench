@@ -124,14 +124,14 @@ reference, not a human beatbox performance.
 
 PDF and image imports use homr by default and Audiveris as a selectable or
 automatic fallback engine. On simulated scans and phone photos of printed pages
-homr held up far better than Audiveris (2026-11-14 A/B in PIPELINE.md); real
-photos, real scans, handwriting and jianpu are not yet measured. homr does not
-read lyrics, chord symbols or part names by itself; an experimental text layer
-(off by default) adds them from the PDF's own text or local OCR (RapidOCR). Its
-third confirmation test (2026-11-15, v8) passed lyrics and chord symbols on fresh
-lead sheets (.894 / .860), but still failed on real scans of instrumental pages:
-two of six pages got performance marks under keyboard staves ("poco", "p",
-"dolce") as lyrics. Real phone photos are not yet measured. Photos and
+homr held up far better than Audiveris (2026-11-14 A/B in PIPELINE.md); note
+accuracy on real photos, real scans, handwriting and jianpu is not yet measured. homr does not
+read lyrics, chord symbols or part names by itself; Coro's text layer (on by
+default with homr since 2026-11-15) adds them from the PDF's own text or local
+OCR (RapidOCR). Its fourth confirmation test passed every gate on fresh data
+(lead-sheet lyrics .859 / chords .853 clean, .788 / .828 simulated photo; 10 of
+11 real instrumental scan pages with no false lyric). Real phone photos are not
+yet measured. Photos and
 scans can misread words, shift a syllable or take a performance term for a lyric,
 and only the first verse is imported. homr reads fewer ties than printed.
 Either engine can introduce wrong accidentals, ties, meter, voice assignments
