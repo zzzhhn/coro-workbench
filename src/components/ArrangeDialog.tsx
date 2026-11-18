@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { ArrowRight, Check, MusicNotes, Sparkle } from '@phosphor-icons/react';
+import { useId, useState } from 'react';
+import { ArrowRight, Check, LockSimple, MusicNotes, Sparkle, X } from '@phosphor-icons/react';
 import Modal from './Modal';
-import type { ArrangementOptions, ScoreProject } from '../lib/types';
+import type { ArrangementOptions, MeasureLock, ScoreProject } from '../lib/types';
 import { recommendLeadPart } from '../lib/arrange';
 import { chantSourceOptions, defaultChantSelection } from '../lib/arrangeSourceChant';
+import './arrangement-controls.css';
 
 const presets = [
   {
@@ -34,17 +35,22 @@ const presets = [
 
 export default function ArrangeDialog({
   project,
+  current,
   initialOptions,
   onClose,
   onArrange,
+  onLocksChange,
 }: {
   project: ScoreProject;
+  current?: ScoreProject;
   initialOptions?: ArrangementOptions;
   onClose: () => void;
   onArrange: (options: ArrangementOptions) => void;
+  onLocksChange?: (locks: MeasureLock[]) => void;
 }) {
   const [options, setOptions] = useState<ArrangementOptions>(
     initialOptions ??
+      current?.arrangement?.options ??
       project.arrangement?.options ?? {
         preset: 'solo-satb',
         style: 'pop',
@@ -54,9 +60,49 @@ export default function ArrangeDialog({
         leadPartId: recommendLeadPart(project)?.id,
       },
   );
+  const [locks, setLocks] = useState<MeasureLock[]>(current?.arrangement?.locks ?? []);
+  const [firstBar, setFirstBar] = useState('1');
+  const [lastBar, setLastBar] = useState(String(Math.min(4, current?.measures ?? project.measures)));
+  const [lockError, setLockError] = useState('');
+  const lockHelpId = useId();
+  const lockErrorId = useId();
+  const locked = locks.length > 0;
+  const measureCount = current?.measures ?? project.measures;
+  const changeLocks = (next: MeasureLock[]) => {
+    setLocks(next);
+    setLockError('');
+    onLocksChange?.(next);
+  };
+  const addLock = () => {
+    const first = Number(firstBar);
+    const last = Number(lastBar);
+    if (
+      !firstBar.trim() || !lastBar.trim() ||
+      !Number.isInteger(first) || !Number.isInteger(last) ||
+      first < 1 || last > measureCount || first > last
+    ) {
+      setLockError(`请输入 1 至 ${measureCount} 的完整小节范围，起点不能晚于终点。`);
+      return;
+    }
+    if (locks.some((lock) => first <= lock.last && last >= lock.first)) {
+      setLockError('这段与已锁定的小节重叠，请调整范围。');
+      return;
+    }
+    const currentOptions = current?.arrangement?.options;
+    if (currentOptions && (
+      options.preset !== currentOptions.preset ||
+      options.transpose !== currentOptions.transpose ||
+      options.leadPartId !== currentOptions.leadPartId
+    )) {
+      setLockError('锁定前，请将编制、主旋律和移调恢复为当前版本设置。');
+      return;
+    }
+    changeLocks([...locks, { first, last }].sort((a, b) => a.first - b.first));
+  };
   const chantOptions = chantSourceOptions(project, options.leadPartId);
   const selectedSources = (options.accompanimentIds ?? []).filter((id) => chantOptions.some((option) => option.id === id));
-  const chantBlocked = options.preset === 'solo-satb' && options.engine === 'source-chant' && (!selectedSources.length || !options.bassPartId);
+  const sourceChant = options.preset === 'solo-satb' && options.engine === 'source-chant';
+  const chantBlocked = sourceChant && (!selectedSources.length || !selectedSources.includes(options.bassPartId ?? ''));
   return (
     <Modal title="阿卡贝拉编配" eyebrow="ARRANGEMENT" onClose={onClose} wide>
       <p className="modal-description">
@@ -69,6 +115,8 @@ export default function ArrangeDialog({
             className={`preset ${preset.id === options.preset ? 'selected' : ''}`}
             role="radio"
             aria-checked={preset.id === options.preset}
+            aria-describedby={locked ? lockHelpId : undefined}
+            disabled={locked && preset.id !== options.preset}
             onClick={() => setOptions({ ...options, preset: preset.id })}
           >
             <div className="voice-stacks">
@@ -94,6 +142,8 @@ export default function ArrangeDialog({
           主旋律来自
           <select
             value={options.leadPartId}
+            disabled={locked}
+            aria-describedby={locked ? lockHelpId : undefined}
             onChange={(event) => setOptions({ ...options, leadPartId: event.target.value })}
           >
             {project.parts
@@ -135,6 +185,8 @@ export default function ArrangeDialog({
           整体移调
           <select
             value={options.transpose}
+            disabled={locked}
+            aria-describedby={locked ? lockHelpId : undefined}
             onChange={(event) => setOptions({ ...options, transpose: Number(event.target.value) })}
           >
             {Array.from({ length: 25 }, (_, i) => i - 12).map((value) => (
@@ -227,6 +279,36 @@ export default function ArrangeDialog({
           )}
         </fieldset>
       )}
+      {current?.arrangement && onLocksChange && (
+        <section className="arrange-locks" aria-label="锁定小节">
+          <div className="arrange-locks-heading">
+            <strong><LockSimple size={16} /> 锁定小节</strong>
+            {locked && <button className="text-button" onClick={() => changeLocks([])}>全部解锁</button>}
+          </div>
+          <p id={lockHelpId}>
+            {locked ? '锁定段保留当前版本的音符；更改编制、主旋律或移调前需先解锁。' : '保留满意的段落，其余小节重新编配。起止小节均包含在内。'}
+          </p>
+          {locked && (
+            <ul className="arrange-lock-list" aria-label="已锁定范围">
+              {locks.map((lock) => (
+                <li key={`${lock.first}-${lock.last}`}>
+                  <span>第 {lock.first === lock.last ? lock.first : `${lock.first} 至 ${lock.last}`} 小节</span>
+                  <button aria-label={`解锁第 ${lock.first} 至 ${lock.last} 小节`} onClick={() => changeLocks(locks.filter((item) => item !== lock))}>
+                    <X size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="arrange-lock-editor" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addLock(); } }}>
+            <label>起始小节<input type="number" min={1} max={measureCount} step={1} value={firstBar} aria-invalid={Boolean(lockError)} aria-describedby={lockError ? lockErrorId : lockHelpId} onChange={(event) => { setFirstBar(event.target.value); setLockError(''); }} /></label>
+            <span aria-hidden="true">至</span>
+            <label>结束小节<input type="number" min={1} max={measureCount} step={1} value={lastBar} aria-invalid={Boolean(lockError)} aria-describedby={lockError ? lockErrorId : lockHelpId} onChange={(event) => { setLastBar(event.target.value); setLockError(''); }} /></label>
+            <button className="secondary-button" onClick={addLock}><LockSimple size={15} /> 锁定</button>
+          </div>
+          {lockError && <p className="arrange-lock-error" id={lockErrorId} role="alert">{lockError}</p>}
+        </section>
+      )}
       <label className="toggle-row">
         <div>
           <MusicNotes size={22} />
@@ -249,10 +331,15 @@ export default function ArrangeDialog({
           根据常见声域、和声连接、声部交叉和换气自动约束。默认生成拟声音节；已有歌词尽量保留，不会凭音频猜写原词。合唱音色仅用于排练音高。
         </p>
       </div>
-      <div className="modal-actions">
+      <div className="modal-actions arrange-actions">
         <button className="secondary-button" onClick={onClose}>
           返回总谱
         </button>
+        {sourceChant && (
+          <button className="secondary-button" disabled={chantBlocked} onClick={() => onArrange({ ...options, variant: (options.variant ?? 0) + 1 })}>
+            <Sparkle size={17} /> 生成变体
+          </button>
+        )}
         <button className="primary-button" disabled={chantBlocked} onClick={() => onArrange(options)}>
           生成阿卡贝拉谱 <ArrowRight size={18} />
         </button>

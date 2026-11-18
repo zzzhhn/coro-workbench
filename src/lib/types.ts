@@ -177,6 +177,8 @@ export interface ArrangementPlan {
 }
 
 export interface ArrangementOptions {
+  /** Zero (or omitted) uses the original voicing. */
+  variant?: number;
   preset: 'satb' | 'ssaa' | 'ttbb' | 'solo-satb';
   style: 'pop' | 'choral' | 'jazz';
   difficulty: 'easy' | 'medium' | 'advanced';
@@ -189,6 +191,11 @@ export interface ArrangementOptions {
   accompanimentIds?: string[];
   /** source-chant: part (or `partId::staff-N`) whose lowest notes are the bass. */
   bassPartId?: string;
+}
+
+export interface MeasureLock {
+  first: number;
+  last: number;
 }
 
 export interface ArrangementReport {
@@ -237,7 +244,7 @@ export interface ScoreProject {
     offsetSeconds: number;
     tempo?: number;
   };
-  arrangement?: { options: ArrangementOptions; report: ArrangementReport; plan?: ArrangementPlan };
+  arrangement?: { options: ArrangementOptions; report: ArrangementReport; plan?: ArrangementPlan; revision?: number; locks?: MeasureLock[] };
   createdAt: string;
   updatedAt: string;
   layout?: ScoreLayout;

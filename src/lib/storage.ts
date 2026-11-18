@@ -14,6 +14,7 @@ export function registerLocalAssetUrl(url: string, key: string): void {
 export interface WorkspaceState {
   source: ScoreProject;
   arrangement?: ScoreProject;
+  comparison?: ScoreProject;
   active: 'source' | 'arrangement';
   savedAt: string;
 }
@@ -42,6 +43,7 @@ export function saveWorkspace(state: WorkspaceState): void {
       ...state,
       source: safeProject(state.source),
       arrangement: state.arrangement ? safeProject(state.arrangement) : undefined,
+      comparison: state.comparison ? safeProject(state.comparison) : undefined,
     }),
   );
 }
@@ -54,6 +56,7 @@ export function readWorkspace(): WorkspaceState | undefined {
     if (!state.source || !Array.isArray(state.source.parts) || state.source.version !== 1) return undefined;
     if (validateProject(state.source).length) return undefined;
     if (state.arrangement && validateProject(state.arrangement).length) return undefined;
+    if (state.comparison && validateProject(state.comparison).length) delete state.comparison;
     return state;
   } catch {
     return undefined;

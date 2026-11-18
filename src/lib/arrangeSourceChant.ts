@@ -108,6 +108,7 @@ export function arrangeSourceChant(source: ScoreProject, options: ArrangementOpt
     chant = createSourceChant(scaffold, evidence, { accompanimentIds, bassPartId }, [{ first: 1, last: source.measures }], {
       harmony: 'vocal-core',
       recoverInstrumentalArpeggios: true,
+      variant: options.variant,
     });
   } catch (error) {
     throw new Error(`源谱吟唱无法为这份谱生成可唱的四声部：${error instanceof Error ? error.message : String(error)}。可换伴奏声部或改用默认编配。`);

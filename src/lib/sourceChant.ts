@@ -68,7 +68,7 @@ export function createSourceChant(
   scaffold: ScoreProject, source: ScoreProject,
   selection: { accompanimentIds: string[]; bassPartId: string },
   spans: Array<{ first: number; last: number }>,
-  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' | 'vocal-core'; editWindow?: { start: number; end: number }; joinWindowEdges?: boolean; recoverInstrumentalArpeggios?: boolean } = {},
+  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' | 'vocal-core'; editWindow?: { start: number; end: number }; joinWindowEdges?: boolean; recoverInstrumentalArpeggios?: boolean; variant?: number } = {},
 ) {
   const bar = beatsPerBar(source);
   if (!selection.accompanimentIds.includes(selection.bassPartId)) throw Error('Bass staff must belong to selected accompaniment');
@@ -258,6 +258,7 @@ export function createSourceChant(
     melodyPartId: options.harmony === 'vocal-core' ? 'solo' : undefined,
     editWindow: options.editWindow,
     joinWindowEdges: options.joinWindowEdges,
+    variant: options.variant,
   });
   return { ...result, anchors, breaths, bassRoleDecisions, phraseBlocks: phrase?.blocks, preprocessing: { rolls: prepared.rolls, ornaments: prepared.ornaments } };
 }
