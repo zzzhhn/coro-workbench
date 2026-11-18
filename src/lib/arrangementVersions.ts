@@ -16,19 +16,18 @@ function union(intervals: Interval[]): Interval[] {
 
 /** Keep complete accepted events, including an attack or release outside the
  * barline. Newly generated notes may only sound in the remaining time. */
-function restoreNotes(old: NoteEvent[], generated: NoteEvent[], ranges: Interval[]) {
+function restoreEvents<T extends {start: number; duration: number}>(old: T[], generated: T[], ranges: Interval[],
+  prepare?: (event: T, kept: T[]) => T) {
   const kept = old.filter(n => ranges.some(r => n.start < r.end && n.start + n.duration > r.start));
   const reserved = union([...ranges, ...kept.map(n => ({ start: n.start, end: n.start + n.duration }))]);
   const result = structuredClone(kept);
-  const ids = new Set(kept.map(n => n.id));
   for (const n of generated) {
     let from = n.start;
     const end = from + n.duration;
     const append = (to: number) => {
       if (to <= from + 1e-8) return;
-      const id = ids.has(n.id) ? newId('note') : n.id;
-      ids.add(id);
-      result.push({ ...n, id, start: from, duration: from === n.start && to === end ? n.duration : to - from });
+      const event = { ...n, start: from, duration: from === n.start && to === end ? n.duration : to - from };
+      result.push(prepare ? prepare(event, kept) : event);
     };
     for (const r of reserved) {
       if (r.end <= from) continue;
@@ -40,6 +39,16 @@ function restoreNotes(old: NoteEvent[], generated: NoteEvent[], ranges: Interval
     append(end);
   }
   return result.sort((a, b) => a.start - b.start);
+}
+
+function restoreNotes(old: NoteEvent[], generated: NoteEvent[], ranges: Interval[]) {
+  let ids: Set<string> | undefined;
+  return restoreEvents(old, generated, ranges, (event, kept) => {
+    ids ??= new Set(kept.map(n => n.id));
+    if (ids.has(event.id)) event.id = newId('note');
+    ids.add(event.id);
+    return event;
+  });
 }
 
 function musicalContent(project: ScoreProject) {
@@ -61,6 +70,7 @@ export function generateArrangementVersion(source: ScoreProject, options: Arrang
       throw new Error('原谱的调、速度、小节或声部已改变。请先解除段落锁定，再用新设置编配。');
     const bar = beatsPerBar(next);
     const ranges = locks.map(lock => ({ start: (lock.first - 1) * bar, end: lock.last * bar }));
+    next.chords = restoreEvents(current.chords, next.chords, ranges);
     for (const part of next.parts) {
       const old = current.parts.find(p => p.id === part.id)!;
       part.notes = restoreNotes(old.notes, part.notes, ranges);
@@ -71,7 +81,7 @@ export function generateArrangementVersion(source: ScoreProject, options: Arrang
   }
   const identical = !!current && musicalContent(next) === musicalContent(current) &&
     next.tempo === current.tempo && next.key === current.key && next.measures === current.measures &&
-    String(next.timeSignature) === String(current.timeSignature);
+    String(next.timeSignature) === String(current.timeSignature) && JSON.stringify(next.chords) === JSON.stringify(current.chords);
   meta.revision = identical ? previous?.revision ?? 1 : 1 + Math.max(current ? previous?.revision ?? 1 : 0, other?.arrangement?.revision ?? 0);
   if (identical && current) next.id = current.id;
   const errors = validateProject(next);

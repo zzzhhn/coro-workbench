@@ -14,10 +14,13 @@ describe('arrangement comparisons', () => {
     const accepted = { id: 'accepted', start: 3.75, duration: 8.5, midi: 67, velocity: 0.6, lyric: 'Hmm' };
     approved.parts[1].notes = [accepted];
     approved.parts[2].notes = [];
+    const chord = { start: 3.5, duration: 9, pitches: [55, 59, 62, 66, 69], symbol: 'Gmaj9' };
+    approved.chords = [chord];
     const before = structuredClone(approved);
     const { project, identical } = generateArrangementVersion(source, options, approved);
     expect(project.parts[1].notes.filter(n => n.start < 12.25 && n.start + n.duration > 3.75)).toEqual([accepted]);
     expect(project.parts[2].notes.filter(n => n.start < 12 && n.start + n.duration > 4)).toEqual([]);
+    expect(project.chords.filter(c => c.start < 12.5 && c.start + c.duration > 3.5)).toEqual([chord]);
     expect(approved).toEqual(before);
     expect(identical).toBe(false);
     expect(project.arrangement?.revision).toBe(2);
