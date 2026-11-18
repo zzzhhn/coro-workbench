@@ -249,3 +249,108 @@ separate recognition errors from notation errors. A local inference run, browser
 tests and model-free CI are different evidence and should be reported separately.
 All downloaded recordings, labels and per-note outputs remain in ignored `data/`:
 no explicit upstream dataset license was found, so do not redistribute them.
+
+### Cross-song arrangement auditions
+
+Use one project-independent corpus file under ignored `work/`. Both `dev` and
+`holdout` are arrays. Every entry needs a unique `id` and composition-level
+`workId`. Put all editions, covers and transpositions of a work in the same
+split. Development entries also carry `title`, `path` (relative to the
+corpus), zero-based imported `leadIndex`, a short `feature` to listen for,
+source provenance and preferably `sourceSha256`. Holdouts can be metadata
+only. Already studied reference arrangements and locked regression songs are
+outside the unseen set. Keep the corpus, source material, votes and renders local.
+
+With Node 22 and a running local Coro dev server:
+
+```sh
+node scripts/draft-auditions.mjs work/round/corpus.json output/round
+node scripts/plan-audition.mjs output/round/drafts/SONG_ID
+node scripts/plan-audition.mjs output/round/drafts/SONG_ID work/round/decision.json output/round/candidates/SONG_ID
+node scripts/render-auditions.mjs output/round/drafts/SONG_ID output/round/candidates/SONG_ID
+```
+
+The first command uses the workbench V2 rule arranger with one selected Solo,
+SATB, medium difficulty and no VP or transposition. It checks the Solo against
+the imported events and saves both scores in a Coro project bundle. The second
+command prints the source meter, tempo, phrase ranges, lyrics-onset counts,
+transposition-invariant repeated phrase candidates and internal Solo breaks
+with pitched accompaniment. An imported tempo represents the written timeline.
+These commands do not measure a recording's groove or infer emotion.
+
+For the controlled planning comparison, a planner supplies a JSON object with
+`model` (actual planner identity), `sourceSha256` and `decisions`. For each
+chosen break give its exact `first` and `last` bar, `energy` from 1 to 5,
+`texture`, `bass` and a musical `rationale`. Supported textures and bass
+patterns are declared in `ArrangementSectionPlan`. The runner validates
+boundaries and settings, calls the same realizer, and checks the complete Solo,
+chords, ensemble, tempo, program and mixer settings against the baseline.
+It saves the submitted decisions with the resulting score. Voice leading,
+breathing and expression near a new boundary may also change. Model decisions
+in the first experiment were supplied by the local development session. The
+workbench has no automatic hosted-model dependency.
+
+Render every draft and candidate to completion, then publish a fresh listening
+order. These examples create different persistent round identities:
+
+```sh
+node scripts/review-auditions.mjs work/round/corpus.json output/round/first.json
+node scripts/review-auditions.mjs work/round/corpus.json output/round/blind.json FIRST_ID SECOND_ID
+```
+
+Open `/review/arrangements.html?manifest=/output/round/blind.json` on the
+local Coro server. The single-version page evaluates the rule first draft. In
+a comparison the labels are shuffled per work and stored once. Rate each
+version for rehearsal readiness and editing time, then reveal the identities.
+Export the scores before clearing browser storage. The mix and each isolated
+voice have individually matched loudness. Relative part balance is heard in
+the mix. Rehearse with people to judge whether the lines work.
+
+Freeze a candidate, its planner and the singer settings after development
+listening. Only then obtain the four unseen scores. Preserve the first render
+and its independent rating before taking natural-language feedback. Save each
+of at most two revised proposals and ratings under new version directories.
+Report readiness, estimated editing time and where the assessment changed for
+each song. Keep the actual ensemble and any missing source evidence explicit.
+
+To stage the held-out run after choosing a method, write a local policy JSON
+with `mode` (`rule`, `internal-breaks` or `whole-song`), fixed `instructions`
+and the exact `model` identity for a model experiment. The freeze command
+reads identities only. Following a freeze, add the four admitted source paths,
+checksums and lead indices to the existing holdout records.
+
+```sh
+node scripts/audition-freeze.mjs work/round/corpus.json work/round/policy.json work/round/freeze.json
+node scripts/draft-auditions.mjs work/round/corpus.json output/sealed --frozen work/round/freeze.json
+```
+
+A rule-only freeze produces the first scores under `first/`. A model freeze
+produces `holdout-inputs/` and includes the policy in each planner brief. Run
+the frozen planner once per input and apply its response with
+`plan-audition.mjs` into `first/ID`. Whole-song responses may give an ordered
+`sections` array instead of `decisions`; the runner validates every section's
+label, kind, writing, rationale and complete contiguous coverage. The source,
+method and model identity must match. Revisions use the original input, a new
+response containing the singer's verbatim `feedback`, a fresh output directory
+and the previous candidate directory as the fourth argument. The receipt links
+to the previous score by hash and allows at most two sequential revisions.
+The freeze covers local planner/realizer code, declared instructions and work
+membership. An external model's weights and repeated service behavior need
+their own pinned model identifier or local checkpoint.
+
+A rule first draft can freeze a separate `calibrationMode` and
+`calibrationModel` in advance. Name the held-out revision directories
+`r1/ID` and `r2/ID`. Publish the independent listening page for each round
+with `review-auditions.mjs CORPUS NEW_MANIFEST --frozen FREEZE first` (or
+`r1`, `r2`). The command checks the source, freeze and calibration round.
+
+The first controlled cohort fixes Solo + SATB. Track the other roster cases
+independently: with SSATTB, two singers sharing a register need distinct
+musical jobs and staggered breathing; without a dedicated Solo, check who
+carries each phrase across hand-offs; with a VP, audition the bass and
+percussion together for coincident accents. Compare each written line with
+the individual singer's supplied comfortable range before using a generic
+range. A changing meter or tempo, swing, lyric stress and any harmony heard
+only in the recording require additional source evidence. Record gaps in
+coverage alongside each result. These are separate evaluation conditions;
+a five-part listening preference does not validate those cases.

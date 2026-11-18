@@ -759,10 +759,13 @@ export function encodeWav(buffer: AudioBuffer): Uint8Array {
   return bytes;
 }
 
-export async function renderProjectAudio(
+/** Render the complete score without allocating an additional encoded WAV.
+ * Consumers can stream or encode this buffer while preserving the same sampler.
+ */
+export async function renderProjectAudioBuffer(
   project: ScoreProject,
   partIds?: string[],
-): Promise<{ bytes: Uint8Array; buffer: AudioBuffer }> {
+): Promise<AudioBuffer> {
   const errors = validateProject(project);
   if (errors.length) throw new Error(errors[0]);
   const duration = (project.measures * quarterBeats(project) * 60) / project.tempo + 0.75;
@@ -799,6 +802,14 @@ export async function renderProjectAudio(
       );
   }
   const buffer = await context.startRendering();
+  return buffer;
+}
+
+export async function renderProjectAudio(
+  project: ScoreProject,
+  partIds?: string[],
+): Promise<{ bytes: Uint8Array; buffer: AudioBuffer }> {
+  const buffer = await renderProjectAudioBuffer(project, partIds);
   return { bytes: encodeWav(buffer), buffer };
 }
 
