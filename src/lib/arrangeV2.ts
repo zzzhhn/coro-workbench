@@ -12,6 +12,7 @@ import { inferChords, inspectArrangement, recommendLeadPart } from './arrange';
 import { planVocalBreaths } from './vocalBreathing';
 import { phraseTexture } from './phraseTexture';
 import { planBackgroundContinuity } from './backgroundContinuity';
+import { projectArrangementNotation } from './midiNotation';
 
 const EPS = 1e-6;
 const DYNAMICS = ['p', 'mp', 'mf', 'f', 'ff'] as const;
@@ -323,6 +324,13 @@ export function arrangeV2(source: ScoreProject, options: ArrangementOptions, sup
     ...plan.sections.map((section) => `${section.label} ${section.startBar}–${section.startBar + section.bars - 1} 小节：${section.texture} / bass ${section.bass} / 能量 ${section.energy}`),
   ];
   project.arrangement = { options: { ...options, preset: 'solo-satb', percussion: false, leadPartId: lead.id }, plan, report: { changes, warnings: [], ranges: [] } };
+  // Keep the selected attacks, syllables and voicings. Commit only the
+  // supported timing corrections to the newly generated backing, not Solo.
+  const writtenBacking = projectArrangementNotation(project).parts.slice(1);
+  if (writtenBacking.some((part, i) => part !== project.parts[i + 1])) {
+    project.parts = [solo, ...writtenBacking];
+    changes.splice(1, 0, '背景保留编配选出的音头和音节。有 MIDI 时钟证据的起止位置采用书面拍点。');
+  }
   const inspection = inspectArrangement(project);
   project.arrangement.report = { ...inspection, changes, warnings: inspection.warnings };
   const errors = validateProject(project);
