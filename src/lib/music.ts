@@ -1,5 +1,5 @@
 import * as ToneMidi from '@tonejs/midi';
-import { normalizeMidiNotation } from './midiNotation';
+import { normalizeMidiNotation, projectMeasuredSoloNotation } from './midiNotation';
 import { musicXmlKind, parseChord } from './chordSymbols';
 import type { Midi as MidiType } from '@tonejs/midi';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
@@ -697,6 +697,10 @@ export function toAbc(
   layout: AbcLayoutOptions = {},
 ): AbcRenderResult {
   assertValid(project);
+  const rawProject = project;
+  project = projectMeasuredSoloNotation(project);
+  const measuredSolo = project !== rawProject ? rawProject.parts.find((part) => part.id === 'solo') : undefined;
+  const measuredNotes = new Map(measuredSolo?.notes.map((note) => [note.id, note]));
   const { start: firstMeasure, end: lastMeasure } = layout.measureRange ?? {
     start: 1,
     end: project.measures,
@@ -879,12 +883,20 @@ export function toAbc(
             while (mappedBegin > 0 && /[ \t]/.test(abc[mappedBegin - 1])) mappedBegin--;
             abc += token;
             if (first) {
+              const measured = part.id === measuredSolo?.id ? measuredNotes.get(first.id) : undefined;
+              // For an inferred Solo rhythm, retain the measured slice for seeking
+              // and highlighting while the glyph coordinates use the written clock.
+              const timingScale = measured && measured !== first ? measured.duration / first.duration : undefined;
               const segmentInfo = {
                 partId: part.id,
                 noteIds: (pitches.length ? pitches : segment.notes).map((note) => note.id),
                 midiPitches: pitches.map((note) => note.midi!),
                 start: segment.start,
                 duration: segment.duration,
+                ...(measured && timingScale !== undefined ? { measured: {
+                  start: measured.start + (segment.start - first.start) * timingScale,
+                  duration: segment.duration * timingScale,
+                } } : {}),
               };
               for (let char = mappedBegin; char < abc.length; char++) {
                 noteMap[char] = { partId: part.id, noteId: first.id };
@@ -1127,6 +1139,7 @@ function xmlNote(
 
 export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
   assertValid(project);
+  project = projectMeasuredSoloNotation(project);
   const selected = project.parts.filter((part) => !partIds || partIds.includes(part.id));
   if (!selected.length) throw new Error('请至少选择一个声部。');
   const plan = createEngravingPlan(project, partIds);

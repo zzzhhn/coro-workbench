@@ -271,7 +271,15 @@ export interface AbcRenderResult {
   warnings?: string[];
   noteSegments?: Record<
     number,
-    { partId: string; noteIds: string[]; start: number; duration: number; midiPitches?: number[] }
+    {
+      partId: string;
+      noteIds: string[];
+      start: number;
+      duration: number;
+      midiPitches?: number[];
+      /** The original playback span when this glyph uses an inferred rhythm. */
+      measured?: { start: number; duration: number };
+    }
   >;
 }
 
