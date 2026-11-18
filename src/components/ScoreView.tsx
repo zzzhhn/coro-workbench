@@ -178,7 +178,8 @@ export default function ScoreView({
           const mapped = abcResult.noteMap[element.startChar];
           const extend = Boolean(mouseEvent?.shiftKey ?? shiftDown.current);
           const span = Boolean(mouseEvent?.altKey ?? altDown.current);
-          if (mapped) onSelectRef.current(mapped, abcResult.noteSegments?.[element.startChar]?.start, extend, span);
+          const segment = abcResult.noteSegments?.[element.startChar];
+          if (mapped) onSelectRef.current(mapped, segment?.measured?.start ?? segment?.start, extend, span);
         },
         ariaLabel: `${project.title}，可交互五线谱。点击音符编辑，键盘上下键改变音高。`,
       });
@@ -220,6 +221,10 @@ export default function ScoreView({
           if (segment) {
             item.svgEl.dataset.noteIds = JSON.stringify(segment.noteIds);
             item.svgEl.dataset.exactSegment = 'true';
+            if (segment.measured) {
+              item.svgEl.dataset.playbackStart = String(segment.measured.start);
+              item.svgEl.dataset.playbackEnd = String(segment.measured.start + segment.measured.duration);
+            }
           }
           if (found.note.confidence !== undefined && found.note.confidence < 0.6)
             item.svgEl.classList.add('low-confidence');
@@ -489,8 +494,9 @@ export default function ScoreView({
   useEffect(() => {
     const nodes = container.current?.querySelectorAll<SVGElement>('[data-note-id]');
     nodes?.forEach((node) => {
-      const active =
-        playing && beat >= Number(node.dataset.start) - 0.03 && beat < Number(node.dataset.end) - 0.025;
+      const start = Number(node.dataset.playbackStart ?? node.dataset.start);
+      const end = Number(node.dataset.playbackEnd ?? node.dataset.end);
+      const active = playing && beat >= start - 0.03 && beat < end - 0.025;
       node.classList.toggle('sounding-note', active);
     });
     const scroll = container.current?.closest<HTMLElement>('.score-scroll');
