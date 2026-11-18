@@ -1,4 +1,4 @@
-import type { NoteEvent, ScoreProject } from './types';
+import type { NoteEvent, ScorePart, ScoreProject } from './types';
 
 const EPSILON = 1e-6;
 // Written values Coro can engrave without inventing tuplets: 32nds plus eighth-note triplets.
@@ -183,14 +183,18 @@ function measuredPhase(notes: NoteEvent[]): number | undefined {
 export function projectMeasuredSoloNotation(project: ScoreProject): ScoreProject {
   if (project.source.kind !== 'midi' || !project.arrangement) return project;
   const solo = project.parts.find((part) => part.id === 'solo' && part.role === 'lead');
-  if (!solo || solo.notes.length < 8 || solo.staves?.length || solo.pedals?.length || solo.pedalSustain?.length ||
-    solo.notes.some((note) => note.midi === null || note.voice || note.staff || note.arpeggio)) return project;
+  if (!solo) return project;
+  const bar = project.timeSignature[0] * 4 / project.timeSignature[1];
+  const written = projectMeasuredLeadPart(solo, bar, bar * project.measures);
+  return written === solo ? project : { ...project, parts: project.parts.map(p => p === solo ? written : p) };
+}
 
+export function projectMeasuredLeadPart(solo: ScorePart, barLength: number, scoreEnd: number): ScorePart {
+  if (solo.notes.length < 8 || solo.staves?.length || solo.pedals?.length || solo.pedalSustain?.length ||
+    solo.notes.some((note) => note.midi === null || note.voice || note.staff || note.arpeggio)) return solo;
   const notes = [...solo.notes].sort((a, b) => a.start - b.start);
   const phase = measuredPhase(notes);
-  if (phase === undefined) return project;
-  const barLength = (project.timeSignature[0] * 4) / project.timeSignature[1];
-  const scoreEnd = barLength * project.measures;
+  if (phase === undefined) return solo;
   const gridAttacks = notes.map(({ start }) => {
     const shifted = start - phase;
     const grid = nearestGrid(shifted);
@@ -202,8 +206,9 @@ export function projectMeasuredSoloNotation(project: ScoreProject): ScoreProject
   if (notes.some((note, index) => index > 0 && (
     attacks[index] - attacks[index - 1] <= EPSILON ||
     notes[index - 1].start + notes[index - 1].duration - note.start > MAX_GATE_OVERLAP + EPSILON
-  ))) return project;
+  ))) return solo;
 
+  const straight = (beat: number) => Math.abs(beat * 8 - Math.round(beat * 8)) < EPSILON;
   const changed = new Map<NoteEvent, NoteEvent>();
   notes.forEach((note, index) => {
     const start = attacks[index];
@@ -212,11 +217,32 @@ export function projectMeasuredSoloNotation(project: ScoreProject): ScoreProject
     const previous = notes[index - 1];
     const clippedReattack = previous?.midi === note.midi && next - start >= 1 / 4 - EPSILON &&
       Math.abs(previous.start + previous.duration - note.start - note.duration) <= MAX_ATTACK_JITTER;
-    const overlaps = end > next + EPSILON && Math.abs(phase) > EPSILON;
+    const measuredClock = Math.abs(phase) > EPSILON;
+    const overlaps = end > next + EPSILON && measuredClock;
+    // A finger gate may happen to equal a tuplet or double-dotted value. On a
+    // measured straight phrase, nearby attacks and the following silence also
+    // need to support that spelling. A real triplet entrance disambiguates it.
+    const binaryPhrase = straight(start) && straight(next) && measuredClock &&
+      attacks.slice(Math.max(0, index - 2), index + 4).every(straight);
+    const isolatedTripletGate = binaryPhrase && !straight(note.duration) &&
+      Math.abs(note.duration * 12 - Math.round(note.duration * 12)) < EPSILON;
+    // An isolated key release can also land exactly on a 64th in an otherwise
+    // binary phrase. Require a matching nearby gate and inter-onset interval
+    // before giving that finer subdivision its own note or rest.
+    const nearbyStart = Math.max(0, index - 3);
+    const fineGate = binaryPhrase && !straight(note.duration) && writtenGate(note.duration);
+    const repeatedFineGate = fineGate &&
+      notes.slice(nearbyStart, index + 4).some((other, offset) => {
+        const j = nearbyStart + offset;
+        return j !== index && Math.abs(other.duration - note.duration) < EPSILON &&
+          Math.abs(attacks[j + 1] - attacks[j] - (next - start)) < EPSILON;
+      });
+    const isolatedFineGate = fineGate && !repeatedFineGate;
+    const tinyRelease = binaryPhrase && !repeatedFineGate && end < next && next - end <= SHORT_GATE_GAP + EPSILON;
     let duration = start === note.start ? note.duration : Math.min(note.duration, scoreEnd - start);
     if (gridAttacks[index] !== undefined && (index + 1 === notes.length || gridAttacks[index + 1] !== undefined) &&
-      !note.articulation && (overlaps || !writtenGate(duration)) && (duration >= SHORT_GATE_GAP || clippedReattack)) {
-      if (end >= next - SHORT_GATE_GAP) {
+      !note.articulation && (overlaps || tinyRelease || isolatedTripletGate || isolatedFineGate || !writtenGate(duration)) && (duration >= SHORT_GATE_GAP || clippedReattack)) {
+      if (end >= next - SHORT_GATE_GAP - EPSILON) {
         // Clip measured legato overlaps and close residual note-off gaps.
         duration = next - start;
       } else {
@@ -235,11 +261,79 @@ export function projectMeasuredSoloNotation(project: ScoreProject): ScoreProject
     if (Math.abs(start - note.start) > EPSILON || Math.abs(duration - note.duration) > EPSILON)
       changed.set(note, { ...note, start, duration });
   });
-  if (!changed.size) return project;
-  return {
-    ...project,
-    parts: project.parts.map((part) => part === solo
-      ? { ...solo, notes: solo.notes.map((note) => changed.get(note) ?? note) }
-      : part),
-  };
+  return changed.size ? { ...solo, notes: solo.notes.map(n => changed.get(n) ?? n) } : solo;
+}
+
+/**
+ * Older vocal arrangements borrowed both attacks and note-offs from the performed lead.
+ * Recover those same boundaries on the written clock, including notes answering a beat later.
+ * An isolated off-grid backing note without a matching source anchor is left alone.
+ */
+export function projectArrangementNotation(project: ScoreProject): ScoreProject {
+  const written = projectMeasuredSoloNotation(project);
+  if (written === project) return project;
+  const rawLead = project.parts.find(p => p.id === 'solo')!;
+  const writtenLead = written.parts.find(p => p.id === 'solo')!;
+  const bar = project.timeSignature[0] * 4 / project.timeSignature[1];
+  const limit = bar * project.measures;
+  const anchors = new Map<number, Set<number>>();
+  const tick = (beat: number) => Math.round(beat * 1e6);
+  const onGrid = (beat: number) => [16, 12].some(grid => Math.abs(beat * grid - Math.round(beat * grid)) < EPSILON);
+  function remember(measured: number, notated: number) {
+    if (!onGrid(notated) || Math.abs(measured - notated) > MAX_GATE_OVERLAP) return;
+    const key = tick(measured);
+    const values = anchors.get(key) ?? new Set<number>();
+    values.add(tick(notated));
+    anchors.set(key, values);
+  }
+  rawLead.notes.forEach((raw, i) => {
+    const note = writtenLead.notes[i];
+    remember(raw.start, note.start);
+    remember(raw.start + raw.duration, note.start + note.duration);
+  });
+  function writtenBoundary(beat: number) {
+    if (onGrid(beat)) return beat;
+    // A direct source boundary wins; only unanimous equidistant anchors may carry a shifted response.
+    for (let steps = 0; steps <= Math.ceil(bar * 4); steps++) {
+      const candidates = new Set<number>();
+      for (const delta of steps ? [-steps / 4, steps / 4] : [0]) {
+        for (const mapped of anchors.get(tick(beat - delta)) ?? []) candidates.add(mapped + tick(delta));
+      }
+      if (candidates.size > 1) return beat;
+      if (candidates.size === 1) {
+        const approximate = [...candidates][0] / 1e6;
+        const exact = Math.round(approximate * 48) / 48;
+        return exact >= 0 && exact <= limit && Math.abs(exact - approximate) < EPSILON ? exact : beat;
+      }
+    }
+    return beat;
+  }
+  const locks = project.arrangement?.locks ?? [];
+  const touchesLock = (start: number, end: number) =>
+    locks.some(lock => start < lock.last * bar && end > (lock.first - 1) * bar);
+  const parts = written.parts.map(part => {
+    if (!['harmony', 'bass'].includes(part.role) || part.staves?.length) return part;
+    let changed = false;
+    const notes = part.notes.map(note => {
+      if (note.origin !== 'arranged' || note.sourceRef || note.arpeggio || note.midi === null ||
+          touchesLock(note.start, note.start + note.duration)) return note;
+      const start = writtenBoundary(note.start);
+      const end = writtenBoundary(note.start + note.duration);
+      if (end - start <= EPSILON || touchesLock(start, end) ||
+          (Math.abs(start - note.start) < EPSILON && Math.abs(end - start - note.duration) < EPSILON)) return note;
+      changed = true;
+      return { ...note, start, duration: end - start };
+    });
+    if (!changed) return part;
+    // Keep distinct attacks and intended overlaps, including a manually edited neighbour.
+    const order = part.notes.map((_, i) => i).sort((a, b) => part.notes[a].start - part.notes[b].start);
+    for (let i = 1; i < order.length; i++) {
+      const a = order[i - 1], b = order[i];
+      if (part.notes[b].start > part.notes[a].start + EPSILON && notes[b].start <= notes[a].start + EPSILON) return part;
+      if (part.notes[a].start + part.notes[a].duration <= part.notes[b].start + EPSILON &&
+          notes[a].start + notes[a].duration > notes[b].start + EPSILON) return part;
+    }
+    return { ...part, notes };
+  });
+  return { ...written, parts };
 }
