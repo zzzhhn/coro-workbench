@@ -14,10 +14,19 @@ describe('blind review navigation', () => {
     const sections = reviewSections([a, b]);
     expect(sections).toEqual(reviewSections([b, a]));
     expect(sections.map(s => [s.label, s.start, s.end])).toEqual([
-      ['全曲', 1, 17], ['1–8 小节', 1, 8], ['9–16 小节', 9, 16], ['17–17 小节', 17, 17],
+      ['全曲', 1, 17], ['1–8 小节', 1, 8], ['9–16 小节', 9, 16], ['17 小节', 17, 17],
     ]);
     expect(JSON.stringify(sections)).not.toContain('source-specific');
     expect(JSON.stringify(sections)).not.toContain('different structure');
+  });
+
+  it('bounds a shorter version’s anonymous ranges to bars it contains', () => {
+    const a = project(17, 'Original');
+    const b = project(11, 'Trimmed');
+    expect(reviewSections([a, b], b).map(s => [s.label, s.start, s.end])).toEqual([
+      ['全曲', 1, 11], ['1–8 小节', 1, 8], ['9–11 小节', 9, 11],
+    ]);
+    expect(reviewSections([a, b], a).at(-1)?.start).toBe(17);
   });
 
   it('keeps first-draft sections without duplicate selector values', () => {
