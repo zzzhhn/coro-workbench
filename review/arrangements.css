@@ -39,12 +39,17 @@ main { min-width: 0; padding: 27px; }
 .part-switch { margin-left: auto; }
 audio { width: 100%; height: 40px; margin-top: 13px; }
 .audio-error { color: #a3453d; font-size: 13px; margin-top: 7px; }
-.score-toolbar { padding: 15px 20px 0; justify-content: space-between; font-size: 13px; }
+.score-toolbar { padding: 15px 20px; font-size: 13px; }
 .score-toolbar select { max-width: 190px; }
-.score-scroll { padding: 24px 16px 10px; overflow-x: auto; min-height: 270px; }
+#follow { margin-left: auto; }
+.score-scroll { padding: 14px 16px; overflow: auto; overscroll-behavior: contain; height: clamp(350px, 57dvh, 720px); border-block: 1px solid #e4e7ea; overflow-anchor: none; }
+.score-scroll:focus-visible { outline-offset: -3px; }
 #score { min-width: 610px; }
 #score svg { display: block; width: 100%; height: auto; }
+.review-playhead { stroke: #ae5636; stroke-width: 2px; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }
 .score-footer { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 18px; gap: 10px; font-size: 13px; }
+#range, #play-position { white-space: nowrap; font-variant-numeric: tabular-nums; }
+#play-position { color: #87442d; }
 .download { text-decoration: none; font-size: 13px; }
 .rating { padding: 20px; }
 .rating h2 { margin-bottom: 6px; }
@@ -70,7 +75,7 @@ input[type='number'] { width: 100%; }
 .fatal { max-width: 700px; margin: 60px auto; padding: 25px; line-height: 1.8; }
 .fatal button { margin-top: 15px; }
 @media (max-width: 1150px) { .workspace { grid-template-columns: minmax(0, 1fr); } .rating { max-width: none; } .rating-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; } }
-@media (max-width: 700px) { header { padding: 15px; } .brand { gap: 10px; } .brand strong { font-size: 25px; } h1 { font-size: 16px; } .shell { display: block; } nav { display: flex; padding: 10px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #dfe2e6; } .song { min-width: 150px; width: auto; margin: 0 4px 0 0; } main { padding: 18px 12px; } .song-heading h2 { font-size: 22px; } .listening-top { padding: 15px 12px; } .part-switch { margin-left: 0; } .score-toolbar { padding: 15px 12px 0; } .score-footer { padding: 10px 12px 15px; flex-wrap: wrap; } .rating { padding: 17px; } }
+@media (max-width: 700px) { header { padding: 15px; } .brand { gap: 10px; } .brand strong { font-size: 25px; } h1 { font-size: 16px; } .shell { display: block; } nav { display: flex; padding: 10px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #dfe2e6; } .song { min-width: 150px; width: auto; margin: 0 4px 0 0; } main { padding: 18px 12px; } .song-heading h2 { font-size: 22px; } .listening-top { padding: 15px 12px; } .part-switch { margin-left: 0; } .score-toolbar { padding: 12px; } .score-footer { padding: 10px 12px 15px; flex-wrap: wrap; } .rating { padding: 17px; } }
 
 button[aria-pressed='true']:hover:not(:disabled) {
   background: #30343b;
