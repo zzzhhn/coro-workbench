@@ -1,5 +1,5 @@
 import * as ToneMidi from '@tonejs/midi';
-import { normalizeMidiNotation, projectMeasuredSoloNotation } from './midiNotation';
+import { normalizeMidiNotation, projectArrangementNotation } from './midiNotation';
 import { musicXmlKind, parseChord } from './chordSymbols';
 import type { Midi as MidiType } from '@tonejs/midi';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
@@ -55,6 +55,8 @@ export const newId = (prefix = 'id'): string =>
   `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
 export const beatsPerBar = (project: Pick<ScoreProject, 'timeSignature'>): number =>
   (project.timeSignature[0] * 4) / project.timeSignature[1];
+const notationBeatUnit = ([beats, unit]: ScoreProject['timeSignature']): number =>
+  unit === 8 && beats >= 6 && beats % 3 === 0 ? 1.5 : 4 / unit;
 export const pitchName = (midi: number): string =>
   `${SHARP_NAMES[((Math.round(midi) % 12) + 12) % 12]}${Math.floor(Math.round(midi) / 12) - 1}`;
 const cleanText = (text: string): string => text.replace(/[\r\n\u0000-\u001f]/g, ' ').trim();
@@ -539,7 +541,8 @@ interface Segment {
   tiedFrom: boolean;
   tiedTo: boolean;
   notatedDuration?: number;
-  tupletPrefix?: string;
+  tripletSize?: number;
+  tripletEnd?: boolean;
 }
 
 function measureSegments(lane: NoteGroup[], start: number, duration: number): Segment[] {
@@ -564,6 +567,16 @@ function measureSegments(lane: NoteGroup[], start: number, duration: number): Se
   if (cursor < end - EPSILON)
     result.push({ start: cursor, duration: end - cursor, notes: [], tiedFrom: false, tiedTo: false });
   return result;
+}
+
+function isMeasureRest(segment: Segment, start: number, duration: number): boolean {
+  return !segment.notes.some((note) => note.midi !== null)
+    && Math.abs(segment.start - start) < EPSILON
+    && Math.abs(segment.duration - duration) < EPSILON;
+}
+
+function nextBeat(start: number, barStart: number, beatUnit: number): number {
+  return barStart + (Math.floor((start - barStart + EPSILON) / beatUnit) + 1) * beatUnit;
 }
 
 function gcd(a: number, b: number): number {
@@ -698,9 +711,12 @@ export function toAbc(
 ): AbcRenderResult {
   assertValid(project);
   const rawProject = project;
-  project = projectMeasuredSoloNotation(project);
-  const measuredSolo = project !== rawProject ? rawProject.parts.find((part) => part.id === 'solo') : undefined;
-  const measuredNotes = new Map(measuredSolo?.notes.map((note) => [note.id, note]));
+  project = projectArrangementNotation(project);
+  const measuredParts = new Map<string, Map<string, NoteEvent>>();
+  project.parts.forEach((part, i) => {
+    const original = rawProject.parts[i];
+    if (part !== original) measuredParts.set(part.id, new Map(original.notes.map(note => [note.id, note])));
+  });
   const { start: firstMeasure, end: lastMeasure } = layout.measureRange ?? {
     start: 1,
     end: project.measures,
@@ -787,8 +803,7 @@ export function toAbc(
   for (const [staff, id] of pedalVoiceIds) abc += `V:${id} clef=${staff.clef === 'treble8' ? 'treble-8 transpose=-12' : staff.clef}\n`;
   abc += `K:${normalizeKey(project.key)}\n`;
   if (firstMeasure > 1 || layout.measureNumberOffset) abc += `%%setbarnb ${printedFirstMeasure}\n`;
-  const [meterBeats, meterUnit] = project.timeSignature;
-  const beamUnit = meterUnit === 8 && meterBeats >= 6 && meterBeats % 3 === 0 ? 1.5 : 4 / meterUnit;
+  const beamUnit = notationBeatUnit(project.timeSignature);
   const hasPercussion = parts.some((part) => part.role === 'percussion' || part.clef === 'percussion');
   const systemMeasures: number[] = [];
   // Forced system/page starts come from the project layout; between them, automatic
@@ -821,8 +836,19 @@ export function toAbc(
           const start = bar * barLength;
           const accidentals = new Map<string, number>();
           let previousBeamGroup = -1;
-          for (const segment of groupAbcTuplets(measureSegments(lane, start, barLength)
-            .flatMap(splitAbcSegment))) {
+          const otherVoiceSounds = lanes.some((other, index) => index !== laneIndex && other.lane.some(group =>
+            group.start < start + barLength - EPSILON && group.start + group.duration > start + EPSILON));
+          const isInvisibleSpacer = (segment: Segment) => !segment.notes.length && (
+            laneIndex > 0 || (isMeasureRest(segment, start, barLength) && otherVoiceSounds)
+            // A rest on a grand staff is implied while the other lane on the staff sounds.
+            || ((part.staves?.length ?? 0) > 1
+              && lanes.some((other, index) => index !== laneIndex && other.lane.some(group =>
+                group.start < segment.start + segment.duration - EPSILON
+                && group.start + group.duration > segment.start + EPSILON))));
+          const segments = measureSegments(lane, start, barLength)
+            .flatMap((segment) => splitNotationSegment(segment, { barStart: start, barLength, beatUnit: beamUnit }));
+          for (const segment of groupNotationTuplets(segments, isInvisibleSpacer)
+            .flatMap((segment) => splitAbcSingletonTuplet(segment, isInvisibleSpacer(segment)))) {
             const beamGroup = Math.floor((segment.start - start + EPSILON) / beamUnit);
             // Syncopated runs may never end exactly on a beat. Still separate
             // their beams when the next attack belongs to a new metrical beat.
@@ -841,19 +867,8 @@ export function toAbc(
             // abcjs has no notehead for invisible spacer rests. A tuplet on
             // that spacer crashes TripletElem; its exact fraction needs no
             // visible tuplet bracket and already preserves the voice's clock.
-            const otherVoiceSounds = lanes.some((other, index) => index !== laneIndex && other.lane.some(group =>
-              group.start < start + barLength - EPSILON && group.start + group.duration > start + EPSILON));
-            const emptyVoiceBar = Math.abs(segment.start - start) < EPSILON
-              && Math.abs(segment.duration - barLength) < EPSILON;
-            // On a keyboard grand staff, a rest in the upper lane while the
-            // other lane on the same staff is sounding is implied; drawing it
-            // stacks rest glyphs above the staff. Same duration, same audio.
-            const grandStaffRestCovered = !first && (part.staves?.length ?? 0) > 1
-              && lanes.some((other, index) => index !== laneIndex && other.lane.some(group =>
-                group.start < segment.start + segment.duration - EPSILON
-                && group.start + group.duration > segment.start + EPSILON));
-            const invisibleSpacer = !first && (laneIndex > 0 || (emptyVoiceBar && otherVoiceSounds) || grandStaffRestCovered);
-            if (!invisibleSpacer) prefix += segment.tupletPrefix ?? '';
+            const invisibleSpacer = isInvisibleSpacer(segment);
+            if (!invisibleSpacer && segment.tripletSize) prefix += `(3:2:${segment.tripletSize}`;
             const duration = abcDuration(invisibleSpacer ? segment.duration : segment.notatedDuration ?? segment.duration);
             const pitches = segment.notes.filter((note) => note.midi !== null);
             const pitchedTokens = pitches.map((note) =>
@@ -883,8 +898,8 @@ export function toAbc(
             while (mappedBegin > 0 && /[ \t]/.test(abc[mappedBegin - 1])) mappedBegin--;
             abc += token;
             if (first) {
-              const measured = part.id === measuredSolo?.id ? measuredNotes.get(first.id) : undefined;
-              // For an inferred Solo rhythm, retain the measured slice for seeking
+              const measured = measuredParts.get(part.id)?.get(first.id);
+              // For a projected rhythm, retain the measured slice for seeking
               // and highlighting while the glyph coordinates use the written clock.
               const timingScale = measured && measured !== first ? measured.duration / first.duration : undefined;
               const segmentInfo = {
@@ -945,7 +960,7 @@ export function toAbc(
           for (let i = 0; i < times.length - 1; i++) {
             const labels = here.filter((mark) => Math.abs(mark.at - times[i]) < EPSILON);
             abc += labels.map((mark) => `"_${mark.label}"`).join('');
-            for (const spacer of splitAbcSegment({ start: times[i], duration: times[i + 1] - times[i], notes: [], tiedFrom: false, tiedTo: false }))
+            for (const spacer of splitNotationSegment({ start: times[i], duration: times[i + 1] - times[i], notes: [], tiedFrom: false, tiedTo: false }))
               abc += `x${abcDuration(spacer.duration)} `;
           }
           abc += bar === project.measures - 1 ? '|] ' : '| ';
@@ -963,7 +978,7 @@ export function toAbc(
           for (let i = 0; i < times.length - 1; i++) {
             const labels = changes.filter((chord) => Math.abs(chord.start - times[i]) < EPSILON);
             abc += labels.map((chord) => `"${abcText(chord.symbol)}"`).join('');
-            for (const spacer of splitAbcSegment({ start: times[i], duration: times[i + 1] - times[i], notes: [], tiedFrom: false, tiedTo: false }))
+            for (const spacer of splitNotationSegment({ start: times[i], duration: times[i + 1] - times[i], notes: [], tiedFrom: false, tiedTo: false }))
               abc += `x${abcDuration(spacer.duration)} `;
           }
           abc += bar === project.measures - 1 ? '|] ' : '| ';
@@ -991,96 +1006,172 @@ export function toAbc(
   };
 }
 
-function notationDuration(duration: number): {
+interface NotationDuration {
   type: string;
   dots: number;
   actual?: number;
   normal?: number;
-} {
-  const bases: Array<[number, string]> = [
-    [8, 'breve'],
-    [4, 'whole'],
-    [2, 'half'],
-    [1, 'quarter'],
-    [0.5, 'eighth'],
-    [0.25, '16th'],
-    [0.125, '32nd'],
-    [0.0625, '64th'],
-  ];
-  for (const [beats, type] of bases) {
-    for (let dots = 0; dots <= 2; dots++)
-      if (Math.abs(duration - beats * (2 - 1 / 2 ** dots)) < 0.001) return { type, dots };
-    if (Math.abs(duration - (beats * 2) / 3) < 0.001) return { type, dots: 0, actual: 3, normal: 2 };
-  }
-  const [writtenBeats, type] = bases.reduce((best, item) =>
+}
+
+const notationBases: Array<[number, string]> = [
+  [8, 'breve'], [4, 'whole'], [2, 'half'], [1, 'quarter'], [0.5, 'eighth'],
+  [0.25, '16th'], [0.125, '32nd'], [0.0625, '64th'],
+];
+const plainDurations = notationBases.flatMap(([beats, type]) => [0, 1, 2].map((dots) => ({
+  ticks: Math.round(beats * (2 - 1 / 2 ** dots) * DIVISIONS), type, dots,
+}))).sort((a, b) => b.ticks - a.ticks);
+const notationDurations: Array<NotationDuration & { ticks: number }> = [
+  ...plainDurations,
+  ...notationBases.map(([beats, type]) => ({
+    ticks: Math.round((beats * 2 / 3) * DIVISIONS), type, dots: 0, actual: 3, normal: 2,
+  })),
+].sort((a, b) => b.ticks - a.ticks);
+const durationByTicks = new Map(notationDurations.map((value) => [value.ticks, value]));
+
+function notationDuration(duration: number): NotationDuration {
+  const actualTicks = Math.max(1, Math.round(duration * DIVISIONS));
+  const value = durationByTicks.get(actualTicks);
+  if (value) return value;
+  const [writtenBeats, type] = notationBases.reduce((best, item) =>
     Math.abs(item[0] - duration) < Math.abs(best[0] - duration) ? item : best,
   );
   const writtenTicks = Math.round(writtenBeats * DIVISIONS);
-  const actualTicks = Math.max(1, Math.round(duration * DIVISIONS));
   const divisor = gcd(writtenTicks, actualTicks);
   return { type, dots: 0, actual: writtenTicks / divisor, normal: actualTicks / divisor };
 }
 
+// A common tick unit for plain/dotted and triplet values. Prefer a wholly
+// straight spelling when available, then fewer glyphs for the same tuplet count.
+const spellingUnit = notationDurations.reduce((unit, value) => gcd(unit, value.ticks), DIVISIONS);
+interface DurationSpelling { ticks: number; glyphs: number; tuplets: number; shortest: number }
+const durationSpellings: Array<DurationSpelling | undefined> = [{
+  ticks: 0, glyphs: 0, tuplets: 0, shortest: Infinity,
+}];
+
 function decomposeDuration(duration: number): number[] {
-  const simple = [8, 6, 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.375, 0.25, 0.1875, 0.125, 0.0625];
-  if (
-    simple.some((value) => Math.abs(value - duration) < EPSILON) ||
-    [8, 4, 2, 1, 0.5, 0.25, 0.125].some((value) => Math.abs((value * 2) / 3 - duration) < 0.001)
-  )
-    return [duration];
+  const ticks = Math.max(1, Math.round(duration * DIVISIONS));
+  if (durationByTicks.has(ticks)) return [duration];
   const result: number[] = [];
-  let remaining = roundBeat(duration);
-  while (remaining > 0.0001 && result.length < 128) {
-    const next = simple.find((value) => value <= remaining + EPSILON);
-    if (!next) {
-      result.push(remaining);
-      break;
+  if (ticks % spellingUnit === 0) {
+    for (let index = durationSpellings.length; index <= ticks / spellingUnit; index++) {
+      let best: DurationSpelling | undefined;
+      for (const value of notationDurations) {
+        const rest = durationSpellings[index - value.ticks / spellingUnit];
+        if (!rest) continue;
+        const tuplets = rest.tuplets + Number(value.actual !== undefined);
+        const glyphs = rest.glyphs + 1;
+        const shortest = Math.min(rest.shortest, value.ticks);
+        if (!best || tuplets < best.tuplets || (tuplets === best.tuplets && (
+          glyphs < best.glyphs || (glyphs === best.glyphs && tuplets > 0 && shortest > best.shortest)
+        ))) best = { ticks: value.ticks, glyphs, tuplets, shortest };
+      }
+      durationSpellings.push(best);
     }
-    result.push(next);
-    remaining = roundBeat(remaining - next);
+    if (durationSpellings[ticks / spellingUnit]) {
+      let remaining = ticks;
+      while (remaining > 0) {
+        const next = durationSpellings[remaining / spellingUnit]!.ticks;
+        result.push(next / DIVISIONS);
+        remaining -= next;
+      }
+      return result;
+    }
+  }
+  // Freely timed imports can fall outside either grid. Keep their residual
+  // duration explicit rather than rounding away a fragment or an onset.
+  let remaining = ticks;
+  while (remaining > 0) {
+    const next = plainDurations.find((value) => value.ticks <= remaining)?.ticks ?? remaining;
+    result.push(next / DIVISIONS);
+    remaining -= next;
   }
   return result;
 }
 
-function splitAbcSegment(segment: Segment): Segment[] {
+interface MeasureRhythm {
+  barStart: number;
+  barLength: number;
+  beatUnit: number;
+}
+
+function splitNotationSegment(segment: Segment, meter?: MeasureRhythm): Segment[] {
   let start = segment.start;
-  const durations = decomposeDuration(segment.duration);
+  let durations: number[];
+  if (meter && !segment.notes.some((note) => note.midi !== null)) {
+    const { barStart, barLength, beatUnit } = meter;
+    if (isMeasureRest(segment, barStart, barLength)) return [segment];
+    const beat = nextBeat(start, barStart, beatUnit);
+    const end = start + segment.duration;
+    const boundaries = [start];
+    const position = (start - barStart) / beatUnit;
+    if (Math.abs(position - Math.round(position)) > EPSILON && beat < end - EPSILON) boundaries.push(beat);
+    const midpoint = barStart + barLength / 2;
+    if (Math.abs(barLength / beatUnit - 4) < EPSILON && midpoint > boundaries[boundaries.length - 1] + EPSILON
+      && midpoint < end - EPSILON) boundaries.push(midpoint);
+    boundaries.push(end);
+    durations = boundaries.slice(1).flatMap((boundary, i) => decomposeDuration(boundary - boundaries[i]));
+  } else {
+    durations = decomposeDuration(segment.duration);
+    // When a compound spelling can finish a triplet on the beat, put its
+    // triplet-sized piece before the ordinary value.
+    if (meter && durations.length === 2) {
+      const second = notationDuration(durations[1]);
+      const beat = nextBeat(start, meter.barStart, meter.beatUnit);
+      if (second.actual === 3 && second.normal === 2 && Math.abs(start + durations[1] - beat) < EPSILON)
+        durations.reverse();
+    }
+  }
   return durations.map((duration, index) => {
     const value = notationDuration(duration);
-    let tupletPrefix: string | undefined;
-    let notatedDuration: number | undefined;
-    if (value.actual && value.normal && value.actual <= 9 && value.normal <= 9) {
-      tupletPrefix = `(${value.actual}:${value.normal}:1`;
-      notatedDuration = (duration * value.actual) / value.normal;
-    }
+    const triplet = value.actual === 3 && value.normal === 2;
     const piece = {
       ...segment,
       start,
       duration,
       tiedFrom: segment.tiedFrom || index > 0,
       tiedTo: segment.tiedTo || index < durations.length - 1,
-      tupletPrefix,
-      notatedDuration,
+      tripletSize: triplet ? 1 : undefined,
+      notatedDuration: triplet ? duration * 1.5 : undefined,
     };
     start += duration;
     return piece;
   });
 }
 
-function groupAbcTuplets(segments: Segment[]): Segment[] {
-  for (let index = 0; index + 2 < segments.length; index++) {
-    const group = segments.slice(index, index + 3);
-    if (group.every((segment) => segment.tupletPrefix === '(3:2:1'
-        && segment.notes.some((note) => note.midi !== null)
-        && Math.abs(segment.duration - group[0].duration) < EPSILON)
-      && group.slice(1).every((segment, i) =>
-        Math.abs(segment.start - group[i].start - group[i].duration) < EPSILON)) {
-      group[0].tupletPrefix = '(3:2:3';
-      group[1].tupletPrefix = group[2].tupletPrefix = undefined;
-      index += 2;
-    }
+function groupNotationTuplets(segments: Segment[], isInvisibleSpacer: (segment: Segment) => boolean): Segment[] {
+  for (let index = 0; index + 1 < segments.length; index++) {
+    if (segments[index].tripletSize !== 1) continue;
+    const consecutive = segments.slice(index, index + 3);
+    const canGroup = (group: Segment[]) => group.every((segment, i) =>
+      segment.tripletSize === 1 && !isInvisibleSpacer(segment)
+      && (i === 0 || Math.abs(segment.start - group[i - 1].start - group[i - 1].duration) < EPSILON))
+      && group.some((segment) => segment.notes.some((note) => note.midi !== null));
+    const [first, second, third] = consecutive;
+    const threeEqual = third && consecutive.every((segment) => Math.abs(segment.duration - first.duration) < EPSILON);
+    const longAndShort = Math.abs(Math.max(first.duration, second.duration) - 2 * Math.min(first.duration, second.duration)) < EPSILON;
+    let count = 0;
+    if (threeEqual && canGroup(consecutive)) count = 3;
+    else if (longAndShort && canGroup(consecutive.slice(0, 2))) count = 2;
+    if (!count) continue;
+    first.tripletSize = count;
+    for (const segment of consecutive.slice(1, count)) segment.tripletSize = undefined;
+    consecutive[count - 1].tripletEnd = true;
+    index += count - 1;
   }
   return segments;
+}
+
+function splitAbcSingletonTuplet(segment: Segment, invisible: boolean): Segment[] {
+  if (invisible || segment.tripletSize !== 1 || segment.notatedDuration === undefined) return [segment];
+
+  // abcjs's sequencer leaves a singleton's multiplier active for subsequent
+  // notes. Spell an isolated triplet using two equal connected subdivisions.
+  const duration = segment.duration / 2;
+  const notatedDuration = segment.notatedDuration / 2;
+  return [
+    { ...segment, duration, notatedDuration, tiedTo: true, tripletSize: 2 },
+    { ...segment, start: segment.start + duration, duration, notatedDuration, tiedFrom: true, tripletSize: undefined },
+  ];
 }
 
 function xmlHarmony(chord: ChordEvent, offset: number): string {
@@ -1102,14 +1193,14 @@ function xmlNote(
   key: string,
   voice: string | number,
   chord: boolean,
-  firstPiece: boolean,
   staff?: number,
   hiddenRest = false,
+  measureRest = false,
 ): string {
   const pitched = note?.midi !== null && note?.midi !== undefined;
   const duration = Math.max(1, Math.round(segment.duration * DIVISIONS));
   const value = notationDuration(segment.duration);
-  let pitch = '<rest/>';
+  let pitch = measureRest ? '<rest measure="yes"/>' : '<rest/>';
   if (pitched) {
     const spelling = spellPitch(note!.midi!, key);
     pitch =
@@ -1123,23 +1214,28 @@ function xmlNote(
   const tiedNotation = pitched
     ? `${tiedFrom ? '<tied type="stop"/>' : ''}${tiedTo ? '<tied type="start"/>' : ''}`
     : '';
+  let tupletNotation = '';
+  if (!chord && segment.tripletEnd) tupletNotation = '<tuplet type="stop"/>';
+  else if (!chord && (segment.tripletSize ?? 0) > 1) tupletNotation = '<tuplet type="start" bracket="yes"/>';
   const articulation =
-    note?.articulation && firstPiece && !tiedFrom
+    note?.articulation && !tiedFrom
       ? `<articulations><${note.articulation}/></articulations>`
       : '';
-  const arpeggio = note?.arpeggio && firstPiece && !tiedFrom ? '<arpeggiate/>' : '';
+  const arpeggio = note?.arpeggio && !tiedFrom ? '<arpeggiate/>' : '';
   const lyric =
-    note?.lyric && firstPiece && !tiedFrom
+    note?.lyric && !tiedFrom
       ? `<lyric number="1"><syllabic>single</syllabic><text>${xmlText(note.lyric)}</text></lyric>`
       : '';
   const instrument =
     part.role === 'percussion' && pitched ? `<instrument id="${xmlText(part.id)}-D${note!.midi}"/>` : '';
-  return `<note${hiddenRest ? ' print-object="no"' : ''}${note ? ` dynamics="${Math.round((note.velocity * 10000) / 90)}"` : ''}>${chord ? '<chord/>' : ''}${pitch}<duration>${duration}</duration>${tie}${instrument}<voice>${xmlText(voice)}</voice><type>${value.type}</type>${'<dot/>'.repeat(value.dots)}${value.actual ? `<time-modification><actual-notes>${value.actual}</actual-notes><normal-notes>${value.normal}</normal-notes></time-modification>` : ''}${part.role === 'percussion' && pitched && [42, 44, 46, 49, 51].includes(note!.midi!) ? '<notehead>x</notehead>' : ''}${staff !== undefined ? `<staff>${staff}</staff>` : ''}${tiedNotation || articulation || arpeggio ? `<notations>${tiedNotation}${articulation}${arpeggio}</notations>` : ''}${lyric}</note>`;
+  const rhythm = measureRest ? '' : `<type>${value.type}</type>${'<dot/>'.repeat(value.dots)}${value.actual ? `<time-modification><actual-notes>${value.actual}</actual-notes><normal-notes>${value.normal}</normal-notes></time-modification>` : ''}`;
+  const notations = tiedNotation + tupletNotation + articulation + arpeggio;
+  return `<note${hiddenRest ? ' print-object="no"' : ''}${note ? ` dynamics="${Math.round((note.velocity * 10000) / 90)}"` : ''}>${chord ? '<chord/>' : ''}${pitch}<duration>${duration}</duration>${tie}${instrument}<voice>${xmlText(voice)}</voice>${rhythm}${part.role === 'percussion' && pitched && [42, 44, 46, 49, 51].includes(note!.midi!) ? '<notehead>x</notehead>' : ''}${staff !== undefined ? `<staff>${staff}</staff>` : ''}${notations ? `<notations>${notations}</notations>` : ''}${lyric}</note>`;
 }
 
 export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
   assertValid(project);
-  project = projectMeasuredSoloNotation(project);
+  project = projectArrangementNotation(project);
   const selected = project.parts.filter((part) => !partIds || partIds.includes(part.id));
   if (!selected.length) throw new Error('请至少选择一个声部。');
   const plan = createEngravingPlan(project, partIds);
@@ -1170,6 +1266,7 @@ export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
     })
     .join('');
   const barLength = beatsPerBar(project);
+  const beatUnit = notationBeatUnit(project.timeSignature);
   const fifths = FIFTHS[normalizeKey(project.key)] ?? 0;
   const displayedHarmony = harmonyChanges(project);
   const body = parts
@@ -1236,35 +1333,25 @@ export function toMusicXml(project: ScoreProject, partIds?: string[]): string {
           if (voiceIndex)
             content += `<backup><duration>${Math.round(barLength * DIVISIONS)}</duration></backup>`;
           const voice = lane.voice;
-          for (const segment of measureSegments(lane.groups, start, barLength)) {
+          const segments = measureSegments(lane.groups, start, barLength)
+            .flatMap((segment) => splitNotationSegment(segment, { barStart: start, barLength, beatUnit }));
+          for (const segment of groupNotationTuplets(segments, (segment) => !segment.notes.length && lane.secondary)) {
             const first = segment.notes[0];
             if (first?.dynamic && Math.abs(first.start - segment.start) < EPSILON)
               content += `<direction placement="below"><direction-type><dynamics><${first.dynamic}/></dynamics></direction-type>${first.dynamicScope === 'voice' ? `<voice>${xmlText(voice)}</voice>` : ''}${staves.length > 1 || part.staves ? `<staff>${lane.staff}</staff>` : ''}</direction>`;
-            const pieces = decomposeDuration(segment.duration);
-            let pieceStart = segment.start;
-            pieces.forEach((duration, index) => {
-              const piece = {
-                ...segment,
-                start: pieceStart,
-                duration,
-                tiedFrom: segment.tiedFrom || index > 0,
-                tiedTo: segment.tiedTo || index < pieces.length - 1,
-              };
-              const notes = segment.notes.length ? segment.notes : [undefined];
-              notes.forEach((note, noteIndex) => {
-                content += xmlNote(
-                  piece,
-                  note,
-                  part,
-                  project.key,
-                  voice,
-                  noteIndex > 0,
-                  index === 0,
-                  staves.length > 1 || part.staves ? lane.staff : undefined,
-                  !note && lane.secondary,
-                );
-              });
-              pieceStart += duration;
+            const notes = segment.notes.length ? segment.notes : [undefined];
+            notes.forEach((note, noteIndex) => {
+              content += xmlNote(
+                segment,
+                note,
+                part,
+                project.key,
+                voice,
+                noteIndex > 0,
+                staves.length > 1 || part.staves ? lane.staff : undefined,
+                !note && lane.secondary,
+                isMeasureRest(segment, start, barLength),
+              );
             });
           }
         });

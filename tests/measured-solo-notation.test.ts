@@ -81,6 +81,20 @@ describe('Measured MIDI Solo notation', () => {
     expect(timed(fromMusicXml(xml).parts[0].notes)).toEqual(timed(projected.parts[0].notes));
   });
 
+  it('interprets an isolated measured release in the surrounding straight pulse', () => {
+    const p = measuredSolo([
+      [0, .44], [.5, .44], [1, .4375], [1.5, .44], [2, .44], [2.5, .44],
+      [3, .125], [3.25, 1 / 6], [4.5, .44], [5, .44], [6, .44], [7, .44],
+    ], 1 / 240);
+    const written = projectMeasuredSoloNotation(p).parts[0].notes;
+    expect(written[2].duration).toBe(.5); // no invented 64th rest before the next attack
+    expect(written[7].duration).toBe(.125);
+    expect(written[8].start).toBe(4.5); // the substantial following rest survives
+    const articulated = p.parts[0].notes[2];
+    articulated.articulation = 'staccato';
+    expect(projectMeasuredSoloNotation(p).parts[0].notes[2].duration).toBe(articulated.duration);
+  });
+
   it('preserves written triplets, short rests and a longer phrase break', () => {
     const raw = measuredSolo([
       [0, 0.375], [0.5, 0.5], [1, 1 / 3], [4 / 3, 1 / 3, 62], [5 / 3, 1 / 3, 64],
@@ -93,6 +107,17 @@ describe('Measured MIDI Solo notation', () => {
     expect(notes[8].start - notes[7].start - notes[7].duration).toBe(1.5);
     expect(toAbc(projected, ['solo']).abc).toContain('(3:2:3');
     expect(toMusicXml(projected, ['solo']).match(/<actual-notes>3<\/actual-notes>/g)).toHaveLength(3);
+  });
+
+  it('distinguishes a lone fine MIDI release from a repeated written figure', () => {
+    const raw = measuredSolo([
+      [0, .21], [.5, .183], [1, .1875], [1.5, .19],
+      [2, .3125], [2.5, .3125], [3, .4375], [3.5, .4375], [4, .21],
+    ], 1 / 240);
+    const notes = projectMeasuredSoloNotation(raw).parts[0].notes;
+    expect(notes[2].duration).toEqual(.25);
+    expect(notes.slice(4, 7).map(n => n.duration)).toEqual([.3125, .3125, .4375]);
+    expect(notes.map(n => n.start)).toEqual([0, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4]);
   });
 
   it('leaves written source, ambiguous attacks and unmeasured performances intact', () => {
