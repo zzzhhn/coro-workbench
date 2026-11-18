@@ -99,6 +99,17 @@ export function applyFormCuts(input: ScoreProject, cuts: FormCut[], options: Pic
   const project=structuredClone(input);
   if(!sorted.length)return {project,segments,cuts:sorted};
   project.measures=targetStart/bar;
+  if (project.layout) {
+    for (const field of ['systemBreaks', 'pageBreaks'] as const) {
+      project.layout[field] = project.layout[field].flatMap(measure => {
+        const start = (measure - 1) * bar;
+        const segment = segments.find(s => start >= s.sourceStart && start < s.sourceEnd);
+        if (!segment) return [];
+        const mapped = 1 + (segment.targetStart + start - segment.sourceStart) / bar;
+        return mapped > 1 ? [mapped] : [];
+      });
+    }
+  }
   project.parts.forEach(p=>{
     p.notes=remap(p.notes);
     for(const field of ['pedals','pedalSustain'] as const)if(p[field])p[field]=remap(p[field]!.map(e=>({start:e.start,duration:e.end-e.start}))).map(e=>({start:e.start,end:e.start+e.duration}));

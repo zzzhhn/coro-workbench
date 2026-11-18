@@ -46,3 +46,12 @@ it('preserves exact fractional durations outside cuts',()=>{
  const b=applyFormCuts(p,[{start:20,end:36}],{leadPartId:'solo'}).project;
  expect(b.parts[0].notes[0]).toEqual(p.parts[0].notes[0]);
 });
+
+it('moves written system and page starts with the retained measures', () => {
+  const p = fixture();
+  p.layout = { systemBreaks: [3, 5, 9, 16], pageBreaks: [6, 16], repeat: { clef: 'every', key: 'every', labels: 'every' } };
+  const {project} = applyFormCuts(p, [{start: 16, end: 24}], {leadPartId: 'solo'});
+  expect(project.layout?.systemBreaks).toEqual([3, 7, 14]);
+  expect(project.layout?.pageBreaks).toEqual([14]);
+  expect(p.layout?.pageBreaks).toEqual([6, 16]);
+});
