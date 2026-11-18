@@ -13,6 +13,7 @@
     "test:e2e": "playwright test",
     "start": "node scripts/start.mjs",
     "doctor": "node scripts/doctor.mjs",
+    "audit:notation": "node scripts/audit-audition-notation.mjs --check",
     "test:scripts": "node --test tests/runtime.test.mjs"
   },
   "dependencies": {

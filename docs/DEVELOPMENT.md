@@ -354,3 +354,9 @@ range. A changing meter or tempo, swing, lyric stress and any harmony heard
 only in the recording require additional source evidence. Record gaps in
 coverage alongside each result. These are separate evaluation conditions;
 a five-part listening preference does not validate those cases.
+
+### 编配试听谱的节奏复核
+
+在项目根目录运行 `npm run audit:notation -- --manifest <试听清单.json> --out <本地报告.json>`。可以重复传入 `--manifest`，相同编配只检查一次。加上 `--revision <提交 SHA>` 可用同一批工程复查旧导出器。清单、成谱和报告保存在本地。
+
+报告逐声部对照书面音符、ABC 实际解码出的播放事件和 MusicXML 回读结果，检查每小节总长、音高、起音与收音。报告也标出极短音符、休止与孤立连音的位置，方便回到源谱判断。遇到碎音先追查原始起音、收音和附近声部的节拍，再看谱面是否把一个发声事件拆成了多枚记号。原有起音、实际断奏和有依据的三连音都应单独复核。
