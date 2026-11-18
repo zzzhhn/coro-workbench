@@ -47,6 +47,10 @@ export default defineConfig({
   preview: { proxy: { '/api': backend } },
   build: {
     rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        arrangements: fileURLToPath(new URL('./review/arrangements.html', import.meta.url)),
+      },
       output: {
         manualChunks: {
           notation: ['abcjs'],
