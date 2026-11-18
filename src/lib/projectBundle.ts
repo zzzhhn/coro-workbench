@@ -111,7 +111,7 @@ export async function createProjectBundle(
     seen.set(url, reference);
     return reference;
   };
-  for (const project of [copied.source, copied.arrangement].filter((item): item is ScoreProject =>
+  for (const project of [copied.source, copied.arrangement, copied.comparison].filter((item): item is ScoreProject =>
     Boolean(item),
   )) {
     if (project.originalAudio) {
@@ -236,6 +236,7 @@ export async function importProjectBundle(file: File): Promise<WorkspaceState> {
   const result: WorkspaceState = {
     source: checked(workspace.source),
     arrangement: workspace.arrangement ? checked(workspace.arrangement) : undefined,
+    comparison: workspace.comparison ? checked(workspace.comparison) : undefined,
     active: workspace.active === 'arrangement' && workspace.arrangement ? 'arrangement' : 'source',
     savedAt: new Date().toISOString(),
   };

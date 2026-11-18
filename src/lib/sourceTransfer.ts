@@ -7,6 +7,14 @@ const CENTRES = [70, 64, 57, 45];
 const pc = (n: number) => (n % 12 + 12) % 12;
 const EPS = 1e-6;
 type Pitched = NoteEvent & { midi: number };
+
+function variantChoice(variant: number, start: number, count: number): number {
+  let hash = 2166136261;
+  for (const character of `${variant}:${start}`) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);
+  return ((hash ^ (hash >>> 13)) >>> 0) % count;
+}
+
 export interface TransferSlice {
   start: number; duration: number; sourceNoteIds: string[];
   sourcePitches: number[]; kept: number[]; omitted: number[]; voicing: number[];
@@ -26,6 +34,8 @@ export interface SourceTransferOptions {
   editWindow?: { start: number; end: number };
   /** Disable merging across a frozen region's note-object boundary. */
   joinWindowEdges?: boolean;
+  /** Reproducible choice among close legal upper voicings; zero keeps the original. */
+  variant?: number;
 }
 
 export function prepareSourceNotes(source: ScoreProject, accompanimentIds: string[], options: SourceTransferOptions = {}) {
@@ -169,23 +179,65 @@ export function transferSourceToSatb(
     // Keep several possible registers until the phrase is evaluated. Greedy
     // octave choices otherwise lock the next chord into an exposed Solo clash.
     // The historical path remains width one when melody-aware allocation is off.
-    let paths: Array<{ cost: number; history: number[][] }> = [{ cost: 0, history: [] }];
-    frames.forEach((frame, index) => {
-      const connected = index > 0 && Math.abs(frames[index - 1].end - frame.start) < EPS;
-      paths = frame.choices.map(choice => {
-        let bestPath = paths[0], cost = Infinity;
-        for (const path of paths) {
-          const previous = connected ? path.history.at(-1) : undefined;
-          const total = path.cost + choice.cost + (previous ? choice.voicing.reduce((sum, m, v) => sum + Math.abs(m - previous[v]), 0) : 0)
-            + (index === 0 && Math.abs(frame.start - a) < EPS ? edgeMotion(choice.voicing, entry) : 0)
-            + (index === frames.length - 1 && Math.abs(frame.end - b) < EPS ? edgeMotion(choice.voicing, exit) : 0);
-          if (total < cost) { cost = total; bestPath = path; }
-        }
-        return { cost, history: [...bestPath.history, choice.voicing] };
-      }).sort((a, b) => a.cost - b.cost).slice(0, melody ? 32 : 1);
-    });
+    const allocate = (reference?: number[][], first = 0, last = frames.length) => {
+      let paths: Array<{ cost: number; history: number[][] }> = [{ cost: 0, history: [] }];
+      frames.slice(first, last).forEach((frame, offset) => {
+        const index = first + offset;
+        const connected = offset > 0 && Math.abs(frames[index - 1].end - frame.start) < EPS;
+        const baselineCost = reference ? frame.choices.find(choice => choice.voicing.every((m, v) => m === reference[index][v]))!.cost : 0;
+        const choices = reference ? frame.choices.filter(choice => choice.voicing[3] === reference[index][3]
+          && choice.cost <= baselineCost + 2 + EPS) : frame.choices;
+        paths = choices.map(choice => {
+          let bestPath = paths[0], cost = Infinity;
+          for (const path of paths) {
+            const previous = connected ? path.history.at(-1) : undefined;
+            const total = path.cost + choice.cost + (previous ? choice.voicing.reduce((sum, m, v) => sum + Math.abs(m - previous[v]), 0) : 0)
+              + (index === 0 && Math.abs(frame.start - a) < EPS ? edgeMotion(choice.voicing, entry) : 0)
+              + (index === frames.length - 1 && Math.abs(frame.end - b) < EPS ? edgeMotion(choice.voicing, exit) : 0);
+            if (total < cost) { cost = total; bestPath = path; }
+          }
+          return { cost, history: [...bestPath.history, choice.voicing] };
+        }).sort((a, b) => a.cost - b.cost).slice(0, melody || reference ? 32 : 1);
+      });
+      return paths;
+    };
+    const baseline = allocate()[0];
+    let selected = baseline;
+    if (Number.isSafeInteger(options.variant) && options.variant! > 0 && frames.length) {
+      // Re-run only octave/voice allocation, freezing the exact default bass.
+      // Select independently between actual breathing/source gaps. Choosing
+      // only a final full-song beam state would vary just the last phrase.
+      selected = { cost: 0, history: [] };
+      for (let first = 0; first < frames.length;) {
+        let last = first + 1;
+        while (last < frames.length && Math.abs(frames[last - 1].end - frames[last].start) < EPS) last++;
+        const history = baseline.history.slice(first, last);
+        const cost = history.reduce((sum, voicing, offset) => {
+          const index = first + offset, frame = frames[index];
+          return sum + frame.choices.find(choice => choice.voicing.every((m, v) => m === voicing[v]))!.cost
+            + (offset ? voicing.reduce((motion, m, v) => motion + Math.abs(m - history[offset - 1][v]), 0) : 0)
+            + (index === 0 && Math.abs(frame.start - a) < EPS ? edgeMotion(voicing, entry) : 0)
+            + (index === frames.length - 1 && Math.abs(frame.end - b) < EPS ? edgeMotion(voicing, exit) : 0);
+        }, 0);
+        // Score loss is bounded per sung phrase; no new upper leap larger
+        // than a fourth is accepted unless the baseline already requires it.
+        const alternatives = allocate(baseline.history, first, last).filter(path => path.cost <= cost + 3 + EPS
+          && path.history.every((voicing, i) => i === 0 || voicing.slice(0, 3).every((m, v) =>
+            Math.abs(m - path.history[i - 1][v]) <= Math.max(5, Math.abs(history[i][v] - history[i - 1][v])))));
+        const seen = new Set<string>([JSON.stringify(history)]);
+        const candidates = [{ cost, history }, ...alternatives.filter(path => {
+          const key = JSON.stringify(path.history);
+          if (seen.has(key)) return false;
+          seen.add(key); return true;
+        })];
+        const chosen = candidates[variantChoice(options.variant!, frames[first].start, candidates.length)];
+        selected.cost += chosen.cost;
+        selected.history.push(...chosen.history);
+        first = last;
+      }
+    }
     frames.forEach(({ start, end, active, pitches, kept }, i) => {
-      const best = paths[0].history[i];
+      const best = selected.history[i];
       slices.push({ start, duration: end - start, sourceNoteIds: active.map(n => n.id), sourcePitches: pitches, kept,
         omitted: pitches.filter(p => !kept.includes(p)), voicing: best });
       best.forEach((midi, v) => {

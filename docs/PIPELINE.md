@@ -8,6 +8,23 @@ acceptance. Bobby's ear and the human reference score are.
 Legend: solid = runs in production; dashed = in progress on a branch;
 `(eval)` = evaluation only, never feeds inference.
 
+## 2026-11-18: locked arrangement excerpts and reproducible comparisons
+
+```mermaid
+flowchart LR
+  S[Source score and selected tracks] --> G[Arrangement engine]
+  V[Explicit voicing variant] --> G
+  G --> M[Restore locked measures]
+  A[Current arrangement and lock ranges] --> M
+  M --> C[Compare new and previous scores at the same beat]
+```
+
+Locks use inclusive measure numbers. Every event sounding inside a lock survives
+with its complete attack and release. Old and new versions travel together in
+the local workspace and portable project. The original audition can be kept as
+a separate portable project or library snapshot. On source chant, positive
+variant numbers select reproducible alternative upper-voice allocations.
+
 ## 2026-11-17: confirm tempo after OMR when the score states none
 
 A printed score without a metronome mark (Kong Er's PDF has none; 65 BPM exists

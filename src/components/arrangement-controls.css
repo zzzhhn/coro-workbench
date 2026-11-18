@@ -1,0 +1,244 @@
+.arrangement-version-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 11px 20px;
+  color: var(--ink);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.arrangement-version-info {
+  min-width: 0;
+}
+
+.arrangement-version-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 12px;
+}
+
+.arrangement-version-heading strong {
+  font-weight: 600;
+}
+
+.arrangement-version-heading strong span {
+  margin-left: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.arrangement-method {
+  color: var(--muted);
+}
+
+.arrangement-version-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 18px;
+  margin: 5px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.arrangement-version-sources > div {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.arrangement-version-sources dt {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.arrangement-version-sources dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.arrangement-version-locks {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--accent);
+}
+
+.arrangement-version-locks svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.arrangement-version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.arrangement-version-actions .secondary-button {
+  min-height: 32px;
+  padding: 6px 9px;
+  gap: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.arrange-locks {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.arrange-locks-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.arrange-locks-heading strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.arrange-locks-heading .text-button {
+  font-size: 12px;
+}
+
+.arrange-locks > p {
+  margin: 7px 0 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.arrange-lock-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.arrange-lock-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 5px 4px 10px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+
+.arrange-lock-list button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 3px;
+  color: var(--muted);
+}
+
+.arrange-lock-list button:hover {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.arrange-lock-editor {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+}
+
+.arrange-lock-editor label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.arrange-lock-editor input {
+  width: 95px;
+  max-width: 100%;
+  height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 6px 9px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.arrange-lock-editor input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.arrange-lock-editor > span {
+  padding-bottom: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.arrange-lock-editor .secondary-button {
+  height: 34px;
+  min-height: 34px;
+  padding: 6px 10px;
+  gap: 5px;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.arrange-locks > .arrange-lock-error {
+  color: var(--danger);
+  margin-bottom: 0;
+}
+
+.arrange-actions {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+  .arrangement-version-bar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+
+  .arrangement-version-actions {
+    flex-shrink: 1;
+  }
+}
+
+@media (max-width: 420px) {
+  .arrange-lock-editor {
+    gap: 6px;
+  }
+
+  .arrange-lock-editor label {
+    flex: 1;
+  }
+
+  .arrange-lock-editor input {
+    width: 100%;
+  }
+
+  .arrange-actions > button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}

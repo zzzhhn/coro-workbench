@@ -481,6 +481,7 @@ export function validateProject(project: ScoreProject): string[] {
       !Number.isInteger(options.transpose) ||
       Math.abs(options.transpose) > 24 ||
       !optionalText(options.leadPartId) ||
+      (options.variant !== undefined && (!Number.isSafeInteger(options.variant) || options.variant < 0)) ||
       (options.engine !== undefined && !['v2', 'source-chant'].includes(options.engine)) ||
       (options.accompanimentIds !== undefined &&
         (!Array.isArray(options.accompanimentIds) || options.accompanimentIds.length > 32 ||
@@ -488,6 +489,14 @@ export function validateProject(project: ScoreProject): string[] {
       !optionalText(options.bassPartId)
     )
       problems.push('编配选项无效。');
+    if (arrangement?.revision !== undefined && (!Number.isSafeInteger(arrangement.revision) || arrangement.revision < 1))
+      problems.push('编配版本无效。');
+    const locks = arrangement?.locks;
+    if (locks !== undefined && (!Array.isArray(locks) || locks.length > project.measures ||
+      locks.some((lock, index) => !lock || !Number.isInteger(lock.first) || !Number.isInteger(lock.last) ||
+        lock.first < 1 || lock.first > lock.last || lock.last > project.measures ||
+        (index > 0 && lock.first <= locks[index - 1].last))))
+      problems.push('锁定小节须按顺序填写，范围不能重叠或超出全曲。');
     if (
       !report ||
       !stringList(report.warnings) ||

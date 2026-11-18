@@ -63,7 +63,7 @@ import {
   type Accidental,
   type DurationChange,
 } from './lib/noteInput';
-import { arrangeForVoices } from './lib/arrange';
+import { generateArrangementVersion } from './lib/arrangementVersions';
 import { createBlankProject, createDemoProject } from './lib/demo';
 import {
   changePart,
@@ -140,6 +140,7 @@ import { notationReadabilitySummary } from './lib/readability';
 import { recommendLeadPart } from './lib/arrange';
 import ImportDialog, { PENDING_ANALYSIS_KEY } from './components/ImportDialog';
 import ArrangeDialog from './components/ArrangeDialog';
+import ArrangementVersionBar from './components/ArrangementVersionBar';
 import ExportDialog from './components/ExportDialog';
 import Modal from './components/Modal';
 import { readOriginalFile, resolveLocalAsset } from './lib/projectBundle';
@@ -174,6 +175,7 @@ export default function App() {
   const initial = useMemo(() => readWorkspace(), []);
   const [source, setSource] = useState<ScoreProject>(initial?.source ?? createDemoProject());
   const [arrangement, setArrangement] = useState<ScoreProject | undefined>(initial?.arrangement);
+  const [comparison, setComparison] = useState<ScoreProject | undefined>(initial?.comparison);
   const [active, setActive] = useState<ActiveDocument>(
     initial?.active === 'arrangement' && initial?.arrangement ? 'arrangement' : 'source',
   );
@@ -239,8 +241,8 @@ export default function App() {
   const [chordDraft, setChordDraft] = useState('');
   const engine = useRef<PlaybackEngine | null>(null);
   const history = useRef(newHistory());
-  const workspaceRef = useRef({ source, arrangement, active });
-  workspaceRef.current = { source, arrangement, active };
+  const workspaceRef = useRef({ source, arrangement, comparison, active });
+  workspaceRef.current = { source, arrangement, comparison, active };
   const generatedDemo = useRef<string | undefined>(undefined);
   const localAudioUrls = useRef<Map<string, string>>(new Map());
   const switchingWorkspace = useRef(false);
@@ -338,7 +340,7 @@ export default function App() {
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const state = { source, arrangement, active, savedAt: new Date().toISOString() };
+        const state = { source, arrangement, comparison, active, savedAt: new Date().toISOString() };
         saveWorkspace(state);
         await archiveWorkspace(state);
         if (!cancelled) setSaved('saved');
@@ -347,7 +349,7 @@ export default function App() {
       }
     }, 500);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [source, arrangement, active]);
+  }, [source, arrangement, comparison, active]);
   useEffect(() => {
     const flush = () => {
       try { saveWorkspace({ ...workspaceRef.current, savedAt: new Date().toISOString() }); }
@@ -410,10 +412,12 @@ export default function App() {
               : previous,
           );
           setArrangement((previous) =>
-            previous?.originalAudio?.url.startsWith('local:')
+            previous?.originalAudio?.url === audio.url
               ? { ...previous, originalAudio: { ...previous.originalAudio, url } }
               : previous,
           );
+          setComparison((previous) => previous?.originalAudio?.url === audio.url
+            ? { ...previous, originalAudio: { ...previous.originalAudio, url } } : previous);
         })
         .catch(() => notify('无法恢复本地音频缓存；乐谱不受影响。', true));
     }
@@ -540,6 +544,7 @@ export default function App() {
     if (!await stash()) return false;
     setSource(next);
     setArrangement(undefined);
+    setComparison(undefined);
     setActive('source');
     history.current = newHistory();
     setHistoryVersion((value) => value + 1);
@@ -556,6 +561,7 @@ export default function App() {
     if (!await stash()) return false;
     setSource(next.source);
     setArrangement(next.arrangement);
+    setComparison(next.comparison);
     setActive(next.active);
     history.current = newHistory();
     setHistoryVersion((value) => value + 1);
@@ -576,8 +582,9 @@ export default function App() {
   const arrange = (options: ArrangementOptions) => {
     try {
       engine.current?.pause();
-      const next = arrangeForVoices(source, options);
+      const { project: next, identical } = generateArrangementVersion(source, options, arrangement, comparison);
       if (arrangement) {
+        if (!identical) setComparison(arrangement);
         history.current.arrangement.past.push(arrangement);
         history.current.arrangement.future = [];
       }
@@ -585,7 +592,7 @@ export default function App() {
       setActive('arrangement');
       resetEditor(next);
       setDialog(undefined);
-      notify('阿卡贝拉编配已生成。原总谱已保留，请先试听并校对。');
+      notify(identical ? '这次生成的音符相同，已保留试听对照。' : '阿卡贝拉编配已生成。');
     } catch (error) {
       notify(cleanError(error), true);
     }
@@ -594,6 +601,7 @@ export default function App() {
     const stack = history.current[active];
     const previous = stack.past.pop();
     if (!previous) return;
+    if (active === 'arrangement' && previous.id !== project.id) setComparison(project);
     stack.future.push(project);
     updateProject(previous, false);
     setSelection(undefined);
@@ -603,6 +611,7 @@ export default function App() {
     const stack = history.current[active];
     const next = stack.future.pop();
     if (!next) return;
+    if (active === 'arrangement' && next.id !== project.id) setComparison(project);
     stack.past.push(project);
     updateProject(next, false);
     setSelection(undefined);
@@ -961,10 +970,11 @@ export default function App() {
     startBeat = playingState.beat,
     mode = playbackMode,
     sourceUrl: string | null = stem?.url ?? null,
+    score = playbackProject,
   ) => {
     setAudioBusy(true);
     try {
-      await engine.current?.play(playbackProject, {
+      await engine.current?.play(score, {
         mode,
         startBeat,
         loop,
@@ -1701,6 +1711,25 @@ export default function App() {
             )}
           </div>
         </div>
+        {active === 'arrangement' && arrangement?.arrangement && (
+          <ArrangementVersionBar source={source} current={arrangement} previous={comparison}
+            onSwitch={() => {
+              if (!comparison) return;
+              const beat = Math.min(playingState.beat, comparison.measures * beatsPerBar(comparison));
+              engine.current?.pause();
+              setComparison(arrangement);
+              setArrangement(comparison);
+              history.current.arrangement = { past: [], future: [] };
+              setHistoryVersion(v => v + 1);
+              setSelection(undefined);
+              setStem(undefined);
+              setPlaybackMode('score');
+              if (!comparison.parts.some(p => p.id === selectedPartId)) setSelectedPartId(comparison.parts[0].id);
+              if (!comparison.parts.some(p => p.id === visiblePart)) setVisiblePart('all');
+              engine.current?.seek(beat);
+              if (playingState.playing) void beginPlayback(beat, 'score', null, auditionProject(comparison, backgroundTimbre));
+            }} />
+        )}
         {tab === 'practice' && (
           <div className="practice-banner">
             <div>
@@ -2350,6 +2379,9 @@ export default function App() {
         <ArrangeDialog
           project={source}
           initialOptions={arrangement?.arrangement?.options}
+          current={arrangement}
+          onLocksChange={locks => setArrangement(current => current?.arrangement
+            ? { ...current, arrangement: { ...current.arrangement, locks } } : current)}
           onClose={() => setDialog(undefined)}
           onArrange={arrange}
         />
@@ -2357,7 +2389,7 @@ export default function App() {
       {dialog === 'export' && (
         <ExportDialog
           project={project}
-          workspace={{ source, arrangement, active, savedAt: new Date().toISOString() }}
+          workspace={{ source, arrangement, comparison, active, savedAt: new Date().toISOString() }}
           onClose={() => setDialog(undefined)}
           onDone={notify}
         />
@@ -2539,7 +2571,7 @@ export default function App() {
         </Modal>
       )}
       {dialog === 'library' && (
-        <LibraryDialog workspace={{ source, arrangement, active, savedAt: new Date().toISOString() }}
+        <LibraryDialog workspace={{ source, arrangement, comparison, active, savedAt: new Date().toISOString() }}
           onClose={() => setDialog(undefined)} onOpen={openWorkspace} onImport={importProject}
           onNew={() => { void importProject(createBlankProject()); }}
           onDemo={() => { generatedDemo.current = undefined; void importProject(createDemoProject()); }}

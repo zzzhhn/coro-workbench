@@ -17,12 +17,15 @@ export function safeWorkspace(state: WorkspaceState): WorkspaceState {
     ...state,
     source: safeProject(state.source),
     arrangement: state.arrangement ? safeProject(state.arrangement) : undefined,
+    comparison: state.comparison ? safeProject(state.comparison) : undefined,
   };
 }
 
 export async function workspaceFingerprint(state: WorkspaceState): Promise<string> {
   const safe = safeWorkspace(state);
-  const bytes = new TextEncoder().encode(JSON.stringify([safe.source, safe.arrangement]));
+  const projects = [safe.source, safe.arrangement];
+  if (safe.comparison) projects.push(safe.comparison);
+  const bytes = new TextEncoder().encode(JSON.stringify(projects));
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) =>
     b.toString(16).padStart(2, '0'),
   ).join('');
