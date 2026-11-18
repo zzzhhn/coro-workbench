@@ -1,6 +1,7 @@
 import { beatsPerBar, newId, validateProject } from './music';
 import { inspectArrangement } from './arrange';
 import { applyFormCuts, type FormCut } from './arrangementForm';
+import { projectMeasuredLeadPart } from './midiNotation';
 import { planVocalBreaths } from './vocalBreathing';
 import type { NoteEvent, ScorePart, ScoreProject } from './types';
 
@@ -10,6 +11,39 @@ const crosses = (n: NoteEvent, a: number, b: number) =>
   sounding(n) && n.start < b - eps && n.start + n.duration > a + eps;
 const semitoneClash = (a: number, b: number) => [1, 11].includes(Math.abs(a - b) % 12);
 const activeNotes = (part: ScorePart) => part.notes.filter(sounding);
+const MIDI_ATTACK_TOLERANCE = 1 / 240 + eps;
+
+function writtenMidiLine(notes: NoteEvent[]): NoteEvent[] | undefined {
+  const nearest = (beat: number, grid: number) => Math.round(beat * grid) / grid;
+  const onGrid = (beat: number, grid: number) => Math.abs(beat - nearest(beat, grid)) < eps;
+  const attacks = notes.map(({ start }) => {
+    const straight = nearest(start, 16), triplet = nearest(start, 12);
+    return Math.abs(start - straight) <= Math.abs(start - triplet) ? straight : triplet;
+  });
+  // An independent line can corroborate its attack clock even when adjacent
+  // notes overlap because it came from a piano or an expressive MIDI gate.
+  if (notes.some((note, i) => Math.abs(note.start - attacks[i]) > MIDI_ATTACK_TOLERANCE ||
+    (i > 0 && attacks[i] <= attacks[i - 1] + eps))) return;
+
+  // A raw note-off landing near a triplet grid is insufficient evidence. A
+  // distinct attack in the beat must establish that rhythm before using it.
+  const straight = attacks.map((start, i) => !attacks.slice(Math.max(0, i - 1), i + 2).some(beat =>
+    Math.floor(beat + eps) === Math.floor(start + eps) && !onGrid(beat, 16)));
+  const alreadyWritten = notes.every((note, i) => onGrid(note.duration, straight[i] ? 16 : 12));
+  return notes.map((note, i) => {
+    const start = attacks[i];
+    if (alreadyWritten) return { ...note, start };
+    const grid = straight[i] ? (note.duration < 0.125 ? 16 : 8) : 12;
+    const gate = nearest(note.duration, grid);
+    const maximumExtension = Math.min(note.duration * 0.15, 1 / 24);
+    const writtenGate = gate > note.duration + maximumExtension
+      ? Math.floor((note.duration + eps) * grid) / grid : gate;
+    // Round supported written releases without filling the gap to the next
+    // attack. Leave an extremely short, unresolved gate as source evidence.
+    const duration = writtenGate <= eps ? note.duration : writtenGate;
+    return { ...note, start, duration };
+  });
+}
 interface Span {
   from: number;
   to: number;
@@ -37,11 +71,16 @@ function spansOf(source: ScoreProject, lead: ScorePart): Span[] {
 
 // A written staff/voice is stronger evidence than the top note of a mixed keyboard part.
 function backingLines(source: ScoreProject, lead: ScorePart) {
+  const bar = beatsPerBar(source);
   return source.parts
     .filter((p) => p.id !== lead.id && !['percussion', 'bass'].includes(p.role))
     .flatMap((p) => {
+      const written = source.source.kind === 'midi' ? projectMeasuredLeadPart(p, bar, bar * source.measures) : p;
       const groups = new Map<string, NoteEvent[]>();
-      for (const n of activeNotes(p)) {
+      for (const [i, note] of p.notes.entries()) {
+        if (!sounding(note)) continue;
+        const start = written.notes[i].start;
+        const n = start === note.start ? note : { ...note, start };
         const key = [n.staff ?? '', n.voice ?? ''].join('/');
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push(n);
@@ -73,7 +112,7 @@ function replaceSpan(part: ScorePart, from: number, to: number, notes: NoteEvent
   part.notes = kept.concat(notes).sort((a, b) => a.start - b.start);
 }
 
-function singLine(notes: NoteEvent[], from: number, to: number, range: number[], tempo: number) {
+function singLine(notes: NoteEvent[], from: number, to: number, range: number[]) {
   const center = (range[0] + range[1]) / 2;
   const placements = [-36, -24, -12, 0, 12, 24, 36].map((shift) => ({
     shift,
@@ -83,50 +122,29 @@ function singLine(notes: NoteEvent[], from: number, to: number, range: number[],
     }, 0),
   }));
   const shift = placements.sort((a, b) => a.cost - b.cost)[0].shift;
-  const event: NoteEvent[] = [];
-  const minSpacing = Math.max(0.25, (tempo / 60) * 0.16);
-  // Match the nearest common written subdivision only when its error is within performance tolerance.
-  const snap = (t: number) => {
-    for (const unit of [1, 0.5, 1 / 3, 0.25]) {
-      const q = Math.round(t / unit) * unit;
-      if (Math.abs(t - q) <= 0.09) return q;
-    }
-    return Math.round(t * 24) / 24;
-  };
-  for (let i = 0; i < notes.length; i++) {
-    const n = notes[i],
-      pitch = n.midi! + shift;
+  const events: NoteEvent[] = [];
+  for (const note of notes) {
+    const pitch = note.midi! + shift;
     if (pitch < range[0] || pitch > range[1]) continue;
-    const t = Math.max(from, snap(n.start));
-    const last = event.at(-1);
-    if (last && t - last.start < minSpacing - eps) {
-      // A rapid repeated pitch is a sustain or a pulse shared with the bass.
-      if (last.midi === pitch)
-        last.duration = Math.min(
-          to - last.start,
-          Math.max(last.duration, snap(n.start + n.duration) - last.start),
-        );
-      continue;
-    }
-    const next = notes[i + 1];
-    const end =
-      next && next.start - n.start <= 0.75 && next.start - (n.start + n.duration) < 0.34
-        ? next.start
-        : n.start + n.duration;
-    const length = Math.min(to - t, Math.max(0.25, snap(end) - t));
-    if (length < 0.24) continue;
-    if (last) last.duration = Math.min(last.duration, t - last.start);
-    event.push({
+    const start = Math.max(from, note.start);
+    const duration = Math.min(to, note.start + note.duration) - start;
+    if (duration <= eps) continue;
+    const last = events.at(-1);
+    // A real repeated attack remains an attack. Only shorten an overlapping
+    // tail to make the selected line monophonic for its new singer.
+    if (last) last.duration = Math.min(last.duration, start - last.start);
+    events.push({
       id: newId('backing-line'),
-      start: t,
-      duration: length,
+      start,
+      duration,
       midi: pitch,
       origin: 'arranged',
-      lyric: !last || t - last.start - last.duration > 0.5 ? 'Doo' : 'oo',
-      velocity: Math.min(0.82, Math.max(0.48, n.velocity)),
+      lyric: !last || start - last.start - last.duration > 0.5 ? 'Doo' : 'oo',
+      velocity: Math.min(0.82, Math.max(0.48, note.velocity)),
+      ...(note.articulation ? { articulation: note.articulation } : {}),
     });
   }
-  return event;
+  return events;
 }
 
 /** Source-driven writing candidate. With no independent musical material, keep the current draft. */
@@ -146,6 +164,7 @@ export function writeInstrumentalLines(source: ScoreProject, previous: ScoreProj
     lines = backingLines(source, lead),
     bar = beatsPerBar(source);
   const gestures: Gesture[] = [];
+  let skippedUnmeasuredLine = false;
   const solo = activeNotes(lead);
   for (const span of spansOf(source, lead)) {
     // Check instrumental answers during sung phrases locally; sustained instrumental statements stay intact.
@@ -175,13 +194,20 @@ export function writeInstrumentalLines(source: ScoreProject, previous: ScoreProj
             (!span.sung || (c.line.clarity >= 0.82 && c.independent >= c.ns.length * 0.65)),
         )
         .sort((a, b) => b.score - a.score);
-      if (!choices.length) continue;
-      const { line, ns } = choices[0];
+      const [choice] = choices.flatMap(({ line, ns }) => {
+        const written = source.source.kind === 'midi' ? writtenMidiLine(ns) : ns;
+        return written ? [{ line, ns: written }] : [];
+      });
+      if (!choice) {
+        if (choices.length) skippedUnmeasuredLine = true;
+        continue;
+      }
+      const { line, ns } = choice;
       // Keep at most one answering line under singing. Occupied, dense vocal passages retain the draft.
       if (span.sung && localLead.length / (to - from) > 1.25) continue;
       const carrier = span.sung ? upper[1] : upper[0];
       const range = span.sung ? [55, 67] : [60, 76];
-      const notes = singLine(ns, from, to, range, source.tempo).filter((n) => {
+      const notes = singLine(ns, from, to, range).filter((n) => {
         if (!span.sung) return true;
         // Protect the sustained sung pitch and surrounding voices from a new semitone rub.
         return ![...localLead, ...upper.filter((p) => p !== carrier).flatMap((p) => p.notes)].some(
@@ -248,6 +274,8 @@ export function writeInstrumentalLines(source: ScoreProject, previous: ScoreProj
   project.arrangement!.report.changes.push(
     '伴奏独立动机候选；有可用的原谱声线时交给歌手，合唱配平与换气待听评。',
   );
+  if (skippedUnmeasuredLine)
+    project.arrangement!.report.changes.push('MIDI 伴奏未能确认书面起止的位置保留原编配。');
   const errors = validateProject(project);
   if (errors.length) throw Error(errors.join('；'));
   return { project, gestures };
