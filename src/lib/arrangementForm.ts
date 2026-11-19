@@ -110,6 +110,17 @@ export function applyFormCuts(input: ScoreProject, cuts: FormCut[], options: Pic
       });
     }
   }
+  if (project.source.arrangementSections) {
+    let first = 1;
+    project.source.arrangementSections = project.source.arrangementSections.flatMap(section => {
+      const start = (section.startBar - 1) * bar;
+      const end = start + section.bars * bar;
+      const kept = segments.reduce((sum, s) => sum + Math.max(0, Math.min(s.sourceEnd, end) - Math.max(s.sourceStart, start)), 0) / bar;
+      const startBar = first;
+      first += kept;
+      return kept ? [{ ...section, startBar, bars: kept }] : [];
+    });
+  }
   project.parts.forEach(p=>{
     p.notes=remap(p.notes);
     for(const field of ['pedals','pedalSustain'] as const)if(p[field])p[field]=remap(p[field]!.map(e=>({start:e.start,duration:e.end-e.start}))).map(e=>({start:e.start,end:e.start+e.duration}));

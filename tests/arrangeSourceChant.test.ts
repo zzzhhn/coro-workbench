@@ -79,3 +79,21 @@ describe('source-chant experimental arrangement', () => {
     expect(() => arrangeForVoices(source, { ...base, engine: 'source-chant' })).toThrow('源谱吟唱需要');
   });
 });
+
+describe('workbench score-led arrangements', () => {
+  it.each(['open-chant', 'lyrical', 'groove', 'jazz-ballad'] as const)('%s regenerates from a fresh written score', engine => {
+    const initial = song(false);
+    const source = fromMusicXml(toMusicXml(initial));
+    const lead = source.parts[0];
+    const options = { ...base, engine, leadPartId: lead.id };
+    const first = arrangeForVoices(source, options);
+    const again = arrangeForVoices(source, first.arrangement!.options);
+    const sounding = (p: ScoreProject) => p.parts.map(part => part.notes.map(({ id, ...event }) => event));
+    expect(first.arrangement?.options.engine).toBe(engine);
+    expect(validateProject(first)).toEqual([]);
+    expect(first.parts.length).toBe(5);
+    expect(first.parts.slice(1).some(part => part.notes.length > 0)).toBe(true);
+    expect(sounding(first)).toEqual(sounding(again));
+    expect(soloOf(first)).toEqual(soloOf(arrangeForVoices(source, { ...options, engine: 'v2' })));
+  });
+});

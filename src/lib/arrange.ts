@@ -1,3 +1,6 @@
+import { arrangeGroove } from './arrangeGroove';
+import { arrangeJazzBallad } from './arrangeJazzBallad';
+import { arrangeLyrical } from './arrangeLyrical';
 import type {
   ArrangementOptions,
   ArrangementReport,
@@ -448,8 +451,13 @@ function mergeSustains(notes: NoteEvent[]): NoteEvent[] {
 export function arrangeForVoices(source: ScoreProject, options: ArrangementOptions): ScoreProject {
   const errors = validateProject(source);
   if (errors.length) throw new Error(errors.join('\n'));
-  if (options.preset === 'solo-satb')
-    return options.engine === 'source-chant' ? arrangeSourceChant(source, options) : arrangeSoloSatb(source, options);
+  if (options.preset === 'solo-satb') {
+    if (options.engine === 'source-chant' || options.engine === 'open-chant') return arrangeSourceChant(source, options);
+    if (options.engine === 'jazz-ballad') return arrangeJazzBallad(source, options);
+    if (options.engine === 'groove') return arrangeGroove(source, options);
+    if (options.engine === 'lyrical') return arrangeLyrical(source, options);
+    return arrangeSoloSatb(source, options);
+  }
   if (
     !(options.preset in ENSEMBLES) ||
     !['pop', 'choral', 'jazz'].includes(options.style) ||

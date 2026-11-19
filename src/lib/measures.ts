@@ -68,6 +68,12 @@ export function insertMeasures(project: ScoreProject, bar: number, count = 1): M
       ];
     return [chord];
   });
+  if (next.source.arrangementSections) {
+    const sections = next.source.arrangementSections;
+    const owner = [...sections].reverse().find(s => s.startBar <= bar);
+    if (owner) owner.bars += count;
+    for (const section of sections) if (section.startBar > bar) section.startBar += count;
+  }
   next.measures += count;
   next.updatedAt = new Date().toISOString();
   const shifted = shiftLayout(next, { at: bar, inserted: count });
@@ -131,6 +137,14 @@ export function deleteMeasures(project: ScoreProject, startBar: number, endBar =
     if (end > from + EPS) return [{ ...chord, duration: round(from - chord.start) }];
     return [chord];
   });
+  if (next.source.arrangementSections) {
+    const mapped = (position: number) => position - Math.min(count, Math.max(0, position - startBar));
+    next.source.arrangementSections = next.source.arrangementSections.flatMap(section => {
+      const first = mapped(section.startBar);
+      const bars = mapped(section.startBar + section.bars) - first;
+      return bars ? [{ ...section, startBar: first, bars }] : [];
+    });
+  }
   next.measures -= count;
   next.updatedAt = new Date().toISOString();
   const shifted = shiftLayout(next, { from: startBar, to: endBar });

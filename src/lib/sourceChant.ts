@@ -68,7 +68,7 @@ export function createSourceChant(
   scaffold: ScoreProject, source: ScoreProject,
   selection: { accompanimentIds: string[]; bassPartId: string },
   spans: Array<{ first: number; last: number }>,
-  options: { rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' | 'vocal-core'; editWindow?: { start: number; end: number }; joinWindowEdges?: boolean; recoverInstrumentalArpeggios?: boolean; variant?: number } = {},
+  options: { openVoicing?: boolean; rhythm?: 'phrase-pulse'; blockBars?: number; harmony?: 'sustained-bass' | 'vocal-core'; editWindow?: { start: number; end: number }; joinWindowEdges?: boolean; recoverInstrumentalArpeggios?: boolean; variant?: number } = {},
 ) {
   const bar = beatsPerBar(source);
   if (!selection.accompanimentIds.includes(selection.bassPartId)) throw Error('Bass staff must belong to selected accompaniment');
@@ -254,6 +254,7 @@ export function createSourceChant(
     }
   }
   const result = transferSourceToSatb(scaffold, control, ['chant-source-reduction'], spans, {
+    openVoicing: options.openVoicing,
     connectCommonTones: options.rhythm !== 'phrase-pulse', voiceRanges: [[64, 76], [57, 69], [50, 64], [40, 55]],
     melodyPartId: options.harmony === 'vocal-core' ? 'solo' : undefined,
     editWindow: options.editWindow,
