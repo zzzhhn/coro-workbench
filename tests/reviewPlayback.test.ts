@@ -29,6 +29,13 @@ describe('review playback', () => {
     expect(playbackPosition(13, jig)).toEqual({ beat: 24, bar: 8, pulse: 2 });
   });
 
+  it('keeps a seek rounded by the media clock on its intended bar', () => {
+    const score = { ...full, tempo: 65 };
+    const downbeat = 16 * 60 / score.tempo;
+    expect(playbackPosition(downbeat - .001, score)).toEqual({ beat: 16, bar: 5, pulse: 1 });
+    expect(playbackPosition(downbeat - .01, score).bar).toBe(4);
+  });
+
   it('moves through unevenly spaced visual columns and stops at the end barline', () => {
     const anchors = [{ beat: 4, x: 110 }, { beat: 5, x: 140 }, { beat: 8, x: 260 }];
     expect(playheadX(anchors, 4)).toBe(110);

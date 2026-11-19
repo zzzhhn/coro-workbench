@@ -42,7 +42,7 @@ let resizeTimer = 0;
 let persistenceError = false;
 const ratings = new Map<string, Rating>();
 const projects = new Map<string, ScoreProject>();
-const views = new Map<string, { versionIndex: number; part: string; browseBar: number; barsPerSystem: number; sectionId: string; following: boolean; time: number }>();
+const views = new Map<string, { versionIndex: number; part: string; browseBar: number; barsPerSystem: number; sectionId: string; time: number }>();
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const element = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id)! as T;
 const song = () => manifest.songs[songIndex];
@@ -101,7 +101,6 @@ function renderSong() {
   browseBar = savedView?.browseBar ?? 1;
   barsPerSystem = savedView?.barsPerSystem ?? 4;
   sectionId = savedView?.sectionId ?? 'all';
-  following = savedView?.following ?? true;
   pendingAudio = { time: savedView?.time ?? 0, playing: false };
   element('main').innerHTML = `<div class="song-heading"><div><h2>${esc(song().title)}</h2><p class="muted">${esc(song().feature ?? '')}</p>${song().issue ? `<p>${esc(song().issue)}</p>` : ''}</div><small>${esc(manifest.roundId)}</small></div>
   <div class="workspace"><section class="listening" aria-label="试听与读谱">
@@ -152,7 +151,6 @@ function renderSong() {
     if (!project) return;
     const audio = element<HTMLAudioElement>('audio');
     const time = (browseBar - 1) * beatsPerBar(project) * 60 / project.tempo;
-    setFollowing(true);
     if (pendingAudio) {
       pendingAudio = { time, playing: true };
       updateCursor(true);
@@ -206,14 +204,13 @@ function bindAudio(audio: HTMLAudioElement) {
   };
   audio.addEventListener('play', () => {
     if (!audio.isConnected) return;
-    draw();
+    updateCursor(true);
     if (!animationFrame) animationFrame = requestAnimationFrame(tick);
   });
   audio.addEventListener('seeking', () => {
     if (!audio.isConnected || pendingAudio) return;
     const external = assignedSeek === undefined || Math.abs(audio.currentTime - assignedSeek) > .06;
     assignedSeek = undefined;
-    if (external) setFollowing(true);
     updateCursor(external);
   });
   for (const event of ['timeupdate', 'seeked', 'pause', 'ended']) audio.addEventListener(event, draw);
@@ -336,7 +333,11 @@ function browseToBar(bar: number | undefined) {
   if (bar === undefined) return;
   const index = systemForBar(bar);
   if (index < 0) return;
-  setFollowing(false);
+  if (following && project) {
+    const time = (bar - 1) * beatsPerBar(project) * 60 / project.tempo;
+    if (pendingAudio) pendingAudio = { ...pendingAudio, time };
+    else seekAudio(element<HTMLAudioElement>('audio'), time);
+  }
   revealSystem(index, bar, true);
 }
 function readScrollPosition() {
@@ -344,7 +345,11 @@ function readScrollPosition() {
   const top = area.scrollTop;
   const left = area.scrollLeft;
   if (!systems.length || (top === scrollPosition.top && left === scrollPosition.left)) return;
-  setFollowing(false);
+  if (following && !element<HTMLAudioElement>('audio').paused) {
+    scrollPosition = { top, left };
+    updateCursor(true);
+    return;
+  }
   if (top !== scrollPosition.top) {
     const visibleTop = area.getBoundingClientRect().top + 12;
     const next = systems.findIndex(system => system.svg.getBoundingClientRect().top > visibleTop);
@@ -543,7 +548,7 @@ async function start() {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-song]');
       if (!button || Number(button.dataset.song) === songIndex) return;
       const audio = element<HTMLAudioElement>('audio');
-      views.set(song().id, { versionIndex, part, browseBar, barsPerSystem, sectionId, following, time: audioPosition().time });
+      views.set(song().id, { versionIndex, part, browseBar, barsPerSystem, sectionId, time: audioPosition().time });
       audio.pause();
       songIndex = Number(button.dataset.song);
       renderSong();

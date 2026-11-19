@@ -60,7 +60,11 @@ export function mappedVersionTime(
 
 export function playbackPosition(time: number, score: ScoreClock) {
   const { measure, step } = metronomeGrid(score);
-  const beat = Math.min(score.measures * measure, Math.max(0, time * score.tempo / 60));
+  // Media seek timestamps may round down to the preceding millisecond.
+  const rawBeat = Math.max(0, time * score.tempo / 60);
+  const nearestPulse = Math.round(rawBeat / step) * step;
+  const onPulse = Math.abs(nearestPulse - rawBeat) <= .002 * score.tempo / 60;
+  const beat = Math.min(score.measures * measure, onPulse ? nearestPulse : rawBeat);
   const bar = Math.min(score.measures, Math.floor((beat + BEAT_EPSILON) / measure) + 1);
   const pulse = Math.min(Math.round(measure / step), Math.floor((beat - (bar - 1) * measure + BEAT_EPSILON) / step) + 1);
   return { beat, bar, pulse };
