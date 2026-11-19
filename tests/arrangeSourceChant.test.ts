@@ -81,6 +81,16 @@ describe('source-chant experimental arrangement', () => {
 });
 
 describe('workbench score-led arrangements', () => {
+  it('retains source section boundaries after shortening a chant interlude', () => {
+    const source = song(false);
+    source.source.arrangementSections = [
+      { id: 'interlude', kind: 'interlude', label: 'Interlude', startBar: 1, bars: 1, energy: 1, texture: 'pad', bass: 'sustain' },
+      { id: 'return', kind: 'chorus', label: 'Return', startBar: 2, bars: 3, energy: 4, texture: 'answer', bass: 'pulse' },
+    ];
+    const result = arrangeForVoices(source, { ...base, engine: 'open-chant' });
+    expect(result.arrangement?.plan?.sections).toEqual(source.source.arrangementSections);
+  });
+
   it.each(['open-chant', 'lyrical', 'groove', 'jazz-ballad'] as const)('%s regenerates from a fresh written score', engine => {
     const initial = song(false);
     const source = fromMusicXml(toMusicXml(initial));
