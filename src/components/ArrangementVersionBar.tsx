@@ -44,7 +44,7 @@ export default function ArrangementVersionBar({
       <div className="arrangement-version-info">
         <div className="arrangement-version-heading">
           <strong>{isLatest ? '当前版' : '上一版'} <span>V{revision}</span></strong>
-          <span className="arrangement-method">{arrangementMethods[options.engine ?? 'v2']}{sourceChant && !!options.variant && ` · 变体 ${options.variant}`}</span>
+          <span className="arrangement-method">{arrangementMethods[options.engine ?? 'v2']}{groove && options.groovePhrasing === 'responsive' && ' · 随乐句变化'}{sourceChant && !!options.variant && ` · 变体 ${options.variant}`}</span>
         </div>
         <dl className="arrangement-version-sources">
           <div><dt>和声</dt><dd>{harmony}</dd></div>

@@ -489,6 +489,7 @@ export function validateProject(project: ScoreProject): string[] {
       !optionalText(options.leadPartId) ||
       (options.variant !== undefined && (!Number.isSafeInteger(options.variant) || options.variant < 0)) ||
       (options.engine !== undefined && !Object.hasOwn(arrangementMethods, options.engine)) ||
+      (options.groovePhrasing !== undefined && options.groovePhrasing !== 'responsive') ||
       (options.accompanimentIds !== undefined &&
         (!Array.isArray(options.accompanimentIds) || options.accompanimentIds.length > 32 ||
           options.accompanimentIds.some((id) => !boundedText(id)))) ||

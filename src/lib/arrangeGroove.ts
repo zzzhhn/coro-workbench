@@ -91,6 +91,91 @@ function fitMonody(input: Pitched[], voice: Voice, transpose: number, lyric: str
   return notes;
 }
 
+/** Register relative to this singer, averaged across adjacent bars. This still
+ * supplies local contrast when the plan describes a whole verse as one span. */
+function phraseLift(lead: Pitched[], sections: ArrangementSectionPlan[], measures: number, bar: number) {
+  const weights = Array.from({ length: measures }, () => ({ pitch: 0, beats: 0 }));
+  for (const note of lead) {
+    for (let i = Math.max(0, Math.floor(note.start / bar)); i < Math.min(measures, Math.ceil(endOf(note) / bar)); i++) {
+      const beats = overlap(note, { start: i * bar, end: (i + 1) * bar });
+      weights[i].pitch += beats * note.midi;
+      weights[i].beats += beats;
+    }
+  }
+  const sung = weights.filter(w => w.beats > 0).map(w => w.pitch / w.beats).sort((a, b) => a - b);
+  const low = sung[Math.floor(sung.length * .2)] ?? 0;
+  const high = sung[Math.floor(sung.length * .8)] ?? low;
+  const levels = sections.flatMap(section => Array<number>(section.bars).fill((section.energy - 1) / 4));
+  return weights.map((w, i) => {
+    const neighbours = [weights[i - 1], w, w, weights[i + 1]].filter(Boolean);
+    const beats = neighbours.reduce((sum, n) => sum + n.beats, 0);
+    if (!w.beats || !beats || high - low < 2) return levels[i];
+    const register = neighbours.reduce((sum, n) => sum + n.pitch, 0) / beats;
+    const relative = Math.max(0, Math.min(1, (register - low) / (high - low)));
+    return .7 * relative + .3 * levels[i];
+  });
+}
+
+/** Keep downbeats, changes of harmony and their source timing. In quieter
+ * phrases let the bass breathe instead of singing every ghost or octave echo. */
+function phraseBass(source: Pitched[], chords: ChordEvent[], sections: ArrangementSectionPlan[], levels: number[], bar: number, transpose: number) {
+  const notes: Pitched[] = [];
+  let chord = -1, section = 0;
+  for (const [i, n] of source.entries()) {
+    const bi = Math.floor(n.start / bar);
+    const lift = levels[bi] ?? .5;
+    while (section + 1 < sections.length && bi >= sections[section + 1].startBar - 1) section++;
+    const mode = sections[section].bass;
+    const previousChord = chord;
+    while (chord + 1 < chords.length && chords[chord + 1].start <= n.start + EPS) chord++;
+    const prev = source[i - 1], next = source[i + 1];
+    const anchor = !prev || Math.floor(prev.start / bar) !== bi || previousChord !== chord;
+    const echo = prev && pc(prev.midi) === pc(n.midi);
+    const returning = next && prev && pc(prev.midi) === pc(next.midi) && next.start - n.start <= 1;
+    if (!anchor && (mode === 'sustain' || lift < .46) && n.duration <= 1 && (echo || returning)) continue;
+    const last = notes.at(-1);
+    const sourceMotion = prev ? n.midi - prev.midi : 0;
+    const desired = last ? last.midi + Math.max(-12, Math.min(12, sourceMotion)) : BASS.center;
+    const contour = !anchor && mode === 'groove' ? .35 + lift * .95 : .28;
+    const cost = (m: number) => Math.abs(m - BASS.center) * .65 + Math.abs(m - desired) * contour
+      + (last ? Math.max(0, Math.abs(m - last.midi) - 7) * .9 : 0);
+    const midi = pitchesIn([pc(n.midi + transpose)], BASS.range).sort((a,b) => cost(a) - cost(b))[0];
+    const strength = .52 + .16 * lift + (anchor ? .08 : 0) + (n.velocity - .65) * .25;
+    scoreNote(BASS, notes, midi, { start: n.start, end: endOf(n), strength, lyric: !last || n.start - endOf(last) >= bar / 2 ? 'dum' : n.lyric });
+  }
+  return notes;
+}
+
+/** Enter underneath an established vowel or into the space after a line.
+ * Keep strong phrases connected, leaving the Solo's exposed attacks clear. */
+function sopranoResponse(span: Span, lead: Pitched[], motif: Pitched[], lift: number, section: ArrangementSectionPlan, bar: number): Task | null {
+  if (motif.length) return null;
+  const min = Math.min(.75, bar / 3);
+  const strength = .55 + lift * .17;
+  const task = (start: number, end: number) => end - start >= min - EPS ? { start, end, strength } : null;
+  if ((section.kind === 'chorus' || lift >= .62) && section.texture !== 'answer') return task(span.start, span.end);
+  // A repeated pitch can be several short syllables on one stable melodic tone.
+  // Join it from the second syllable so the first consonant remains exposed.
+  const repeated = lead.find((n, i) => i > 0 && n.midi === lead[i - 1].midi &&
+    n.start - endOf(lead[i - 1]) <= .5 && endOf(n) - lead[i - 1].start >= 1 &&
+    span.end - n.start >= min);
+  if (repeated && section.texture !== 'answer') return task(Math.max(span.start, repeated.start), span.end);
+  const spaces: Span[] = [];
+  let t = span.start;
+  for (const n of lead) {
+    if (n.start > t) spaces.push({ start: t, end: Math.min(n.start, span.end) });
+    t = Math.max(t, endOf(n));
+  }
+  if (t < span.end) spaces.push({ start: t, end: span.end });
+  const gap = spaces.sort((a,b) => (b.end-b.start) - (a.end-a.start))[0];
+  if (gap && gap.end - gap.start >= min) return task(gap.start, gap.end);
+  const anchor = lead.filter(n => n.duration >= Math.min(1, bar / 3))
+    .sort((a,b) => overlap(b, span) - overlap(a, span))[0];
+  if (anchor) return task(Math.max(span.start, anchor.start + .5), span.end);
+  if (lift >= .4 && lead.length) return task(Math.max(span.start, endOf(lead[0])), span.end);
+  return null;
+}
+
 function clash(a: number, b: number) {
   const distance = Math.abs(a - b);
   if (distance === 1 || distance === 13) return 34;
@@ -196,11 +281,24 @@ export function arrangeGroove(source: ScoreProject, options: ArrangementOptions)
   const cueSource = mono(asPitched(cueParts.flatMap(p => p.notes)), false);
   const sopranoCues = fitMonody(cueSource, UPPER[0], transpose, 'du', .61);
 
-  const slots = project.chords.map((chord, i) => ({
+  const chordSpans = project.chords.map((chord, i) => ({
     chord, start: chord.start,
     end: Math.min(chord.start + chord.duration, project.chords[i + 1]?.start ?? total, total),
   })).filter(slot => slot.end > slot.start + EPS);
-  const bass = fitMonody(sourceBass, BASS, transpose, 'dum', .69);
+  const levels = options.groovePhrasing === 'responsive' ? phraseLift(leadNotes, sections, source.measures, bar) : undefined;
+  // One written chord can sustain through a phrase or section boundary.
+  // Reconsider assignments at a barline; common tones still connect below.
+  const slots = levels ? chordSpans.flatMap(slot => {
+    const chunks = [];
+    for (let start = slot.start; start < slot.end - EPS;) {
+      const end = Math.min(slot.end, (Math.floor((start + EPS) / bar) + 1) * bar);
+      chunks.push({ ...slot, start, end });
+      start = end;
+    }
+    return chunks;
+  }) : chordSpans;
+  const bass = levels ? phraseBass(sourceBass, project.chords, sections, levels, bar, transpose)
+    : fitMonody(sourceBass, BASS, transpose, 'dum', .69);
   if (!bass.length) for (const { chord, start, end } of slots) {
     const notes = pitchesIn([bassClass(chord)], BASS.range);
     const midi = notes.sort((a, b) => Math.abs(a - BASS.center) - Math.abs(b - BASS.center))[0];
@@ -218,6 +316,9 @@ export function arrangeGroove(source: ScoreProject, options: ArrangementOptions)
     const bassHere = bass.filter(n => overlap(n, slot) > EPS);
     const motif = motifAt(slot);
     const tasks = upperTasks(section, slot, leadHere, motif, bar, (section.startBar - 1) * bar, options.style);
+    if (levels && leadHere.length && section.kind !== 'intro') {
+      tasks[0] = sopranoResponse(slot, leadHere, motif, levels[Math.floor(slot.start / bar)], section, bar);
+    }
     const next = chooseVoicing(slot.chord, tasks, leadHere, bassHere, motif, voicing, options.style);
     if (!next) continue;
     voicing = next;
@@ -260,7 +361,7 @@ export function arrangeGroove(source: ScoreProject, options: ArrangementOptions)
   if (!writtenChords.length) report.warnings.push('源谱没有可用的和弦标记，伴唱使用推断和弦，请对照原曲。');
   report.changes = [
     `Solo 保留已选主旋律的 ${leadNotes.length} 个发声音符、起拍和时值。`,
-    sourceBass.length ? 'Bass 保留独立源轨的起音与音级，移入可唱音区。' : 'Bass 按和弦到点支撑。',
+    sourceBass.length ? (levels ? 'Bass 依乐句保留源轨支点，在收束处留出空间。' : 'Bass 保留独立源轨的起音与音级，移入可唱音区。') : 'Bass 按和弦到点支撑。',
     '上三部沿和声变化连接共同音，空拍和乐句换气分开处理。',
   ];
   project.arrangement.report = report;
