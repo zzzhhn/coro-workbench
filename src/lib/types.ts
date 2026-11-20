@@ -180,6 +180,8 @@ export interface ArrangementPlan {
 }
 
 export interface ArrangementOptions {
+  /** Frozen creative input for a reproducible groove or lyrical pilot. */
+  formPlan?: { model: string; inputSHA256: string; sections: ArrangementSectionPlan[] };
   /** Zero (or omitted) uses the original voicing. */
   variant?: number;
   preset: 'satb' | 'ssaa' | 'ttbb' | 'solo-satb';

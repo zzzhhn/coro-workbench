@@ -1,3 +1,4 @@
+import { frozenFormPlan } from './auditionPlan';
 import { validWrittenSections } from './arrangementEngines';
 import { inspectArrangement } from './arrange';
 import { arrangeV2, defaultArrangementPlan } from './arrangeV2';
@@ -167,8 +168,9 @@ export function arrangeLyrical(source: ScoreProject, options: ArrangementOptions
   const writtenForm = source.source.arrangementSections;
   const supplied = validWrittenSections(writtenForm, source.measures) ? writtenForm : undefined;
   const fallback = defaultArrangementPlan(source);
-  const form = supplied?.length ? supplied : fallback.sections;
-  const plan = {
+  const frozen = frozenFormPlan(options, source.measures);
+  const form = frozen?.sections ?? supplied ?? fallback.sections;
+  const plan = frozen ?? {
     ...fallback,
     planner: supplied?.length ? ('manual' as const) : fallback.planner,
     sections: form,

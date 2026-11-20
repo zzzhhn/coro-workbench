@@ -1,3 +1,4 @@
+import { frozenFormPlan } from './auditionPlan';
 import { arrangementMethods, validWrittenSections } from './arrangementEngines';
 import * as ToneMidi from '@tonejs/midi';
 import { normalizeMidiNotation, projectArrangementNotation } from './midiNotation';
@@ -496,6 +497,11 @@ export function validateProject(project: ScoreProject): string[] {
       problems.push('编配选项无效。');
     if (arrangement?.revision !== undefined && (!Number.isSafeInteger(arrangement.revision) || arrangement.revision < 1))
       problems.push('编配版本无效。');
+    if (options?.formPlan !== undefined) {
+      // A saved plan describes the source at generation time. The user may edit the result.
+      try { frozenFormPlan(options); }
+      catch { problems.push('保存的全曲构思无效。'); }
+    }
     const locks = arrangement?.locks;
     if (locks !== undefined && (!Array.isArray(locks) || locks.length > project.measures ||
       locks.some((lock, index) => !lock || !Number.isInteger(lock.first) || !Number.isInteger(lock.last) ||
