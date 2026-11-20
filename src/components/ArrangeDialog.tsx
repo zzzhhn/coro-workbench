@@ -221,6 +221,11 @@ export default function ArrangeDialog({
           </button>}
           {options.engine === 'groove' && (
             <div className="chant-sources">
+              <label className="chant-source">
+                <input type="checkbox" checked={options.groovePhrasing === 'responsive'}
+                  onChange={event => setOptions({ ...options, groovePhrasing: event.target.checked ? 'responsive' : undefined })} />
+                女高与低音随乐句变化
+              </label>
               <label className="chant-bass">低音取自
                 <select value={options.bassPartId ?? ''} onChange={event => setOptions({ ...options, bassPartId: event.target.value || undefined })}>
                   <option value="">自动匹配低音声部</option>

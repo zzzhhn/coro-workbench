@@ -180,6 +180,8 @@ export interface ArrangementPlan {
 }
 
 export interface ArrangementOptions {
+  /** Opt into phrase-responsive Soprano and Bass writing on the groove engine. */
+  groovePhrasing?: 'responsive';
   /** Frozen creative input for a reproducible groove or lyrical pilot. */
   formPlan?: { model: string; inputSHA256: string; sections: ArrangementSectionPlan[] };
   /** Zero (or omitted) uses the original voicing. */
