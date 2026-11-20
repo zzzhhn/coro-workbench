@@ -34,18 +34,18 @@ export function insertMeasures(project: ScoreProject, bar: number, count = 1): M
     const notes: NoteEvent[] = [];
     for (const note of part.notes) {
       const end = note.start + note.duration;
-      if (note.start >= at - EPS) notes.push({ ...note, start: round(note.start + length) });
+      if (note.start >= at - EPS) notes.push({ ...note, start: note.start + length });
       else if (end > at + EPS) {
         // A note held across the insertion point: keep the attack, continue after the new bars.
         split++;
-        notes.push({ ...note, duration: round(at - note.start) });
+        notes.push({ ...note, duration: at - note.start });
         // The tail keeps the sourceRef: it is the same printed note, so a click on it in the
         // source panel still finds the original bar.
         const tail: NoteEvent = {
           ...note,
           id: editId(),
-          start: round(at + length),
-          duration: round(end - at),
+          start: at + length,
+          duration: end - at,
         };
         delete tail.lyric;
         notes.push(tail);
@@ -60,14 +60,22 @@ export function insertMeasures(project: ScoreProject, bar: number, count = 1): M
   }
   next.chords = next.chords.flatMap((chord): ChordEvent[] => {
     const end = chord.start + chord.duration;
-    if (chord.start >= at - EPS) return [{ ...chord, start: round(chord.start + length) }];
+    if (chord.start >= at - EPS) return [{ ...chord, start: chord.start + length }];
     if (end > at + EPS)
       return [
-        { ...chord, duration: round(at - chord.start) },
-        { ...chord, start: round(at + length), duration: round(end - at) },
+        { ...chord, duration: at - chord.start },
+        { ...chord, start: at + length, duration: end - at },
       ];
     return [chord];
   });
+  if (next.arrangement?.locks) {
+    next.arrangement.locks = next.arrangement.locks.flatMap(({ first, last }) => {
+      if (bar <= first) return [{ first: first + count, last: last + count }];
+      if (bar > last) return [{ first, last }];
+      // The inserted bars have no accepted material, so leave them unlocked.
+      return [{ first, last: bar - 1 }, { first: bar + count, last: last + count }];
+    });
+  }
   if (next.source.arrangementSections) {
     const sections = next.source.arrangementSections;
     const owner = [...sections].reverse().find(s => s.startBar <= bar);
@@ -86,8 +94,8 @@ export function insertMeasures(project: ScoreProject, bar: number, count = 1): M
 /**
  * Delete bars [startBar, endBar] in every part. Contents of those bars are
  * removed; a note held into them from earlier is cut at the deletion point;
- * everything after moves earlier. A note that starts inside and rings past the
- * deleted range is removed with its bar (reported).
+ * everything after moves earlier. A note starting inside the cut is removed
+ * with its bar. A held tail that reaches surviving locked measures is kept.
  */
 export function deleteMeasures(project: ScoreProject, startBar: number, endBar = startBar): MeasureChange {
   if (
@@ -105,20 +113,31 @@ export function deleteMeasures(project: ScoreProject, startBar: number, endBar =
   const to = endBar * bar;
   const length = to - from;
   const next = structuredClone(project);
+  // A note crossing the cut and ending beyond this beat reaches a surviving lock.
+  const nextLock = next.arrangement?.locks?.find(lock => lock.last > endBar);
+  const lockedTailStart = nextLock ? Math.max(to, (nextLock.first - 1) * bar) : Infinity;
   let removed = 0;
   let ringing = 0;
   let cut = 0;
+  let keptTails = 0;
   for (const part of next.parts) {
     const notes: NoteEvent[] = [];
     for (const note of part.notes) {
       const end = note.start + note.duration;
-      if (note.start >= to - EPS) notes.push({ ...note, start: round(note.start - length) });
-      else if (note.start >= from - EPS) {
+      if (note.start >= to - EPS) notes.push({ ...note, start: Math.max(0, note.start - length) });
+      else if (end > lockedTailStart + EPS) {
+        keptTails++;
+        if (note.start >= from - EPS) {
+          const tail = { ...note, start: from, duration: end - to };
+          delete tail.lyric;
+          notes.push(tail);
+        } else notes.push({ ...note, duration: note.duration - length });
+      } else if (note.start >= from - EPS) {
         removed++;
         if (end > to + EPS) ringing++;
       } else if (end > from + EPS) {
         cut++;
-        notes.push({ ...note, duration: round(from - note.start) });
+        notes.push({ ...note, duration: from - note.start });
       } else notes.push(note);
     }
     part.notes = notes;
@@ -132,13 +151,25 @@ export function deleteMeasures(project: ScoreProject, startBar: number, endBar =
   }
   next.chords = next.chords.flatMap((chord): ChordEvent[] => {
     const end = chord.start + chord.duration;
-    if (chord.start >= to - EPS) return [{ ...chord, start: round(chord.start - length) }];
+    if (chord.start >= to - EPS) return [{ ...chord, start: Math.max(0, chord.start - length) }];
+    if (end > lockedTailStart + EPS) {
+      if (chord.start >= from - EPS) return [{ ...chord, start: from, duration: end - to }];
+      return [{ ...chord, duration: chord.duration - length }];
+    }
     if (chord.start >= from - EPS) return [];
-    if (end > from + EPS) return [{ ...chord, duration: round(from - chord.start) }];
+    if (end > from + EPS) return [{ ...chord, duration: from - chord.start }];
     return [chord];
   });
+  // Map both ends of a half-open measure range, collapsing the removed bars.
+  const mapped = (position: number) => position - Math.min(count, Math.max(0, position - startBar));
+  if (next.arrangement?.locks) {
+    next.arrangement.locks = next.arrangement.locks.flatMap(lock => {
+      const first = mapped(lock.first);
+      const last = mapped(lock.last + 1) - 1;
+      return first <= last ? [{ first, last }] : [];
+    });
+  }
   if (next.source.arrangementSections) {
-    const mapped = (position: number) => position - Math.min(count, Math.max(0, position - startBar));
     next.source.arrangementSections = next.source.arrangementSections.flatMap(section => {
       const first = mapped(section.startBar);
       const bars = mapped(section.startBar + section.bars) - first;
@@ -152,6 +183,7 @@ export function deleteMeasures(project: ScoreProject, startBar: number, endBar =
   if (removed) warnings.push(`删除了 ${removed} 个音符/休止。`);
   if (ringing) warnings.push(`其中 ${ringing} 个从被删小节延续到后面的长音一并删除。`);
   if (cut) warnings.push(`${cut} 个延入被删小节的长音在删除处截短。`);
+  if (keptTails) warnings.push(`${keptTails} 个跨越被删小节的长音保留了延入锁定小节的部分。`);
   audioWarning(project, warnings);
   return { project: shifted, warnings };
 }
