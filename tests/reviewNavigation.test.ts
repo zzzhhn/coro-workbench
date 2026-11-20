@@ -33,6 +33,7 @@ describe('blind review navigation', () => {
     const sections = reviewSections([project(8, 'Verse')]);
     expect(sections.map(s => s.id)).toEqual(['all', 'section-0']);
     expect(sections[1].label).toBe('Verse · 1–8');
+    expect(reviewSections([project(8, 'Source identifying intro')], undefined, true)[1].label).toBe('1–8 小节');
   });
 
   it('rejects absent or invalid score lengths rather than inventing ranges', () => {
