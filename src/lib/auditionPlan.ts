@@ -1,4 +1,4 @@
-import type { ArrangementPlan, ArrangementSectionPlan } from './types';
+import type { ArrangementOptions, ArrangementPlan, ArrangementSectionPlan } from './types';
 
 const allowed = {
   kind: ['intro', 'verse', 'prechorus', 'chorus', 'bridge', 'interlude', 'outro'],
@@ -20,11 +20,11 @@ export function validateSectionWriting(
 
 /** External creative choices are constrained to what the shared realizer can actually play. */
 export function wholeSongPlan(
-  measures: number,
+  measures: number | undefined,
   sections: ArrangementSectionPlan[],
   model: string,
 ): ArrangementPlan {
-  if (typeof model !== 'string' || !model.trim() || !Array.isArray(sections) || !sections.length)
+  if (typeof model !== 'string' || !model.trim() || !Array.isArray(sections) || !sections.length || sections.length > 2048)
     throw Error('缺少全曲构思或规划来源。');
   let next = 1;
   const normalized = sections.map((s) => {
@@ -52,6 +52,14 @@ export function wholeSongPlan(
       rationale: s.rationale,
     };
   });
-  if (next !== measures + 1) throw Error('计划总长度与原谱不符。');
+  if (next > 2049 || (measures !== undefined && next !== measures + 1)) throw Error('计划总长度与原谱不符。');
   return { version: 2, ensemble: 'solo+satb', planner: 'model', model, sections: normalized };
+}
+
+export function frozenFormPlan(options: ArrangementOptions, measures?: number): ArrangementPlan | undefined {
+  const saved = options.formPlan;
+  if (saved === undefined) return undefined;
+  if (!saved || options.preset !== 'solo-satb' || !['groove', 'lyrical'].includes(options.engine ?? '') ||
+      !/^[a-f0-9]{64}$/.test(saved.inputSHA256)) throw Error('全曲构思与编配选项不符。');
+  return wholeSongPlan(measures, saved.sections, saved.model);
 }

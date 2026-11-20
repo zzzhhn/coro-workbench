@@ -1,3 +1,4 @@
+import { frozenFormPlan } from './auditionPlan';
 import { validWrittenSections } from './arrangementEngines';
 import { inferChords, inspectArrangement, recommendLeadPart } from './arrange';
 import { beatsPerBar, newId, transposeChordSymbol, transposeKey, validateProject } from './music';
@@ -178,7 +179,8 @@ export function arrangeGroove(source: ScoreProject, options: ArrangementOptions)
   const bar = beatsPerBar(source);
   const total = bar * source.measures;
   const transpose = options.transpose;
-  const sections = scoreForm(source, lead, bar);
+  const frozen = frozenFormPlan(options, source.measures);
+  const sections = frozen?.sections ?? scoreForm(source, lead, bar);
   const leadNotes = lead.map(n => ({ ...n, midi: n.midi + transpose }));
   const writtenChords = source.chords.filter(chord => chord.pitches.length);
   project.chords = (writtenChords.length ? writtenChords : inferChords(source)).map(chord => ({
@@ -249,7 +251,7 @@ export function arrangeGroove(source: ScoreProject, options: ArrangementOptions)
   project.updatedAt = new Date().toISOString();
   project.arrangement = {
     options: { ...options, engine: 'groove', percussion: false, leadPartId: leadPart.id },
-    plan: { version: 2, planner: validWrittenSections(source.source.arrangementSections, source.measures) ? 'manual' : 'rule', ensemble: 'solo+satb', sections },
+    plan: frozen ?? { version: 2, planner: validWrittenSections(source.source.arrangementSections, source.measures) ? 'manual' : 'rule', ensemble: 'solo+satb', sections },
     revision: 1,
     report: { warnings: [], changes: [], ranges: [] },
   };

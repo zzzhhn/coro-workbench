@@ -119,7 +119,7 @@ export default function ArrangeDialog({
             aria-checked={preset.id === options.preset}
             aria-describedby={locked ? lockHelpId : undefined}
             disabled={locked && preset.id !== options.preset}
-            onClick={() => setOptions({ ...options, preset: preset.id })}
+            onClick={() => setOptions({ ...options, formPlan: preset.id === options.preset ? options.formPlan : undefined, preset: preset.id })}
           >
             <div className="voice-stacks">
               {(preset.id === 'solo-satb' ? [40, 34, 48, 42, 29] : [34, 48, 42, 29]).map((height, index) => (
@@ -146,7 +146,7 @@ export default function ArrangeDialog({
             value={options.leadPartId}
             disabled={locked}
             aria-describedby={locked ? lockHelpId : undefined}
-            onChange={(event) => setOptions({ ...options, leadPartId: event.target.value })}
+            onChange={(event) => setOptions({ ...options, formPlan: undefined, leadPartId: event.target.value })}
           >
             {project.parts
               .filter((part) => part.role !== 'percussion')
@@ -205,17 +205,20 @@ export default function ArrangeDialog({
           <select aria-label="编配方式" value={options.engine ?? 'v2'} onChange={event => {
             const engine = event.target.value as ArrangementEngine;
             if (engine !== 'source-chant' && engine !== 'open-chant') {
-              setOptions({ ...options, engine, accompanimentIds: undefined, bassPartId: undefined });
+              setOptions({ ...options, formPlan: undefined, engine, accompanimentIds: undefined, bassPartId: undefined });
               return;
             }
             const selection = defaultChantSelection(project, options.leadPartId);
-            setOptions({ ...options, engine,
+            setOptions({ ...options, formPlan: undefined, engine,
               accompanimentIds: selectedSources.length ? selectedSources : selection.accompanimentIds,
               bassPartId: selectedSources.includes(options.bassPartId ?? '') ? options.bassPartId : selection.bassPartId,
             });
           }}>
             {Object.entries(arrangementMethods).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
+          {options.formPlan && <button type="button" onClick={() => setOptions({ ...options, formPlan: undefined })}>
+            改用自动段落计划
+          </button>}
           {options.engine === 'groove' && (
             <div className="chant-sources">
               <label className="chant-bass">低音取自
