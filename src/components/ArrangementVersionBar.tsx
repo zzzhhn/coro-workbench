@@ -1,3 +1,4 @@
+import { arrangementMethods } from '../lib/arrangementEngines';
 import { ArrowsLeftRight, LockSimple } from '@phosphor-icons/react';
 import { useMemo } from 'react';
 import type { ScoreProject } from '../lib/types';
@@ -24,12 +25,18 @@ export default function ArrangementVersionBar({
   const otherRevision = previous?.arrangement?.revision ?? 1;
   const isLatest = !previous || revision >= otherRevision;
   const options = arrangement.options;
-  const sourceChant = options.preset === 'solo-satb' && options.engine === 'source-chant';
-  const sourceName = (id: string) => candidates.find((candidate) => candidate.id === id)?.label ?? '来源声部已不可用';
+  const sourceChant = options.preset === 'solo-satb' && (options.engine === 'source-chant' || options.engine === 'open-chant');
+  const sourceName = (id: string) => candidates.find((candidate) => candidate.id === id)?.label
+    ?? source.parts.find(part => part.id === id)?.name ?? '来源声部已不可用';
   const harmony = sourceChant
     ? options.accompanimentIds?.length ? options.accompanimentIds.map(sourceName).join('、') : '未记录'
-    : '按段落生成';
-  const bass = sourceChant ? options.bassPartId ? sourceName(options.bassPartId) : '未记录' : '自动生成';
+    : source.chords.length ? '源谱和弦' : '按段落推断';
+  const groove = options.preset === 'solo-satb' && options.engine === 'groove';
+  const grooveBass = groove ? source.parts.find(p => p.id === options.bassPartId && p.id !== options.leadPartId)
+    ?? source.parts.find(p => p.role === 'bass' && p.id !== options.leadPartId) : undefined;
+  const bass = sourceChant && options.bassPartId ? sourceName(options.bassPartId) : grooveBass?.name ?? '按和弦配音';
+  const cues = groove ? source.parts.filter(p => p.role === 'instrument' && p.id !== grooveBass?.id
+    && p.id !== options.leadPartId && options.accompanimentIds?.includes(p.id)) : [];
   const locks = arrangement.locks ?? [];
 
   return (
@@ -37,11 +44,12 @@ export default function ArrangementVersionBar({
       <div className="arrangement-version-info">
         <div className="arrangement-version-heading">
           <strong>{isLatest ? '当前版' : '上一版'} <span>V{revision}</span></strong>
-          <span className="arrangement-method">{sourceChant ? '源谱吟唱' : '默认编配'}{sourceChant && !!options.variant && ` · 变体 ${options.variant}`}</span>
+          <span className="arrangement-method">{arrangementMethods[options.engine ?? 'v2']}{sourceChant && !!options.variant && ` · 变体 ${options.variant}`}</span>
         </div>
         <dl className="arrangement-version-sources">
           <div><dt>和声</dt><dd>{harmony}</dd></div>
           <div><dt>低音</dt><dd>{bass}</dd></div>
+          {cues.length > 0 && <div><dt>动机</dt><dd>{cues.map(p => p.name).join('、')}</dd></div>}
         </dl>
         {locks.length > 0 && (
           <p className="arrangement-version-locks">

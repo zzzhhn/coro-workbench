@@ -1,3 +1,4 @@
+import { arrangementMethods, validWrittenSections } from './arrangementEngines';
 import * as ToneMidi from '@tonejs/midi';
 import { normalizeMidiNotation, projectArrangementNotation } from './midiNotation';
 import { musicXmlKind, parseChord } from './chordSymbols';
@@ -407,6 +408,8 @@ export function validateProject(project: ScoreProject): string[] {
       ))
   )
     problems.push('乐器候选信息无效。');
+  if (project.source?.arrangementSections !== undefined && !validWrittenSections(project.source.arrangementSections))
+    problems.push('源谱中的段落标记无效。');
   if (project.source?.analysis !== undefined) {
     const analysis = project.source.analysis;
     const rhythm = analysis?.rhythm;
@@ -484,7 +487,7 @@ export function validateProject(project: ScoreProject): string[] {
       Math.abs(options.transpose) > 24 ||
       !optionalText(options.leadPartId) ||
       (options.variant !== undefined && (!Number.isSafeInteger(options.variant) || options.variant < 0)) ||
-      (options.engine !== undefined && !['v2', 'source-chant'].includes(options.engine)) ||
+      (options.engine !== undefined && !Object.hasOwn(arrangementMethods, options.engine)) ||
       (options.accompanimentIds !== undefined &&
         (!Array.isArray(options.accompanimentIds) || options.accompanimentIds.length > 32 ||
           options.accompanimentIds.some((id) => !boundedText(id)))) ||

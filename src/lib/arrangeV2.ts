@@ -8,6 +8,7 @@ import type {
   ScoreProject,
 } from './types';
 import { beatsPerBar, newId, transposeChordSymbol, transposeKey, validateProject } from './music';
+import { validWrittenSections } from './arrangementEngines';
 import { inferChords, inspectArrangement, recommendLeadPart } from './arrange';
 import { planVocalBreaths } from './vocalBreathing';
 import { phraseTexture } from './phraseTexture';
@@ -61,6 +62,9 @@ function slotFor(chord: ChordEvent): Slot {
 }
 
 export function defaultArrangementPlan(project: ScoreProject): ArrangementPlan {
+  const written = project.source.arrangementSections;
+  if (validWrittenSections(written, project.measures))
+    return { version: 2, planner: 'manual', ensemble: 'solo+satb', sections: structuredClone(written) };
   const bar = beatsPerBar(project);
   const lead = recommendLeadPart(project);
   const firstLead = lead?.notes.find((note) => note.midi !== null)?.start ?? 0;

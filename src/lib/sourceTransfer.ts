@@ -28,6 +28,8 @@ export interface SourceTransferOptions {
   reducePerformedGraceNotes?: boolean;
   connectCommonTones?: boolean;
   voiceRanges?: Array<[number, number]>;
+  /** Favor a higher sung register and recall a voicing when the written phrase returns. */
+  openVoicing?: boolean;
   /** Optional register allocation against a fixed melody; never rewrites it. */
   melodyPartId?: string;
   /** Optional absolute-beat repair window inside the context spans. */
@@ -121,6 +123,7 @@ export function transferSourceToSatb(
     const relevant = notes.filter(n => n.start < b && n.start + n.duration > a);
     const boundaries = [...new Set([a, b, ...relevant.flatMap(n => [Math.max(a, n.start), Math.min(b, n.start + n.duration)])])].sort((x, y) => x - y);
     const output: NoteEvent[][] = IDS.map(() => []);
+    const centers = options.openVoicing ? [73, 65, 60, 45] : CENTRES;
     const frames: Array<{ start: number; end: number; active: Pitched[]; pitches: number[]; kept: number[];
       choices: Array<{ voicing: number[]; cost: number }> }> = [];
     for (let i = 0; i + 1 < boundaries.length; i++) {
@@ -163,8 +166,10 @@ export function transferSourceToSatb(
         const lowCluster = melody && t < 55 && t - bass <= 2 ? 4 : 0;
         const clash = lead.reduce((sum, l) => sum + l.weight * v.slice(0, 3).filter(m =>
           [1, 13].includes(Math.abs(m - l.midi))).length, 0);
-        const c = v.reduce((sum, n, voice) => sum + Math.abs(n - CENTRES[voice]) * .35, 0)
-          + (s === alto ? 2 : 0) + (alto === t ? 2 : 0) + leadCost + lowCluster;
+        const c = v.reduce((sum, n, voice) => sum + Math.abs(n - centers[voice]) * (options.openVoicing ? .65 : .35), 0)
+          + (s === alto ? 2 : 0) + (alto === t ? 2 : 0) + leadCost + lowCluster
+          + (options.openVoicing ? ((s - alto === 1 ? 6 : 0) + (alto - t === 1 ? 6 : 0)
+            + (t - bass <= 4 && bass < 50 ? 5 : 0)) : 0);
         voicings.push({ voicing: v, cost: c, clash });
       }
       if (!voicings.length) throw Error(`No source-faithful SATB allocation at beat ${start}`);
@@ -201,7 +206,26 @@ export function transferSourceToSatb(
       });
       return paths;
     };
-    const baseline = allocate()[0];
+    let baseline = allocate()[0];
+    if (options.openVoicing && melody) {
+      // Recall only when the bass, harmonic content and sung pitches at this
+      // metrical position recur. Each legal alternative still comes from this frame.
+      const firstAppearance = new Map<string, number>();
+      frames.forEach((frame, i) => {
+        const barStart = Math.floor(frame.start / bar) * bar;
+        const phrase = melody.notes.filter(n => n.midi !== null && n.start < barStart + bar && n.start + n.duration > barStart)
+          .map(n => [Math.round((n.start - barStart) * 4), n.midi]);
+        if (!phrase.length) return;
+        const key = JSON.stringify([phrase, frame.start - barStart, pc(frame.active[0].midi), [...frame.kept].sort()]);
+        const first = firstAppearance.get(key);
+        if (first === undefined) firstAppearance.set(key, i);
+        else for (const choice of frame.choices) {
+          choice.cost += choice.voicing.reduce((cost, pitch, voice) =>
+            cost + Math.min(7, Math.abs(pitch - baseline.history[first][voice])) * .4, 0);
+        }
+      });
+      baseline = allocate()[0];
+    }
     let selected = baseline;
     if (Number.isSafeInteger(options.variant) && options.variant! > 0 && frames.length) {
       // Re-run only octave/voice allocation, freezing the exact default bass.

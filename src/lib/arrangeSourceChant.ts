@@ -85,6 +85,35 @@ function evidenceSource(source: ScoreProject, ids: string[], transpose: number):
   return copy;
 }
 
+/** Inside a long unaccompanied-by-Solo phrase, expose the written upper line,
+ * then hand the ear back to the inner voices before the singer's pickup. */
+function shapeInstrumentalReturns(project: ScoreProject) {
+  const lead = project.parts.find(part => part.role === 'lead');
+  if (!lead) return;
+  const bar = beatsPerBar(project);
+  let previousEnd = 0;
+  for (const note of [...lead.notes].filter(n => n.midi !== null).sort((a, b) => a.start - b.start)) {
+    const from = Math.ceil(previousEnd / bar) * bar;
+    const end = Math.floor(note.start / bar) * bar;
+    if (previousEnd > 0 && end - from >= 2 * bar) {
+      const handoff = from + Math.max(1, Math.floor((end - from) / bar / 2)) * bar;
+      // Bass carries through the exchange. Take breathing space only within
+      // this interlude, retaining any onset or release outside its boundaries.
+      for (const [id, a, b] of [['voice-a', from, handoff], ['voice-s', handoff, end]] as const) {
+        const part = project.parts.find(p => p.id === id);
+        if (!part) continue;
+        part.notes = part.notes.flatMap(n => {
+          const until = n.start + n.duration;
+          if (until <= a || n.start >= b) return [n];
+          return [...(n.start < a ? [{ ...n, duration: a - n.start }] : []),
+            ...(until > b ? [{ ...n, id: n.id + '-return', start: b, duration: until - b, lyric: 'Ooh' }] : [])];
+        });
+      }
+    }
+    previousEnd = Math.max(previousEnd, note.start + note.duration);
+  }
+}
+
 /**
  * Experimental Solo + SATB: the Solo and ensemble come from arrangeV2, then the
  * backing is rebuilt from the reliable source accompaniment as quiet chant.
@@ -107,6 +136,7 @@ export function arrangeSourceChant(source: ScoreProject, options: ArrangementOpt
   try {
     chant = createSourceChant(scaffold, evidence, { accompanimentIds, bassPartId }, [{ first: 1, last: source.measures }], {
       harmony: 'vocal-core',
+      openVoicing: options.engine === 'open-chant',
       recoverInstrumentalArpeggios: true,
       variant: options.variant,
     });
@@ -114,6 +144,7 @@ export function arrangeSourceChant(source: ScoreProject, options: ArrangementOpt
     throw new Error(`源谱吟唱无法为这份谱生成可唱的四声部：${error instanceof Error ? error.message : String(error)}。可换伴奏声部或改用默认编配。`);
   }
   const project = chant.project;
+  if (options.engine === 'open-chant') shapeInstrumentalReturns(project);
   const bar = beatsPerBar(project);
   const labels = chantSourceOptions(source, leadPartId);
   const name = (id: string) => labels.find((option) => option.id === id)?.label ?? id;
@@ -121,6 +152,7 @@ export function arrangeSourceChant(source: ScoreProject, options: ArrangementOpt
   const changes = [
     `实验编配·源谱吟唱：S/A/T/B 来自原谱伴奏的和声落点（${accompanimentIds.map(name).join('、')}；低音取「${name(bassPartId)}」），以长音吟唱呈现。Solo 与默认编配完全相同。`,
     `识别出 ${chant.anchors.length} 个和声落点，其中 ${chant.anchors.filter((anchor) => anchor.reason === 'instrumental-arpeggio').length} 个来自分解和弦；安排 ${chant.breaths.length} 处换气。`,
+    ...(options.engine === 'open-chant' ? ['相同旋律与和声落点优先复用配音，提高女高和男高的舒适重心；间奏让上声部交替接句。'] : []),
     ...(omitted ? [`${omitted} 处原谱和弦超过四个音级，已保留低音和最高的源谱音，其余音级省略。`] : []),
     '此实验只在个人电脑上《空耳》的部分片段（13–20、21–28、45–52 小节）获得过试听认可；其他段落和其他歌曲都还未经听感验收。',
   ];
@@ -132,7 +164,7 @@ export function arrangeSourceChant(source: ScoreProject, options: ArrangementOpt
     ? [`${silentBars.length} 个小节原谱伴奏没有可用的和声落点，背景声部保持休止（例如第 ${silentBars.slice(0, 5).map((index) => index + 1).join('、')} 小节）。`]
     : [];
   project.arrangement = {
-    options: { ...options, preset: 'solo-satb', percussion: false, leadPartId, engine: 'source-chant', accompanimentIds, bassPartId },
+    options: { ...options, preset: 'solo-satb', percussion: false, leadPartId, engine: options.engine === 'open-chant' ? 'open-chant' : 'source-chant', accompanimentIds, bassPartId },
     plan: scaffold.arrangement?.plan,
     report: { changes, warnings, ranges: [] },
   };

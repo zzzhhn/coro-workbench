@@ -1,3 +1,4 @@
+import { arrangementMethods, type ArrangementEngine } from '../lib/arrangementEngines';
 import { useId, useState } from 'react';
 import { ArrowRight, Check, LockSimple, MusicNotes, Sparkle, X } from '@phosphor-icons/react';
 import Modal from './Modal';
@@ -101,7 +102,8 @@ export default function ArrangeDialog({
   };
   const chantOptions = chantSourceOptions(project, options.leadPartId);
   const selectedSources = (options.accompanimentIds ?? []).filter((id) => chantOptions.some((option) => option.id === id));
-  const sourceChant = options.preset === 'solo-satb' && options.engine === 'source-chant';
+  const sourceChant = options.preset === 'solo-satb' && (options.engine === 'source-chant' || options.engine === 'open-chant');
+  const grooveParts = project.parts.filter(part => part.id !== options.leadPartId && part.role !== 'percussion');
   const chantBlocked = sourceChant && (!selectedSources.length || !selectedSources.includes(options.bassPartId ?? ''));
   return (
     <Modal title="阿卡贝拉编配" eyebrow="ARRANGEMENT" onClose={onClose} wide>
@@ -200,41 +202,40 @@ export default function ArrangeDialog({
       {options.preset === 'solo-satb' && (
         <fieldset className="arrange-engine" aria-label="编配方式">
           <legend>编配方式</legend>
-          <label className={`arrange-engine-choice ${options.engine !== 'source-chant' ? 'selected' : ''}`}>
-            <input
-              type="radio"
-              name="arrange-engine"
-              checked={options.engine !== 'source-chant'}
-              onChange={() => setOptions({ ...options, engine: 'v2' })}
-            />
-            <span>
-              <strong>默认编配</strong>
-              <small>按段落安排背景织体与低音。</small>
-            </span>
-          </label>
-          <label className={`arrange-engine-choice ${options.engine === 'source-chant' ? 'selected' : ''}`}>
-            <input
-              type="radio"
-              name="arrange-engine"
-              checked={options.engine === 'source-chant'}
-              onChange={() => {
-                const selection = defaultChantSelection(project, options.leadPartId);
-                setOptions({
-                  ...options,
-                  engine: 'source-chant',
-                  accompanimentIds: options.accompanimentIds?.length ? options.accompanimentIds : selection.accompanimentIds,
-                  bassPartId: options.bassPartId ?? selection.bassPartId,
-                });
-              }}
-            />
-            <span>
-              <strong>
-                源谱吟唱 <em className="experimental-tag">实验</em>
-              </strong>
-              <small>从原谱伴奏提取和声，背景改为长音吟唱，整首生成。只在少数片段听过，需逐段试听。</small>
-            </span>
-          </label>
-          {options.engine === 'source-chant' && (
+          <select aria-label="编配方式" value={options.engine ?? 'v2'} onChange={event => {
+            const engine = event.target.value as ArrangementEngine;
+            if (engine !== 'source-chant' && engine !== 'open-chant') {
+              setOptions({ ...options, engine, accompanimentIds: undefined, bassPartId: undefined });
+              return;
+            }
+            const selection = defaultChantSelection(project, options.leadPartId);
+            setOptions({ ...options, engine,
+              accompanimentIds: selectedSources.length ? selectedSources : selection.accompanimentIds,
+              bassPartId: selectedSources.includes(options.bassPartId ?? '') ? options.bassPartId : selection.bassPartId,
+            });
+          }}>
+            {Object.entries(arrangementMethods).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+          {options.engine === 'groove' && (
+            <div className="chant-sources">
+              <label className="chant-bass">低音取自
+                <select value={options.bassPartId ?? ''} onChange={event => setOptions({ ...options, bassPartId: event.target.value || undefined })}>
+                  <option value="">自动匹配低音声部</option>
+                  {grooveParts.map(part => <option key={part.id} value={part.id}>{part.name}</option>)}
+                </select>
+              </label>
+              {grooveParts.some(part => part.role === 'instrument' && part.id !== options.bassPartId) && <p>器乐动机来源（可选）</p>}
+              {grooveParts.filter(part => part.role === 'instrument' && part.id !== options.bassPartId).map(part => (
+                <label key={part.id} className="chant-source">
+                  <input type="checkbox" checked={options.accompanimentIds?.includes(part.id) ?? false} onChange={event => {
+                    const rest = (options.accompanimentIds ?? []).filter(id => id !== part.id);
+                    setOptions({ ...options, accompanimentIds: event.target.checked ? [...rest, part.id] : rest });
+                  }} />{part.name}
+                </label>
+              ))}
+            </div>
+          )}
+          {sourceChant && (
             <div className="chant-sources">
               <p>和声来源（从原谱伴奏读取）</p>
               {chantOptions.length === 0 && <p className="chant-empty">这份谱没有可用的伴奏声部，源谱吟唱无法使用。</p>}

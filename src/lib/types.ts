@@ -1,3 +1,4 @@
+import type { ArrangementEngine } from './arrangementEngines';
 export type PartRole = 'lead' | 'harmony' | 'bass' | 'percussion' | 'instrument';
 export type Clef = 'treble' | 'treble8' | 'bass' | 'alto' | 'percussion';
 export type NoteOrigin = 'transcribed' | 'arranged' | 'manual' | 'demo';
@@ -110,6 +111,8 @@ export interface OmrReview {
 }
 
 export interface SourceInfo {
+  /** Optional marked form of this written score, on its current measure clock. */
+  arrangementSections?: ArrangementSectionPlan[];
   kind: 'demo' | 'audio' | 'midi' | 'musicxml' | 'manual' | 'omr';
   filename?: string;
   engine?: string;
@@ -186,7 +189,7 @@ export interface ArrangementOptions {
   transpose: number;
   leadPartId?: string;
   /** Solo + SATB only. Unset keeps the default arrangeV2 path. */
-  engine?: 'v2' | 'source-chant';
+  engine?: ArrangementEngine;
   /** source-chant: source parts whose notes supply harmony evidence. */
   accompanimentIds?: string[];
   /** source-chant: part (or `partId::staff-N`) whose lowest notes are the bass. */
